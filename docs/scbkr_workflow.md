@@ -1,6 +1,6 @@
 # SCBKR Workflow
 
-狀態：P5 model gateway structure
+狀態：P6 generation gate structure
 
 本文件定義 Task、SCBKR、狀態枚舉、狀態轉移，並記錄 P2 回放帳本結構邊界。
 
@@ -92,6 +92,22 @@ P5 建立模型接口安全結構。
 - P5 尚未寫四庫。
 
 P5 只是模型插座結構，不代表 LM Studio、Ollama、OpenAI-compatible 或 custom provider 已可用；只有呼叫方明確提供 success 測試狀態時，後續階段才可考慮啟用生成。
+
+## P6 任務生成流程安全閘門範圍
+
+P6 建立任務生成流程安全閘門。
+
+- P6 只處理 confirmed task → model request → caller-supplied response → generation_result → waiting_review。
+- P6 不執行真模型呼叫。
+- P6 不寫 ledger。
+- P6 不寫 DB。
+- P6 不寫四庫。
+- P6 不接 API route。
+- P6 不接 UI。
+- P6 不自動驗收。
+- P6 不自動入庫。
+
+P6 的狀態上限是 `waiting_review`；模型回覆仍須使用者驗收，不得自動變成 `review_passed`、`waiting_storage_request`、`storage_confirmed` 或 `completed`。
 
 ## 尚未實作
 
