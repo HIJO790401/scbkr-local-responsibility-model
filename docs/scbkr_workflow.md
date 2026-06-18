@@ -1,6 +1,6 @@
 # SCBKR Workflow
 
-狀態：P4 SCBKR generator structure
+狀態：P5 model gateway structure
 
 本文件定義 Task、SCBKR、狀態枚舉、狀態轉移，並記錄 P2 回放帳本結構邊界。
 
@@ -77,12 +77,28 @@ P4 建立純函式 SCBKR 草案生成器。
 
 P4 的 A / B / C / none 相似路徑只作欄位標註，不代表已執行 RAG、向量搜尋、資料庫查詢或模型生成。
 
+## P5 模型接口範圍
+
+P5 建立模型接口安全結構。
+
+- P5 只建立設定驗證、request builder、response parser、connection test helper。
+- P5 尚未接入 task workflow。
+- P5 尚未接入 API route。
+- P5 尚未接入 UI。
+- P5 尚未執行真模型呼叫。
+- P5 尚未產生正式任務答案。
+- P5 尚未寫 ledger。
+- P5 尚未寫 DB。
+- P5 尚未寫四庫。
+
+P5 只是模型插座結構，不代表 LM Studio、Ollama、OpenAI-compatible 或 custom provider 已可用；只有呼叫方明確提供 success 測試狀態時，後續階段才可考慮啟用生成。
+
 ## 尚未實作
 
 - 尚未實作正式任務流程 ledger writer。
 - 尚未實作 generate。
 - 尚未實作 API route。
 - 尚未實作 DB table。
-- 尚未實作 model gateway。
+- 尚未實作 model gateway runtime / 真模型呼叫。
 - 尚未實作四庫寫入。
 - 尚未實作 RAG similarity route。
