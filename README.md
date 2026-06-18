@@ -1,0 +1,1 @@
+# scbkr-local-responsibility-model
