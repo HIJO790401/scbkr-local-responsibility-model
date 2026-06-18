@@ -129,19 +129,23 @@ def set_permissions(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/api/model/test")
 def test_model() -> dict[str, Any]:
-    if not MODEL_SETTINGS.get("model_name", "").strip():
-        status = make_test_status(False, "model_name 未填，不可通過測試")
-    elif MODEL_SETTINGS["mode"] in ("external", "hybrid") and PERMISSIONS.get("external_api") is not True:
-        status = make_test_status(False, "external_api 權限未開，不可測試外部 API")
-    else:
-        try:
+    try:
+        if not MODEL_SETTINGS.get("model_name", "").strip():
+            status = make_test_status(False, "model_name 未填，不可通過測試")
+        else:
+            if MODEL_SETTINGS["mode"] in ("external", "hybrid"):
+                assert_permission_allowed(PERMISSIONS, "external_api_call")
             response = _post_openai_compatible(
                 MODEL_SETTINGS,
                 [{"role": "user", "content": "請回覆 SCBKR model gateway test。"}],
             )
             status = make_test_status(True, parse_chat_completion_response(response))
-        except Exception as exc:
-            status = make_test_status(False, str(exc))
+    except PermissionError as exc:
+        status = make_test_status(False, f"external_api_call 權限或高風險確認未通過: {exc}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        status = make_test_status(False, str(exc))
     MODEL_SETTINGS.update(status)
     MODEL_SETTINGS["enabled"] = status["last_test_status"] == "success"
     return _public_model_settings()
@@ -213,61 +217,111 @@ def generate(task_id: str) -> dict[str, Any]:
 @app.post("/api/tasks/{task_id}/review")
 def review(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
-    result = apply_review_decision(
-        task,
-        task.get("generation_result", {}),
-        payload.get("review_decision", "pass"),
-        payload.get("review_message", "P12 MVP user review"),
-        rollback_layer=payload.get("rollback_layer"),
-        reviewer_signature=payload.get("reviewer_signature"),
-    )
-    task["review_result"] = result
-    task["review_passed"] = result.get("review_passed", False)
-    task["status"] = result["status"]
-    if result["status"] == "review_failed":
+    try:
+        result = apply_review_decision(
+            task,
+            task.get("generation_result", {}),
+            payload.get("review_decision", "pass"),
+            payload.get("review_message", "P12 MVP user review"),
+            rollback_layer=payload.get("rollback_layer"),
+            reviewer_signature=payload.get("reviewer_signature"),
+        )
+        task["review_result"] = result
+        task["review_passed"] = result.get("review_passed", False)
+        task["status"] = result["status"]
+        return task
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _require_payload_fields(payload: dict[str, Any], fields: list[str]) -> None:
+    missing = [field for field in fields if field not in payload or payload[field] in (None, "")]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"missing required fields: {', '.join(missing)}")
+
+
+@app.post("/api/tasks/{task_id}/memory-rule-draft")
+def memory_rule_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    task = _get_task(task_id)
+    required_fields = [
+        "user_failure_judgement",
+        "rule_statement",
+        "applies_to_task_types",
+        "trigger_conditions",
+        "forbidden_patterns",
+        "required_behavior",
+    ]
+    _require_payload_fields(payload, required_fields)
+    try:
+        if task.get("review_result", {}).get("status") != "review_failed":
+            raise ValueError("task review_result.status must be review_failed before memory rule draft")
         task["memory_rule_draft"] = build_memory_rule_draft(
             task,
-            result,
-            payload.get("user_failure_judgement", "使用者判定本次輸出未通過驗收。"),
-            payload.get("rule_statement", "後續遇到同類任務時，必須先補齊使用者指定驗收條件再生成。"),
-            [task["task_type"]],
-            ["同類任務驗收失敗"],
-            ["未依驗收條件輸出"],
-            ["生成前重述驗收條件，並在輸出後標示待驗收。"],
+            task["review_result"],
+            payload["user_failure_judgement"],
+            payload["rule_statement"],
+            payload["applies_to_task_types"],
+            payload["trigger_conditions"],
+            payload["forbidden_patterns"],
+            payload["required_behavior"],
         )
-    return task
+        return task
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/tasks/{task_id}/storage-request")
 def storage_request(task_id: str) -> dict[str, Any]:
     task = _get_task(task_id)
-    task["storage_request"] = build_storage_request(task, task.get("review_result", {}))
-    task["status"] = "waiting_storage_confirm"
-    return task
+    try:
+        task["storage_request"] = build_storage_request(task, task.get("review_result", {}))
+        task["status"] = "waiting_storage_confirm"
+        return task
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/tasks/{task_id}/storage-confirm")
 def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
-    task["storage_plan"] = build_storage_commit_plan(
-        task,
-        task.get("review_result", {}),
-        payload.get("selected_targets", ["vector_db"]),
-        storage_signature=payload.get("storage_signature"),
-        storage_notes=payload.get("storage_notes", "P12 MVP plan only; no physical write."),
-    )
-    task["storage_confirmed"] = True
-    task["status"] = "completed"
-    return task
+    try:
+        task["storage_plan"] = build_storage_commit_plan(
+            task,
+            task.get("review_result", {}),
+            payload.get("selected_targets", ["vector_db"]),
+            storage_signature=payload.get("storage_signature"),
+            storage_notes=payload.get("storage_notes", "P12 MVP plan only; no physical write."),
+        )
+        task["storage_confirmed"] = True
+        task["status"] = "completed"
+        return task
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/tasks/{task_id}/memory-rule-confirm")
 def memory_rule_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
-    task["memory_rule_confirmed_plan"] = confirm_memory_rule_plan(
-        task.get("memory_rule_draft", {}), payload.get("reviewer_signature", "")
-    )
-    return task
+    try:
+        if "memory_rule_draft" not in task:
+            raise ValueError("memory_rule_draft is required before confirmation")
+        reviewer_signature = payload.get("reviewer_signature", "")
+        if not str(reviewer_signature).strip():
+            raise ValueError("reviewer_signature is required")
+        task["memory_rule_confirmed_plan"] = confirm_memory_rule_plan(task["memory_rule_draft"], reviewer_signature)
+        return task
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/tasks/{task_id}")
