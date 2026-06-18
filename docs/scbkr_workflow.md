@@ -183,3 +183,54 @@ embedding runtime 尚未實作。
 - 尚未實作 model gateway runtime / 真模型呼叫。
 - 尚未實作四庫寫入。
 - 尚未實作 RAG similarity route。
+
+## P10 權限鎖與高風險操作確認範圍
+
+狀態：P10 permission lock and high-risk confirmation structure
+
+P10 建立權限鎖與高風險操作確認。
+
+- P10 只判定 operation 是否被授權。
+- P10 不執行 operation。
+- P10 不呼叫模型。
+- P10 不呼叫外部 API。
+- P10 不搜尋網路。
+- P10 不讀本地檔案。
+- P10 不寫 SQLite。
+- P10 不寫 ChromaDB。
+- P10 不寫 ledger。
+- P10 不寫四庫。
+- P10 不接 API route。
+- P10 不接 UI。
+
+P5 確認能不能連。
+P10 確認准不准用。
+
+所有權限預設關閉。
+權限未開，不得宣稱已執行。
+高風險操作必須使用者確認。
+P10 只是 permission gate，不是 runtime executor。
+
+## P11 驗收失敗記憶規則草案與簽名確認範圍
+
+狀態：P11 review failed memory rule draft and signature structure
+
+P11 建立驗收失敗記憶規則草案與簽名確認。
+
+- P11 只處理 review_failed → memory_rule_draft → memory_rule_confirmed_plan。
+- P11 不寫記憶庫。
+- P11 不寫 data/memory。
+- P11 不寫 SQLite。
+- P11 不寫 ChromaDB。
+- P11 不寫 ledger。
+- P11 不接 API route。
+- P11 不接 UI。
+- P11 不自動套用規則。
+- P11 不自動重新 generate。
+
+失敗輸出本身不得入庫。
+failure_report_draft 只能當來源，不是規則本身。
+失敗原因是否成立，必須由使用者判詞確認。
+沒有使用者簽名，不得建立 confirmed plan。
+P11 不產生 memory_rule_stored。
+實體 memory runtime 尚未實作。
