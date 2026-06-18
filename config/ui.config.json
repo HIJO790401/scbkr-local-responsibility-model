@@ -1,0 +1,6 @@
+{
+  "language": "zh-TW",
+  "theme": "blue-white",
+  "api_base_url": "http://localhost:8787",
+  "web_url": "http://localhost:5500"
+}

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/scbkr.schema.json",
+  "title": "scbkr",
+  "description": "SCBKR P0 JSON Schema placeholder. Detailed fields are defined in later construction phases.",
+  "type": "object",
+  "additionalProperties": true
+}
