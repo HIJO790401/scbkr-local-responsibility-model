@@ -1,6 +1,6 @@
 # SCBKR Workflow
 
-狀態：P6 generation gate structure
+狀態：P7 review and rollback structure
 
 本文件定義 Task、SCBKR、狀態枚舉、狀態轉移，並記錄 P2 回放帳本結構邊界。
 
@@ -108,6 +108,27 @@ P6 建立任務生成流程安全閘門。
 - P6 不自動入庫。
 
 P6 的狀態上限是 `waiting_review`；模型回覆仍須使用者驗收，不得自動變成 `review_passed`、`waiting_storage_request`、`storage_confirmed` 或 `completed`。
+
+## P7 驗收與回退範圍
+
+P7 建立使用者驗收與回退判定。
+
+- P7 只處理 waiting_review → review_passed / review_failed / rollback_requested。
+- P7 通過後只進入 ask_user_storage_request。
+- P7 失敗後只產生 failure_report_draft。
+- P7 回退後只標記 rollback_layer。
+- P7 不自動入庫。
+- P7 不自動寫四庫。
+- P7 不自動寫記憶。
+- P7 不自動重生。
+- P7 不寫 ledger。
+- P7 不寫 DB。
+- P7 不接 API route。
+- P7 不接 UI。
+
+失敗可以被報告，但不能被定義成規則。
+失敗原因是否可入庫，必須由使用者後續明確簽名確認。
+驗收失敗入記憶規則屬於 P11，不屬於 P7。
 
 ## 尚未實作
 
