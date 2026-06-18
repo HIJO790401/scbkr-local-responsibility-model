@@ -1,207 +1,81 @@
-import type { DatabaseStatus, ScbkrDimension, TaskSummary, TaskType } from "./types";
+import { useEffect, useState } from "react";
+import type { ModelSettings, Permissions, ScbkrDimensionKey, TaskSummary, TaskType } from "./types";
 
-const taskTypes: { value: TaskType; label: string }[] = [
-  { value: "general", label: "一般任務" },
-  { value: "coding", label: "程式開發" },
-  { value: "info_search", label: "資訊查詢" },
-  { value: "fraud_audit", label: "詐騙稽核" },
-  { value: "document_audit", label: "文件稽核" },
-  { value: "app_design", label: "應用設計" },
-  { value: "game_design", label: "遊戲設計" },
-  { value: "animation", label: "動畫" },
-  { value: "music", label: "音樂" },
-  { value: "privacy", label: "隱私" },
-  { value: "workflow", label: "工作流程" },
-  { value: "private_memory", label: "私人記憶" },
-];
+const API_URL = import.meta.env.VITE_SCBKR_API_URL ?? "http://localhost:8787";
+const dimensions: ScbkrDimensionKey[] = ["S", "C", "B", "K", "R"];
+const taskTypes: TaskType[] = ["general", "coding", "info_search", "fraud_audit", "document_audit", "app_design", "game_design", "animation", "music", "privacy", "workflow", "private_memory"];
 
-const mockTask: TaskSummary = {
-  name: "P3 前端主畫面 mock 任務",
-  taskId: "mock-task-p3-local",
-  taskType: "workflow",
-  status: "waiting_user_confirm",
-  confirmed: false,
-  reviewPassed: false,
-  storageConfirmed: false,
-  ledgerId: "mock-ledger-p3-local",
-  traceId: "mock-trace-p3-local",
-};
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    ...init,
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json() as Promise<T>;
+}
 
-const dimensions: ScbkrDimension[] = [
-  {
-    key: "S",
-    title: "S｜介面 / 主體",
-    summary: "確認任務主體、使用者輸入、輸出形式與操作介面。",
-    status: "待確認",
-  },
-  {
-    key: "C",
-    title: "C｜後端 / 因果",
-    summary: "整理流程順序、資料流、事件流、依賴與失敗影響。",
-    status: "待確認",
-  },
-  {
-    key: "B",
-    title: "B｜邊界 / 行為",
-    summary: "標示資料讀寫範圍、停止條件、敏感操作與入庫邊界。",
-    status: "待確認",
-  },
-  {
-    key: "K",
-    title: "K｜依據 / 風格",
-    summary: "列出依據、參考來源、風格設定、技術選擇與可信度。",
-    status: "待確認",
-  },
-  {
-    key: "R",
-    title: "R｜回放 / 簽名",
-    summary: "定義驗收條件、ledger 要求、簽名狀態與回放需求。",
-    status: "待確認",
-  },
-];
-
-const databaseStatuses: DatabaseStatus[] = [
-  { name: "向量庫", status: "未連線" },
-  { name: "語料庫", status: "未連線" },
-  { name: "程式邏輯庫", status: "未連線" },
-  { name: "記憶庫", status: "未連線" },
-  { name: "回放帳本", status: "本地 JSONL 尚未接入 UI" },
-];
-
-const startGenerationDisabled = !mockTask.confirmed;
-const confirmStorageDisabled = !mockTask.reviewPassed;
+function JsonBlock({ value }: { value: unknown }) {
+  return <pre className="json-block">{JSON.stringify(value, null, 2)}</pre>;
+}
 
 function App() {
+  const [health, setHealth] = useState("checking");
+  const [taskText, setTaskText] = useState("請建立一個 SCBKR 本地 MVP 測試任務。");
+  const [taskType, setTaskType] = useState<TaskType>("workflow");
+  const [task, setTask] = useState<TaskSummary | null>(null);
+  const [model, setModel] = useState<ModelSettings | null>(null);
+  const [permissions, setPermissions] = useState<Permissions | null>(null);
+  const [message, setMessage] = useState("");
+
+  const refresh = async () => {
+    try {
+      await api("/health");
+      setHealth("online");
+      setModel(await api<ModelSettings>("/api/settings/model"));
+      setPermissions(await api<Permissions>("/api/settings/permissions"));
+    } catch (error) {
+      setHealth(`offline: ${String(error)}`);
+    }
+  };
+
+  useEffect(() => { void refresh(); }, []);
+
+  const run = async (label: string, action: () => Promise<TaskSummary | ModelSettings | Permissions>) => {
+    try {
+      const result = await action();
+      if ("task_id" in result) setTask(result as TaskSummary);
+      if ("model_name" in result) setModel(result as ModelSettings);
+      setMessage(`${label} 完成`);
+    } catch (error) {
+      setMessage(`${label} 失敗：${String(error)}`);
+    }
+  };
+
   return (
     <main className="app-shell">
       <section className="top-status-bar" aria-label="系統狀態列">
-        <div className="product-name">SCBKR 本地責任鏈模型</div>
+        <div className="product-name">SCBKR 本地責任鏈模型｜自接入 MVP App</div>
         <div className="status-grid">
-          <span>模型狀態：未連線</span>
-          <span>後端狀態：未連線</span>
-          <span>任務狀態：等待任務</span>
-          <span>本機：localhost:5500</span>
-          <span>API：localhost:8787</span>
+          <span>API：{API_URL}</span><span>Health：{health}</span><span>Web：localhost:5500</span>
+          <span>模型：{model?.last_test_status ?? "unknown"}</span><span>Runtime：in-memory</span>
         </div>
       </section>
 
-      <section className="hero-card">
-        <div>
-          <p className="eyebrow">本地責任鏈工作台</p>
-          <h1>先確認五維責任鏈，再允許模型執行。</h1>
-          <p className="hero-text">
-            P3 僅展示靜態前端與 mock state；目前未連線後端、未建立真任務、未寫 ledger、未啟用模型。
-          </p>
-        </div>
-      </section>
+      <section className="hero-card"><p className="eyebrow">P12 本地啟動閉環</p><h1>模型不是先回答，而是先交代、先確認、再生成。</h1><p className="hero-text">此 UI 連接本機 FastAPI；P12 只提供 MVP in-memory runtime，不宣稱 SQLite、ChromaDB、ledger 或 memory 實體寫入完成。</p></section>
 
       <section className="layout-grid">
-        <div className="panel input-panel">
-          <div className="section-heading">
-            <p className="eyebrow">任務輸入區</p>
-            <h2>建立目前任務草稿</h2>
-          </div>
-          <textarea
-            placeholder="請輸入你的任務。系統會先建立 SCBKR 五維確認單，確認後才執行。"
-            aria-label="任務內容"
-          />
-          <label className="field-label" htmlFor="task-type">
-            任務類型
-          </label>
-          <select id="task-type" defaultValue={mockTask.taskType}>
-            {taskTypes.map((taskType) => (
-              <option key={taskType.value} value={taskType.value}>
-                {taskType.label}
-              </option>
-            ))}
-          </select>
-          <div className="checkbox-row">
-            <label>
-              <input type="checkbox" defaultChecked /> dry_run
-            </label>
-            <label>
-              <input type="checkbox" /> simulated
-            </label>
-          </div>
-          <button className="primary-button" type="button">
-            建立目前任務
-          </button>
+        <div className="panel input-panel"><div className="section-heading"><p className="eyebrow">任務輸入</p><h2>建立任務與 SCBKR</h2></div>
+          <textarea value={taskText} onChange={(event) => setTaskText(event.target.value)} />
+          <label className="field-label">任務類型</label><select value={taskType} onChange={(event) => setTaskType(event.target.value as TaskType)}>{taskTypes.map((type) => <option key={type}>{type}</option>)}</select>
+          <div className="action-grid"><button type="button" onClick={() => run("建立任務", () => api("/api/tasks/create", { method: "POST", body: JSON.stringify({ raw_input: taskText, task_type: taskType }) }))}>建立任務</button><button type="button" disabled={!task} onClick={() => run("產生 SCBKR", () => api(`/api/tasks/${task?.task_id}/scbkr`, { method: "POST" }))}>產生 SCBKR</button><button type="button" disabled={!task?.scbkr} onClick={() => run("確認 SCBKR", () => api(`/api/tasks/${task?.task_id}/confirm`, { method: "POST" }))}>確認責任鏈</button></div>
         </div>
-
-        <div className="panel task-card">
-          <div className="section-heading">
-            <p className="eyebrow">目前任務卡片</p>
-            <h2>{mockTask.name}</h2>
-          </div>
-          <dl className="detail-list">
-            <div><dt>task_id</dt><dd>{mockTask.taskId}</dd></div>
-            <div><dt>task_type</dt><dd>{mockTask.taskType}</dd></div>
-            <div><dt>status</dt><dd>{mockTask.status}</dd></div>
-            <div><dt>confirmed</dt><dd>{String(mockTask.confirmed)}</dd></div>
-            <div><dt>review_passed</dt><dd>{String(mockTask.reviewPassed)}</dd></div>
-            <div><dt>storage_confirmed</dt><dd>{String(mockTask.storageConfirmed)}</dd></div>
-            <div><dt>ledger_id</dt><dd>{mockTask.ledgerId}</dd></div>
-            <div><dt>trace_id</dt><dd>{mockTask.traceId}</dd></div>
-          </dl>
-        </div>
+        <div className="panel task-card"><div className="section-heading"><p className="eyebrow">目前任務</p><h2>{task?.task_name ?? "尚未建立"}</h2></div>{task ? <JsonBlock value={{ task_id: task.task_id, status: task.status, confirmed: task.confirmed, review_passed: task.review_passed, storage_confirmed: task.storage_confirmed }} /> : <p>請先建立任務。</p>}</div>
       </section>
 
-      <section className="panel">
-        <div className="section-heading">
-          <p className="eyebrow">SCBKR 五維確認區</p>
-          <h2>五張責任鏈卡片</h2>
-        </div>
-        <div className="dimension-grid">
-          {dimensions.map((dimension) => (
-            <article className="dimension-card" key={dimension.key}>
-              <div className="dimension-header">
-                <h3>{dimension.title}</h3>
-                <span className="status-chip">{dimension.status}</span>
-              </div>
-              <p>{dimension.summary}</p>
-            </article>
-          ))}
-        </div>
-      </section>
+      <section className="panel"><div className="section-heading"><p className="eyebrow">SCBKR 五維確認單</p><h2>S / C / B / K / R</h2></div><div className="dimension-grid">{dimensions.map((key) => <article className="dimension-card" key={key}><div className="dimension-header"><h3>{key}</h3><span className="status-chip">{task?.scbkr?.confirmation_status ?? "draft"}</span></div><JsonBlock value={task?.scbkr?.[key] ?? "尚未產生"} /></article>)}</div></section>
 
-      <section className="layout-grid bottom-grid">
-        <div className="panel">
-          <div className="section-heading">
-            <p className="eyebrow">四庫狀態區</p>
-            <h2>本地資料能力</h2>
-          </div>
-          <ul className="database-list">
-            {databaseStatuses.map((databaseStatus) => (
-              <li key={databaseStatus.name}>
-                <span>{databaseStatus.name}</span>
-                <strong>{databaseStatus.status}</strong>
-              </li>
-            ))}
-          </ul>
-          {!mockTask.storageConfirmed && (
-            <p className="lock-note">storage_confirmed = false，因此不顯示任何「已寫入四庫」狀態。</p>
-          )}
-        </div>
-
-        <div className="panel">
-          <div className="section-heading">
-            <p className="eyebrow">操作按鈕區</p>
-            <h2>三層硬鎖展示</h2>
-          </div>
-          <div className="action-grid">
-            <button type="button">確認責任鏈</button>
-            <button type="button" disabled={startGenerationDisabled}>開始生成</button>
-            <button type="button" disabled>通過驗收</button>
-            <button type="button" disabled={confirmStorageDisabled}>確認入庫</button>
-            <button type="button">回到 S 修改</button>
-            <button type="button">回到 C 修改</button>
-            <button type="button">回到 B 修改</button>
-            <button type="button">回到 K 修改</button>
-            <button type="button">回到 R 修改</button>
-          </div>
-          <p className="lock-note">confirmed = false 時開始生成 disabled；review_passed = false 時確認入庫 disabled。</p>
-        </div>
-      </section>
+      <section className="layout-grid bottom-grid"><div className="panel"><div className="section-heading"><p className="eyebrow">模型與權限</p><h2>自接入設定狀態</h2></div><JsonBlock value={{ model, permissions }} /><div className="action-grid"><button type="button" onClick={() => run("測試模型", () => api("/api/model/test", { method: "POST" }))}>測試模型連線</button><button type="button" onClick={() => run("開啟模型生成權限", () => api("/api/settings/permissions", { method: "POST", body: JSON.stringify({ model_generate: true }) }))}>開啟 model_generate</button></div></div>
+        <div className="panel"><div className="section-heading"><p className="eyebrow">生成 / 驗收 / 入庫計畫</p><h2>操作閉環</h2></div><div className="action-grid"><button type="button" disabled={!task?.confirmed} onClick={() => run("模型生成", () => api(`/api/tasks/${task?.task_id}/generate`, { method: "POST" }))}>開始生成</button><button type="button" disabled={!task?.generation_result} onClick={() => run("通過驗收", () => api(`/api/tasks/${task?.task_id}/review`, { method: "POST", body: JSON.stringify({ review_decision: "pass", review_message: "P12 UI pass" }) }))}>通過驗收</button><button type="button" disabled={!task?.generation_result} onClick={() => run("驗收失敗", () => api(`/api/tasks/${task?.task_id}/review`, { method: "POST", body: JSON.stringify({ review_decision: "fail", review_message: "P12 UI fail" }) }))}>驗收失敗 / P11 草案</button><button type="button" disabled={task?.status !== "review_passed"} onClick={() => run("入庫請求", () => api(`/api/tasks/${task?.task_id}/storage-request`, { method: "POST" }))}>產生入庫請求</button><button type="button" disabled={!task?.storage_request} onClick={() => run("入庫計畫", () => api(`/api/tasks/${task?.task_id}/storage-confirm`, { method: "POST", body: JSON.stringify({ selected_targets: ["vector_db"] }) }))}>確認入庫計畫</button></div><p className="lock-note">{message}</p><JsonBlock value={{ generation_result: task?.generation_result, review_result: task?.review_result, storage_request: task?.storage_request, storage_plan: task?.storage_plan, memory_rule_draft: task?.memory_rule_draft }} /></div></section>
     </main>
   );
 }
