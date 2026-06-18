@@ -1,8 +1,69 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://scbkr.local/schemas/ledger.schema.json",
-  "title": "ledger",
-  "description": "SCBKR P0 JSON Schema placeholder. Detailed fields are defined in later construction phases.",
+  "title": "SCBKR Ledger Event",
+  "description": "SCBKR P2 replay ledger event schema. The ledger is an append-only replay timeline, not a database, model memory, or workflow decision engine.",
   "type": "object",
-  "additionalProperties": true
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "ledger_id",
+    "task_id",
+    "trace_id",
+    "event_type",
+    "actor",
+    "layer",
+    "message",
+    "payload",
+    "status",
+    "hash",
+    "previous_hash",
+    "dry_run",
+    "simulated",
+    "timestamp"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "minLength": 1 },
+    "ledger_id": { "type": "string", "minLength": 1 },
+    "task_id": { "type": ["string", "null"] },
+    "trace_id": { "type": ["string", "null"] },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "task_created",
+        "scbkr_generated",
+        "scbkr_modified",
+        "user_confirmed",
+        "generation_started",
+        "generation_finished",
+        "review_passed",
+        "review_failed",
+        "rollback_requested",
+        "storage_requested",
+        "storage_confirmed",
+        "memory_rule_drafted",
+        "memory_rule_confirmed",
+        "task_completed",
+        "task_paused",
+        "task_error",
+        "system_note"
+      ]
+    },
+    "actor": {
+      "type": "string",
+      "enum": ["user", "system", "model", "tool"]
+    },
+    "layer": {
+      "type": "string",
+      "enum": ["S", "C", "B", "K", "R", "SYSTEM"]
+    },
+    "message": { "type": "string" },
+    "payload": { "type": "object" },
+    "status": { "type": "string" },
+    "hash": { "type": "string", "minLength": 1 },
+    "previous_hash": { "type": ["string", "null"] },
+    "dry_run": { "type": "boolean", "default": false },
+    "simulated": { "type": "boolean", "default": false },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
 }
