@@ -1,8 +1,92 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://scbkr.local/schemas/model_settings.schema.json",
-  "title": "model_settings",
-  "description": "SCBKR P0 JSON Schema placeholder. Detailed fields are defined in later construction phases.",
+  "title": "SCBKR Model Settings",
+  "description": "SCBKR P5 model gateway settings schema. This defines model connection settings only and does not imply model availability or task generation.",
   "type": "object",
-  "additionalProperties": true
+  "additionalProperties": false,
+  "required": [
+    "provider",
+    "mode",
+    "base_url",
+    "api_key",
+    "model_name",
+    "temperature",
+    "max_tokens",
+    "context_length",
+    "timeout",
+    "enabled",
+    "last_test_status",
+    "last_test_message",
+    "last_test_at",
+    "updated_at"
+  ],
+  "properties": {
+    "provider": {
+      "type": "string",
+      "enum": ["lm_studio", "ollama", "openai_compatible", "custom"],
+      "default": "lm_studio"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["local", "external", "hybrid"],
+      "default": "local"
+    },
+    "base_url": {
+      "type": "string",
+      "default": "http://localhost:1234/v1"
+    },
+    "api_key": {
+      "type": "string",
+      "description": "API key value. UI and logs must use masking helpers and must not display this value in full.",
+      "default": "local"
+    },
+    "model_name": {
+      "type": "string",
+      "default": ""
+    },
+    "temperature": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.2
+    },
+    "max_tokens": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 4096
+    },
+    "context_length": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 8192
+    },
+    "timeout": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 120
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "last_test_status": {
+      "type": "string",
+      "enum": ["untested", "success", "failed"],
+      "default": "untested"
+    },
+    "last_test_message": {
+      "type": "string",
+      "default": ""
+    },
+    "last_test_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "default": null
+    },
+    "updated_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "default": null
+    }
+  }
 }

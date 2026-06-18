@@ -1,8 +1,64 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://scbkr.local/schemas/vector_case.schema.json",
-  "title": "vector_case",
-  "description": "SCBKR P0 JSON Schema placeholder. Detailed fields are defined in later construction phases.",
+  "title": "SCBKR Vector Case",
+  "description": "SCBKR P9 vector case schema for responsibility-chain retrieval route structures. This does not declare ChromaDB, embedding, or physical vector writes as completed.",
   "type": "object",
-  "additionalProperties": true
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "task_id",
+    "task_type",
+    "task_summary",
+    "scbkr_summary",
+    "review_passed",
+    "storage_confirmed",
+    "storage_plan_status",
+    "source",
+    "similarity_metadata",
+    "embedding_status",
+    "physical_write_performed"
+  ],
+  "properties": {
+    "case_id": { "type": ["string", "null"] },
+    "task_id": { "type": ["string", "null"] },
+    "task_type": { "type": "string" },
+    "task_summary": { "type": "string" },
+    "scbkr_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["S", "C", "B", "K", "R"],
+      "properties": {
+        "S": { "type": "string" },
+        "C": { "type": "string" },
+        "B": { "type": "string" },
+        "K": { "type": "string" },
+        "R": { "type": "string" }
+      }
+    },
+    "review_passed": { "type": "boolean" },
+    "storage_confirmed": { "type": "boolean" },
+    "storage_plan_status": { "type": "string" },
+    "source": { "type": "string" },
+    "similarity_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["created_from", "route_hint", "tags"],
+      "properties": {
+        "created_from": { "type": "string" },
+        "route_hint": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    },
+    "embedding_status": {
+      "type": "string",
+      "enum": ["not_created", "created_later"],
+      "default": "not_created"
+    },
+    "physical_write_performed": { "type": "boolean", "default": false }
+  }
 }
