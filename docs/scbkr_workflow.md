@@ -183,3 +183,30 @@ embedding runtime 尚未實作。
 - 尚未實作 model gateway runtime / 真模型呼叫。
 - 尚未實作四庫寫入。
 - 尚未實作 RAG similarity route。
+
+## P10 權限鎖與高風險操作確認範圍
+
+狀態：P10 permission lock and high-risk confirmation structure
+
+P10 建立權限鎖與高風險操作確認。
+
+- P10 只判定 operation 是否被授權。
+- P10 不執行 operation。
+- P10 不呼叫模型。
+- P10 不呼叫外部 API。
+- P10 不搜尋網路。
+- P10 不讀本地檔案。
+- P10 不寫 SQLite。
+- P10 不寫 ChromaDB。
+- P10 不寫 ledger。
+- P10 不寫四庫。
+- P10 不接 API route。
+- P10 不接 UI。
+
+P5 確認能不能連。
+P10 確認准不准用。
+
+所有權限預設關閉。
+權限未開，不得宣稱已執行。
+高風險操作必須使用者確認。
+P10 只是 permission gate，不是 runtime executor。
