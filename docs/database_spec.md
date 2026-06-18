@@ -24,3 +24,14 @@ P8 不寫 ChromaDB。
 P8 不寫 `data/vector_db`。
 P8 只建立 storage plan。
 實體 storage runtime 尚未實作。
+
+## P9 retrieval route 邊界
+
+P9 不建立 ChromaDB collection。
+P9 不初始化 ChromaDB。
+P9 不寫 `data/vector_db`。
+P9 不建立 embedding。
+P9 不寫 SQLite。
+P9 不建立 SQLite table。
+P9 只建立 responsibility-chain retrieval route structure。
+實體 ChromaDB runtime 與 embedding runtime 尚未實作。

@@ -1,6 +1,6 @@
 # SCBKR Workflow
 
-狀態：P8 storage plan structure
+狀態：P9 responsibility-chain retrieval route structure
 
 本文件定義 Task、SCBKR、狀態枚舉、狀態轉移，並記錄 P2 回放帳本結構邊界。
 
@@ -151,6 +151,28 @@ failure_report_draft 不得入庫。
 驗收失敗入記憶規則屬於 P11。
 ChromaDB 實體向量檢索與寫入屬於 P9 或後續 storage runtime。
 SQLite table / migration 屬於後續 database runtime。
+
+## P9 責任鏈相似路由範圍
+
+P9 建立責任鏈相似路由結構。
+
+- P9 只處理 caller-supplied candidate cases。
+- P9 不讀 ChromaDB。
+- P9 不寫 ChromaDB。
+- P9 不建立 embedding。
+- P9 不寫 data/vector_db。
+- P9 不寫 SQLite。
+- P9 不寫 ledger。
+- P9 不接 API route。
+- P9 不接 UI。
+- P9 不自動沿用舊案例。
+- P9 不跳過使用者確認。
+
+P9 找的是責任鏈基因相似度，不是單純文字相似度。
+A / B / C / none 都只是路由建議。
+任何檢索結果都不得跳過 SCBKR 使用者確認。
+ChromaDB 實體 runtime 尚未實作。
+embedding runtime 尚未實作。
 
 ## 尚未實作
 
