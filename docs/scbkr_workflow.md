@@ -1,6 +1,6 @@
 # SCBKR Workflow
 
-狀態：P3 frontend skeleton
+狀態：P4 SCBKR generator structure
 
 本文件定義 Task、SCBKR、狀態枚舉、狀態轉移，並記錄 P2 回放帳本結構邊界。
 
@@ -60,6 +60,22 @@ P3 建立前端主畫面 skeleton。
 - P3 尚未寫入四庫。
 
 P3 UI 是本地責任鏈工作台，不是聊天框；畫面只展示頂部狀態列、任務輸入區、目前任務卡片、SCBKR 五維確認區、四庫狀態區與三層硬鎖按鈕狀態。
+
+## P4 SCBKR 生成器範圍
+
+P4 建立純函式 SCBKR 草案生成器。
+
+- P4 根據 raw_input / task_type 產生 S / C / B / K / R 草案。
+- P4 產物只是 waiting user confirmation 的草案。
+- P4 尚未接入 API。
+- P4 尚未接入 UI。
+- P4 尚未寫 ledger。
+- P4 尚未接入 model gateway。
+- P4 尚未做向量檢索。
+- P4 尚未建立 embedding。
+- P4 尚未進入正式 task workflow runtime。
+
+P4 的 A / B / C / none 相似路徑只作欄位標註，不代表已執行 RAG、向量搜尋、資料庫查詢或模型生成。
 
 ## 尚未實作
 
