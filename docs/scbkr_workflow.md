@@ -1,6 +1,6 @@
 # SCBKR Workflow
 
-狀態：P2 ledger structure
+狀態：P3 frontend skeleton
 
 本文件定義 Task、SCBKR、狀態枚舉、狀態轉移，並記錄 P2 回放帳本結構邊界。
 
@@ -47,6 +47,19 @@ P2 保留三層硬鎖語義，讓 ledger 能記錄 `user_confirmed`、`review_pa
 - P2 尚未接入 API route。
 - P2 尚未接入 DB。
 - P2 尚未寫入正式 `data/ledger/audit-log.jsonl`。
+
+## P3 前端主畫面範圍
+
+P3 建立前端主畫面 skeleton。
+
+- P3 使用 mock state。
+- P3 尚未接入 API。
+- P3 尚未建立 task。
+- P3 尚未寫 ledger。
+- P3 尚未呼叫 model gateway。
+- P3 尚未寫入四庫。
+
+P3 UI 是本地責任鏈工作台，不是聊天框；畫面只展示頂部狀態列、任務輸入區、目前任務卡片、SCBKR 五維確認區、四庫狀態區與三層硬鎖按鈕狀態。
 
 ## 尚未實作
 
