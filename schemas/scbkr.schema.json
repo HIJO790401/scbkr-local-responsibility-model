@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/scbkr.schema.json",
+  "title": "SCBKRConfirmation",
+  "description": "SCBKR P1 five-dimension confirmation form structure. This schema defines S/C/B/K/R fields only; it does not implement retrieval, generation, review, ledger writing, or storage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "S",
+    "C",
+    "B",
+    "K",
+    "R",
+    "source_mode",
+    "similarity_route",
+    "source_case_ids",
+    "confirmation_status",
+    "pending_questions"
+  ],
+  "properties": {
+    "S": { "$ref": "#/$defs/S" },
+    "C": { "$ref": "#/$defs/C" },
+    "B": { "$ref": "#/$defs/B" },
+    "K": { "$ref": "#/$defs/K" },
+    "R": { "$ref": "#/$defs/R" },
+    "source_mode": {
+      "type": "string",
+      "enum": ["new", "retrieved", "hybrid", "manual"],
+      "default": "new"
+    },
+    "similarity_route": {
+      "type": "string",
+      "enum": ["A", "B", "C", "none"],
+      "default": "none"
+    },
+    "source_case_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "confirmation_status": {
+      "type": "string",
+      "enum": ["draft", "waiting_user_confirm", "confirmed", "modified"],
+      "default": "draft"
+    },
+    "pending_questions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "questionArray": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "confirmationStatus": {
+      "type": "string",
+      "enum": ["draft", "waiting_user_confirm", "confirmed", "modified"],
+      "default": "draft"
+    },
+    "S": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_name",
+        "user_instruction",
+        "task_subject",
+        "input_content",
+        "output_format",
+        "interface_type",
+        "platform_type",
+        "confirmation_status",
+        "pending_questions"
+      ],
+      "properties": {
+        "task_name": { "type": "string" },
+        "user_instruction": { "type": "string" },
+        "task_subject": { "type": "string" },
+        "input_content": { "type": "string" },
+        "output_format": { "type": "string" },
+        "interface_type": { "type": "string" },
+        "platform_type": { "type": "string" },
+        "confirmation_status": { "$ref": "#/$defs/confirmationStatus" },
+        "pending_questions": { "$ref": "#/$defs/questionArray" }
+      }
+    },
+    "C": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "flow_steps",
+        "execution_order",
+        "data_flow",
+        "event_flow",
+        "core_logic",
+        "dependencies",
+        "failure_impact",
+        "test_conditions",
+        "pending_questions"
+      ],
+      "properties": {
+        "flow_steps": { "$ref": "#/$defs/stringArray" },
+        "execution_order": { "$ref": "#/$defs/stringArray" },
+        "data_flow": { "$ref": "#/$defs/stringArray" },
+        "event_flow": { "$ref": "#/$defs/stringArray" },
+        "core_logic": { "$ref": "#/$defs/stringArray" },
+        "dependencies": { "$ref": "#/$defs/stringArray" },
+        "failure_impact": { "$ref": "#/$defs/stringArray" },
+        "test_conditions": { "$ref": "#/$defs/stringArray" },
+        "pending_questions": { "$ref": "#/$defs/questionArray" }
+      }
+    },
+    "B": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "data_read_scope",
+        "data_write_scope",
+        "local_scope",
+        "external_scope",
+        "permission_switches",
+        "stop_conditions",
+        "error_handling",
+        "sensitive_operation_confirm",
+        "storage_conditions",
+        "pending_questions"
+      ],
+      "properties": {
+        "data_read_scope": { "$ref": "#/$defs/stringArray" },
+        "data_write_scope": { "$ref": "#/$defs/stringArray" },
+        "local_scope": { "$ref": "#/$defs/stringArray" },
+        "external_scope": { "$ref": "#/$defs/stringArray" },
+        "permission_switches": {
+          "type": "object",
+          "additionalProperties": { "type": "boolean" },
+          "default": {}
+        },
+        "stop_conditions": { "$ref": "#/$defs/stringArray" },
+        "error_handling": { "$ref": "#/$defs/stringArray" },
+        "sensitive_operation_confirm": { "type": "boolean", "default": false },
+        "storage_conditions": { "$ref": "#/$defs/stringArray" },
+        "pending_questions": { "$ref": "#/$defs/questionArray" }
+      }
+    },
+    "K": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "references",
+        "technical_docs",
+        "corpus_sources",
+        "style_settings",
+        "framework_choice",
+        "model_basis",
+        "history_cases",
+        "source_credibility",
+        "pending_questions"
+      ],
+      "properties": {
+        "references": { "$ref": "#/$defs/stringArray" },
+        "technical_docs": { "$ref": "#/$defs/stringArray" },
+        "corpus_sources": { "$ref": "#/$defs/stringArray" },
+        "style_settings": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "framework_choice": { "type": "string" },
+        "model_basis": { "$ref": "#/$defs/stringArray" },
+        "history_cases": { "$ref": "#/$defs/stringArray" },
+        "source_credibility": { "$ref": "#/$defs/stringArray" },
+        "pending_questions": { "$ref": "#/$defs/questionArray" }
+      }
+    },
+    "R": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_outputs",
+        "acceptance_criteria",
+        "ledger_requirements",
+        "storage_options",
+        "signature_status",
+        "review_status",
+        "replay_requirements",
+        "memory_rule_generated",
+        "pending_questions"
+      ],
+      "properties": {
+        "expected_outputs": { "$ref": "#/$defs/stringArray" },
+        "acceptance_criteria": { "$ref": "#/$defs/stringArray" },
+        "ledger_requirements": { "$ref": "#/$defs/stringArray" },
+        "storage_options": { "$ref": "#/$defs/stringArray" },
+        "signature_status": { "type": "string" },
+        "review_status": { "type": "string" },
+        "replay_requirements": { "$ref": "#/$defs/stringArray" },
+        "memory_rule_generated": { "type": "boolean", "default": false },
+        "pending_questions": { "$ref": "#/$defs/questionArray" }
+      }
+    }
+  }
+}

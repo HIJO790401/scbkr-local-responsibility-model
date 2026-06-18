@@ -1,0 +1,8 @@
+[project]
+name = "scbkr-local-responsibility-model"
+version = "0.0.0"
+description = "SCBKR local responsibility chain model P0 skeleton"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

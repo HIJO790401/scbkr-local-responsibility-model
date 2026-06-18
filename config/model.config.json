@@ -1,0 +1,16 @@
+{
+  "provider": "lm_studio",
+  "mode": "local",
+  "base_url": "http://localhost:1234/v1",
+  "api_key": "local",
+  "model_name": "",
+  "temperature": 0.2,
+  "max_tokens": 4096,
+  "context_length": 8192,
+  "timeout": 120,
+  "enabled": false,
+  "last_test_status": "untested",
+  "last_test_message": "",
+  "last_test_at": null,
+  "updated_at": null
+}

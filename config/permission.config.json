@@ -1,0 +1,8 @@
+{
+  "web_search": false,
+  "external_api": false,
+  "local_file_access": false,
+  "model_generate": false,
+  "storage_write": false,
+  "updated_at": null
+}
