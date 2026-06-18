@@ -2,7 +2,35 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://scbkr.local/schemas/permission_settings.schema.json",
   "title": "permission_settings",
-  "description": "SCBKR P0 JSON Schema placeholder. Detailed fields are defined in later construction phases.",
+  "description": "SCBKR P10 permission lock settings. All permissions default to disabled and do not imply any runtime is enabled.",
   "type": "object",
-  "additionalProperties": true
+  "additionalProperties": false,
+  "properties": {
+    "model_generate": { "type": "boolean", "default": false },
+    "external_api": { "type": "boolean", "default": false },
+    "web_search": { "type": "boolean", "default": false },
+    "local_file_access": { "type": "boolean", "default": false },
+    "storage_write": { "type": "boolean", "default": false },
+    "ledger_write": { "type": "boolean", "default": false },
+    "sqlite_runtime": { "type": "boolean", "default": false },
+    "chromadb_runtime": { "type": "boolean", "default": false },
+    "embedding_runtime": { "type": "boolean", "default": false },
+    "memory_write": { "type": "boolean", "default": false },
+    "dangerous_operation_confirmed": { "type": "boolean", "default": false },
+    "updated_at": { "type": ["string", "null"], "default": null }
+  },
+  "required": [
+    "model_generate",
+    "external_api",
+    "web_search",
+    "local_file_access",
+    "storage_write",
+    "ledger_write",
+    "sqlite_runtime",
+    "chromadb_runtime",
+    "embedding_runtime",
+    "memory_write",
+    "dangerous_operation_confirmed",
+    "updated_at"
+  ]
 }
