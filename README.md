@@ -28,14 +28,14 @@ npm --prefix apps/web run dev
 
 1. 設定 LM Studio / Ollama / OpenAI-compatible API（`GET/POST /api/settings/model`）。
 2. 呼叫 `POST /api/model/test` 測試連線；`model_name` 未填或服務沒開會失敗，不會假裝成功。
-3. 開啟必要權限（至少 `model_generate`；external / hybrid mode 另需 `external_api`）。
+3. 開啟必要權限（至少 `model_generate`；external / hybrid mode 測試或生成外部 API 另需通過 P10 `external_api_call`，即 `external_api` 與 `dangerous_operation_confirmed` 皆為 true）。
 4. 建立任務。
 5. 產生 SCBKR 五維確認單。
 6. 使用者確認。
 7. 權限與模型測試成功後才可生成。
 8. 進入驗收。
 9. 通過後產生入庫計畫；P12 不做實體寫入，回傳 `physical_write_performed = false`。
-10. 失敗後可產生 P11 memory rule draft / confirmed plan，但不寫 memory。
+10. 失敗後只保留 `failure_report_draft`；若使用者另行明確提供判詞、規則與 scope，才可建立 P11 `memory_rule_draft`，再以非空白簽名建立 `memory_rule_confirmed_plan`，但不寫 memory。
 
 ## scripts
 
@@ -45,15 +45,15 @@ npm --prefix apps/web run dev
 
 ## 模型接入
 
-預設設定適合 LM Studio：`http://localhost:1234/v1`。Ollama 可使用 OpenAI-compatible 端點，例如 `http://localhost:11434/v1`。外部 API 使用 `openai_compatible` / `external` 或 `hybrid` 時，必須開啟 P10 `external_api` 權限。API key 在讀取設定時只會遮罩，不明文回傳。
+預設設定適合 LM Studio：`http://localhost:1234/v1`。Ollama 可使用 OpenAI-compatible 端點，例如 `http://localhost:11434/v1`。外部 API 使用 `openai_compatible` / `external` 或 `hybrid` 時，模型測試與生成都必須通過 P10 `external_api_call`；該操作同時要求 `external_api = true` 與 `dangerous_operation_confirmed = true`。API key 在讀取設定時只會遮罩，不明文回傳。
 
 ## 權限鎖
 
-P10 控制准不准用：`model_generate` 未開不得生成；external / hybrid 模式下 `external_api` 未開不得呼叫外部 API；storage、ledger、SQLite、ChromaDB、embedding、memory 權限不會被 P12 自動開啟。
+P10 控制准不准用：`model_generate` 未開不得生成；external / hybrid 模式下必須通過 `external_api_call`，缺少 `external_api` 或 `dangerous_operation_confirmed` 都不得呼叫外部 API；storage、ledger、SQLite、ChromaDB、embedding、memory 權限不會被 P12 自動開啟。
 
 ## MVP 邊界
 
-可跑：FastAPI health / status、模型設定與連線測試、權限設定、任務建立、SCBKR 草案、確認、生成閘門、驗收、入庫計畫、P11 失敗規則草案。
+可跑：FastAPI health / status、模型設定與連線測試、權限設定、任務建立、SCBKR 草案、確認、生成閘門、驗收、入庫計畫、P11 失敗報告草案，以及使用者明確觸發的失敗規則草案與確認計畫。
 
 仍為 MVP in-memory：任務 runtime、模型設定 runtime、權限設定 runtime。
 

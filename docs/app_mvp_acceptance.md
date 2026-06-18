@@ -8,7 +8,9 @@
 - 任務流程遵守：create → scbkr → confirm → generate → review → storage-request → storage-confirm。
 - 生成必須受 confirmed、P5 model settings、P10 permission lock 限制。
 - 入庫只產生 plan，`physical_write_performed = false`。
-- review_failed 只產生 P11 draft / confirmed plan，不寫 memory。
+- review_failed 只產生 `failure_report_draft`；不得自動建立 `memory_rule_draft`。
+- `memory_rule_draft` 只能由 `POST /api/tasks/{task_id}/memory-rule-draft` 在使用者明確提供判詞、規則與 scope 後建立。
+- `memory_rule_confirmed_plan` 只能由 `POST /api/tasks/{task_id}/memory-rule-confirm` 在 reviewer_signature 非空白後建立，不寫 memory。
 
 ## 測試指令
 
@@ -61,7 +63,7 @@ curl http://localhost:8787/api/settings/permissions
 ## 權限鎖檢查
 
 - `model_generate = false` 時不得 generate。
-- external / hybrid mode 且 `external_api = false` 時不得呼叫外部 API。
+- external / hybrid mode 必須通過 P10 `external_api_call`，也就是 `external_api = true` 且 `dangerous_operation_confirmed = true`，否則不得呼叫外部 API。
 - storage、ledger、SQLite、ChromaDB、embedding、memory 權限不會造成 P12 實體寫入。
 
 ## 任務流程檢查
@@ -73,7 +75,9 @@ curl http://localhost:8787/api/settings/permissions
 5. `POST /api/tasks/{task_id}/review`
 6. `POST /api/tasks/{task_id}/storage-request`
 7. `POST /api/tasks/{task_id}/storage-confirm`
-8. review failed 時檢查 `memory_rule_draft`，不得產生 `memory_rule_stored`。
+8. review failed 時只能檢查 `failure_report_draft`，不得自動產生 `memory_rule_draft` 或 `memory_rule_stored`。
+9. 如需建立記憶規則草案，呼叫 `POST /api/tasks/{task_id}/memory-rule-draft` 並明確提供 `user_failure_judgement`、`rule_statement`、`applies_to_task_types`、`trigger_conditions`、`forbidden_patterns`、`required_behavior`。
+10. 如需確認記憶規則計畫，呼叫 `POST /api/tasks/{task_id}/memory-rule-confirm` 並提供非空白 `reviewer_signature`。
 
 ## MVP 已完成項
 
