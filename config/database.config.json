@@ -1,0 +1,10 @@
+{
+  "sqlite_path": "data/scbkr.sqlite3",
+  "ledger_path": "data/ledger/audit-log.jsonl",
+  "vector_db_path": "data/vector_db",
+  "corpus_path": "data/corpus",
+  "logic_path": "data/logic",
+  "memory_path": "data/memory",
+  "temp_path": "data/temp",
+  "exports_path": "data/exports"
+}
