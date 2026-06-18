@@ -14,3 +14,13 @@ SCBKR ledger 是回放帳本，不是資料庫。
 - P2 不寫入正式 `data/ledger/audit-log.jsonl`。
 
 P2 只建立 ledger event schema、event constants、hash helper、append-only JSONL helper，以及使用 temporary directory 的單元測試。
+
+## P8 storage plan 邊界
+
+P8 不建立 SQLite tables。
+P8 不執行 migration。
+P8 不寫 `data/scbkr.sqlite3`。
+P8 不寫 ChromaDB。
+P8 不寫 `data/vector_db`。
+P8 只建立 storage plan。
+實體 storage runtime 尚未實作。

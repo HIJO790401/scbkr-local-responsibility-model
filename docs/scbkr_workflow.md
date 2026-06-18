@@ -1,6 +1,6 @@
 # SCBKR Workflow
 
-狀態：P7 review and rollback structure
+狀態：P8 storage plan structure
 
 本文件定義 Task、SCBKR、狀態枚舉、狀態轉移，並記錄 P2 回放帳本結構邊界。
 
@@ -129,6 +129,28 @@ P7 建立使用者驗收與回退判定。
 失敗可以被報告，但不能被定義成規則。
 失敗原因是否可入庫，必須由使用者後續明確簽名確認。
 驗收失敗入記憶規則屬於 P11，不屬於 P7。
+
+## P8 四庫寫入計畫與二次確認範圍
+
+P8 建立四庫寫入計畫與二次確認。
+
+- P8 只處理 review_passed → storage_request → storage_commit_plan。
+- P8 不做實體寫入。
+- P8 不寫 SQLite。
+- P8 不寫 ChromaDB。
+- P8 不寫 data/*。
+- P8 不寫 ledger。
+- P8 不接 API route。
+- P8 不接 UI。
+
+驗收通過不等於自動入庫。
+入庫必須二次確認。
+memory 目標必須使用者簽名。
+失敗內容不得入庫。
+failure_report_draft 不得入庫。
+驗收失敗入記憶規則屬於 P11。
+ChromaDB 實體向量檢索與寫入屬於 P9 或後續 storage runtime。
+SQLite table / migration 屬於後續 database runtime。
 
 ## 尚未實作
 
