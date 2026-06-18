@@ -35,3 +35,14 @@ P9 不寫 SQLite。
 P9 不建立 SQLite table。
 P9 只建立 responsibility-chain retrieval route structure。
 實體 ChromaDB runtime 與 embedding runtime 尚未實作。
+
+## P10 permission lock 邊界
+
+P10 不建立 SQLite tables。
+P10 不執行 migration。
+P10 不寫 `data/scbkr.sqlite3`。
+P10 不初始化 ChromaDB。
+P10 不寫 `data/vector_db`。
+P10 不寫 ledger。
+P10 只建立 permission settings schema 與 pure permission checker。
+SQLite / ChromaDB runtime 仍未實作。
