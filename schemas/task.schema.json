@@ -1,8 +1,132 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://scbkr.local/schemas/task.schema.json",
-  "title": "task",
-  "description": "SCBKR P0 JSON Schema placeholder. Detailed fields are defined in later construction phases.",
+  "title": "Task",
+  "description": "SCBKR P1 task structure. This schema defines task metadata, lock fields, status enum, and links to SCBKR/review/storage results; it does not implement generation, storage, ledger writing, or database tables.",
   "type": "object",
-  "additionalProperties": true
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "task_name",
+    "raw_input",
+    "task_type",
+    "status",
+    "created_at",
+    "updated_at",
+    "confirmed",
+    "review_passed",
+    "storage_confirmed",
+    "dry_run",
+    "simulated"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "raw_input": {
+      "type": "string"
+    },
+    "task_type": {
+      "type": "string",
+      "enum": [
+        "general",
+        "coding",
+        "info_search",
+        "fraud_audit",
+        "document_audit",
+        "app_design",
+        "game_design",
+        "animation",
+        "music",
+        "privacy",
+        "workflow",
+        "private_memory"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "waiting_scbkr",
+        "waiting_user_confirm",
+        "confirmed",
+        "generating",
+        "waiting_review",
+        "review_passed",
+        "review_failed",
+        "rollback_requested",
+        "waiting_storage_request",
+        "waiting_storage_confirm",
+        "memory_rule_waiting_confirm",
+        "memory_rule_stored",
+        "completed",
+        "paused",
+        "error"
+      ],
+      "default": "draft"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Hard lock: when false, generate must not run."
+    },
+    "review_passed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Hard lock: when false, standard storage flow must not start."
+    },
+    "storage_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Hard lock: when false, four-database writes must not run."
+    },
+    "scbkr": {
+      "$ref": "scbkr.schema.json"
+    },
+    "generation_result": {
+      "type": ["object", "null"],
+      "default": null
+    },
+    "review_result": {
+      "type": ["object", "null"],
+      "default": null
+    },
+    "storage_targets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["vector", "corpus", "logic", "memory"]
+      },
+      "default": []
+    },
+    "ledger_id": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "trace_id": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "dry_run": {
+      "type": "boolean",
+      "default": false
+    },
+    "simulated": {
+      "type": "boolean",
+      "default": false
+    }
+  }
 }
