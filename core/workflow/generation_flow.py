@@ -27,7 +27,7 @@ def assert_task_can_generate(task, scbkr, model_settings, permissions):
     if scbkr.get("confirmation_status") != "confirmed":
         raise ValueError("scbkr.confirmation_status must be confirmed before generation")
     if all_dimensions_confirmed(scbkr) is not True:
-        raise ValueError("S/C/B/K/R dimensions must all be confirmed before generation")
+        raise ValueError("S/C/B/K/R dimensions must all be confirmed and match their sealed snapshots before generation")
     if can_enable_generate(model_settings, permissions) is not True:
         raise ValueError("model gateway is not enabled for generation")
     return True

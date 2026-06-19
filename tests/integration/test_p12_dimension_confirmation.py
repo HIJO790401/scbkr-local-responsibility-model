@@ -88,3 +88,54 @@ def test_confirm_route_writes_signature_and_statement_to_scbkr_metadata():
     assert scbkr["confirmation_statement"] == statement
     assert scbkr["signature"] == "user-signature"
     assert scbkr["confirmed_snapshot_hash"]
+
+
+def test_confirmed_task_passes_snapshot_gate_without_calling_model():
+    task = create_task_with_scbkr()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+
+    assert assert_task_can_generate(confirmed, confirmed["scbkr"], MODEL_SETTINGS, PERMISSIONS) is True
+
+
+def test_generate_route_rejects_tampered_s_live_payload_before_model_call():
+    task = create_task_with_scbkr()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+    TASKS[confirmed["task_id"]]["scbkr"]["S"]["task_name"] = "竄改後任務名稱"
+
+    response = client.post(f"/api/tasks/{confirmed['task_id']}/generate")
+
+    assert response.status_code == 400
+    assert "sealed snapshots" in str(response.json())
+
+
+def test_generate_route_rejects_tampered_b_boundary_before_model_call():
+    task = create_task_with_scbkr()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+    TASKS[confirmed["task_id"]]["scbkr"]["B"]["data_write_scope"].append("竄改：允許寫入 data")
+
+    response = client.post(f"/api/tasks/{confirmed['task_id']}/generate")
+
+    assert response.status_code == 400
+    assert "sealed snapshots" in str(response.json())
+
+
+def test_generate_route_rejects_deleted_confirmed_snapshot_before_model_call():
+    task = create_task_with_scbkr()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+    del TASKS[confirmed["task_id"]]["scbkr"]["C"]["confirmed_snapshot"]
+
+    response = client.post(f"/api/tasks/{confirmed['task_id']}/generate")
+
+    assert response.status_code == 400
+    assert "sealed snapshots" in str(response.json())
+
+
+def test_generate_route_rejects_modified_snapshot_hash_before_model_call():
+    task = create_task_with_scbkr()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+    TASKS[confirmed["task_id"]]["scbkr"]["R"]["snapshot_hash"] = "0" * 64
+
+    response = client.post(f"/api/tasks/{confirmed['task_id']}/generate")
+
+    assert response.status_code == 400
+    assert "sealed snapshots" in str(response.json())

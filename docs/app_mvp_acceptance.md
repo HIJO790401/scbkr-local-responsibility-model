@@ -11,6 +11,9 @@
 - 每一維都必須有 `snapshot_hash`。
 - 每一維都必須有 `confirmed_snapshot`。
 - generate 前必須檢查 S/C/B/K/R 五維全 confirmed。
+- confirm 後若任一維 live payload 與 `confirmed_snapshot` 不一致，必須拒絕 generate。
+- `snapshot_hash` 必須等於 `confirmed_snapshot` 的穩定 hash，竄改 hash 或 snapshot 都必須失效。
+- 測試環境必須優先使用真 FastAPI `TestClient`；只有真 TestClient import 失敗時才可 fallback shim。
 - 入庫只產生 plan，`physical_write_performed = false`。
 - review_failed 只產生 `failure_report_draft`；不得自動建立 `memory_rule_draft`。
 - `memory_rule_draft` 只能由 `POST /api/tasks/{task_id}/memory-rule-draft` 在使用者明確提供判詞、規則與 scope 後建立。

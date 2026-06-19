@@ -13,6 +13,17 @@ import json
 from typing import Any
 
 VALID_DIMENSIONS = ("S", "C", "B", "K", "R")
+CONFIRMATION_METADATA_KEYS = (
+    "confirmed",
+    "confirmation_status",
+    "confirmed_at",
+    "confirmed_by",
+    "confirmation_statement",
+    "signature",
+    "snapshot_hash",
+    "confirmed_snapshot",
+    "confirmed_snapshot_hash",
+)
 
 
 def _now() -> str:
@@ -27,11 +38,20 @@ def normalize_confirmation_statement(statement: str | None) -> str | None:
     return normalized or None
 
 
+def strip_confirmation_metadata(dimension_payload: dict[str, Any]) -> dict[str, Any]:
+    """Return business payload without mutable confirmation/seal metadata."""
+    return {
+        key: deepcopy(value)
+        for key, value in dimension_payload.items()
+        if key not in CONFIRMATION_METADATA_KEYS and not key.startswith("confirmation_")
+    }
+
+
 def build_dimension_snapshot(dimension_key: str, dimension_payload: dict[str, Any]) -> dict[str, Any]:
-    """Build a replayable snapshot for one SCBKR dimension."""
+    """Build a stable replay snapshot for one SCBKR dimension business payload."""
     if dimension_key not in VALID_DIMENSIONS:
         raise ValueError("dimension_key must be one of S/C/B/K/R")
-    return {"dimension_key": dimension_key, "payload": deepcopy(dimension_payload)}
+    return {"dimension_key": dimension_key, "payload": strip_confirmation_metadata(dimension_payload)}
 
 
 def hash_snapshot(snapshot: dict[str, Any]) -> str:
@@ -69,21 +89,30 @@ def confirm_dimension(
     return scbkr
 
 
+def is_dimension_snapshot_valid(scbkr: dict[str, Any], dimension_key: str) -> bool:
+    """Return True only when one live dimension still matches its sealed snapshot."""
+    if dimension_key not in VALID_DIMENSIONS:
+        return False
+    dimension = scbkr.get(dimension_key)
+    if not isinstance(dimension, dict):
+        return False
+    if dimension.get("confirmed") is not True:
+        return False
+    if dimension.get("confirmation_status") != "confirmed":
+        return False
+
+    snapshot_hash = dimension.get("snapshot_hash")
+    confirmed_snapshot = dimension.get("confirmed_snapshot")
+    if not snapshot_hash or not isinstance(confirmed_snapshot, dict):
+        return False
+    if hash_snapshot(confirmed_snapshot) != snapshot_hash:
+        return False
+    return build_dimension_snapshot(dimension_key, dimension) == confirmed_snapshot
+
+
 def all_dimensions_confirmed(scbkr: dict[str, Any]) -> bool:
-    """Return True only when all S/C/B/K/R dimensions have sealed confirmations."""
-    for dimension_key in VALID_DIMENSIONS:
-        dimension = scbkr.get(dimension_key)
-        if not isinstance(dimension, dict):
-            return False
-        if dimension.get("confirmed") is not True:
-            return False
-        if dimension.get("confirmation_status") != "confirmed":
-            return False
-        if not dimension.get("snapshot_hash"):
-            return False
-        if not dimension.get("confirmed_snapshot"):
-            return False
-    return True
+    """Return True only when all S/C/B/K/R dimensions have valid sealed snapshots."""
+    return all(is_dimension_snapshot_valid(scbkr, dimension_key) for dimension_key in VALID_DIMENSIONS)
 
 
 def build_scbkr_confirmed_snapshot(scbkr: dict[str, Any]) -> dict[str, Any]:
