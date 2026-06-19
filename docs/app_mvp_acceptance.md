@@ -108,3 +108,10 @@ curl http://localhost:8787/api/settings/permissions
 ## 下一階段
 
 P13 可在「桌面封裝 / 本地主機手機連線 / 持久化 runtime」三選一。
+
+### P12 sealed snapshot acceptance updates
+
+- The sealed `confirmed_snapshot.payload` is the only model-visible source for the confirmed S/C/B/K/R responsibility chain.
+- The live dimension dictionaries are runtime state containers and must not be passed directly into generation prompts.
+- Schema validation must accept confirmed SCBKR payloads, including per-dimension seal metadata such as `confirmed`, `snapshot_hash`, and `confirmed_snapshot`.
+- P12 remains a Web MVP boundary and does not include desktop packaging, Electron, Tauri, installers, or new local database/vector/ledger runtimes.

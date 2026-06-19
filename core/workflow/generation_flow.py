@@ -8,7 +8,7 @@ persists task workflow runtime state.
 import json
 
 from core.model_gateway.openai_compatible import build_chat_completion_payload
-from core.scbkr.confirmation import all_dimensions_confirmed
+from core.scbkr.confirmation import all_dimensions_confirmed, build_model_visible_scbkr_payload
 from core.model_gateway.response_parser import parse_chat_completion_response
 from core.model_gateway.settings import can_enable_generate
 from core.workflow.generation_result import build_generation_result
@@ -40,16 +40,21 @@ def build_generation_messages(task, scbkr):
         "不得自行改變邊界；不得宣稱驗收通過；不得宣稱已入庫；"
         "不得寫 ledger、DB、四庫或記憶；輸出仍必須等待使用者驗收。"
     )
+    if all_dimensions_confirmed(scbkr) is not True:
+        raise ValueError("S/C/B/K/R dimensions must all be confirmed and match their sealed snapshots before generation")
+
+    sealed_scbkr_payload = build_model_visible_scbkr_payload(scbkr)
+    sealed_r_payload = sealed_scbkr_payload["R"]
     user_payload = {
         "raw_input": task.get("raw_input", ""),
         "task_name": task.get("task_name", ""),
         "task_type": task.get("task_type", ""),
-        "S": scbkr.get("S"),
-        "C": scbkr.get("C"),
-        "B": scbkr.get("B"),
-        "K": scbkr.get("K"),
-        "R": scbkr.get("R"),
-        "acceptance_criteria": scbkr.get("R", {}).get("acceptance_criteria", []),
+        "S": sealed_scbkr_payload["S"],
+        "C": sealed_scbkr_payload["C"],
+        "B": sealed_scbkr_payload["B"],
+        "K": sealed_scbkr_payload["K"],
+        "R": sealed_r_payload,
+        "acceptance_criteria": sealed_r_payload.get("acceptance_criteria", []),
     }
     return [
         {"role": "system", "content": system_message},

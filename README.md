@@ -564,3 +564,11 @@ Possible next stages:
 
 Founder of Semantic Firewall
 Wen-Yao Hsu / ShenYao888π
+### P12 sealed SCBKR generation boundary
+
+- Model generation reads only the sealed `confirmed_snapshot.payload` business payload for S/C/B/K/R.
+- Confirmation metadata such as `confirmation_statement`, `confirmed_at`, `snapshot_hash`, and `confirmed_snapshot` is audit/replay state and is not sent into the model prompt.
+- If a confirmed dimension's business payload is modified after sealing, generation is rejected until the dimension is reconfirmed.
+- If only confirmation metadata is modified after sealing, the model-visible payload remains unchanged.
+- `schemas/scbkr.schema.json` recognizes confirmed dimensions and their seal fields while preserving the original business-field schemas.
+- Desktop packaging is not designed yet and remains pending; this Web MVP does not add Electron, Tauri, or an installer.

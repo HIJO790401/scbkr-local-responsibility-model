@@ -100,3 +100,51 @@ def test_hash_snapshot_is_stable_for_same_content():
     second = {"a": "中文", "b": [2, 1]}
 
     assert hash_snapshot(first) == hash_snapshot(second)
+
+
+def test_get_confirmed_dimension_payload_returns_only_sealed_business_payload():
+    from core.scbkr.confirmation import get_confirmed_dimension_payload
+
+    scbkr = confirm_all_dimensions(make_scbkr())
+    scbkr["S"]["confirmation_statement"] = "metadata must not leak"
+    payload = get_confirmed_dimension_payload(scbkr, "S")
+
+    assert payload == scbkr["S"]["confirmed_snapshot"]["payload"]
+    for metadata_key in (
+        "confirmed",
+        "confirmed_at",
+        "confirmed_by",
+        "confirmation_statement",
+        "signature",
+        "snapshot_hash",
+        "confirmed_snapshot",
+    ):
+        assert metadata_key not in payload
+
+
+def test_get_confirmed_dimension_payload_raises_when_snapshot_invalid():
+    from core.scbkr.confirmation import get_confirmed_dimension_payload
+
+    scbkr = confirm_all_dimensions(make_scbkr())
+    scbkr["S"]["task_name"] = "竄改後任務名稱"
+
+    with pytest.raises(ValueError, match="sealed snapshot is invalid"):
+        get_confirmed_dimension_payload(scbkr, "S")
+
+
+def test_scbkr_schema_accepts_draft_and_confirmed_dimensions():
+    import json
+    from pathlib import Path
+
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads(Path("schemas/scbkr.schema.json").read_text())
+
+    draft = make_scbkr()
+    jsonschema.Draft202012Validator(schema).validate(draft)
+
+    confirmed = confirm_all_dimensions(make_scbkr())
+    jsonschema.Draft202012Validator(schema).validate(confirmed)
+    for dimension in VALID_DIMENSIONS:
+        assert confirmed[dimension]["confirmed"] is True
+        assert confirmed[dimension]["snapshot_hash"]
+        assert confirmed[dimension]["confirmed_snapshot"]
