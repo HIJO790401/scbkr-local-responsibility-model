@@ -101,3 +101,7 @@ JSONL remains the main append-only process ledger. P13-C appends retrieval reque
 ### P13-C optional vector store and fallback source
 
 `vector_db` / ChromaDB is an optional local acceleration store, not the source of truth for retrieval. SQLite `retrieval_cases` is the fallback query source and must remain usable when ChromaDB is unavailable, corrupted, or unwritable. JSONL ledger events record optional backend unavailability and fallback use with `retrieval_backend_unavailable` and `retrieval_fallback_used`, while completed indexing still records `retrieval_case_index_completed` when SQLite cases are saved.
+
+### Retrieval fallback source semantics
+
+SQLite `retrieval_cases` is the durable fallback source for P13-C retrieval. The optional local ChromaDB index may be incomplete because ChromaDB can be unavailable or an upsert can fail while the SQLite case is still saved. Query execution must therefore merge durable SQLite candidates with optional ChromaDB candidates and deterministically rescore the merged set before routing and truncation.

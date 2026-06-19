@@ -611,3 +611,9 @@ P13-C now supports advisory retrieval over legally committed local content witho
 ### P13-C retrieval stability
 
 P13-C treats deterministic fallback retrieval as SCBKR's minimum guaranteed retrieval path. ChromaDB is only an optional local acceleration backend: when it is available it may assist indexing and query, but if it is unavailable, corrupted, unwritable, or fails during collection creation or upsert, SCBKR falls back without interrupting the task. SQLite `retrieval_cases` remain the durable fallback query source, and retrieval results remain advisory only: they do not auto-confirm, auto-generate, or auto-commit storage.
+
+### P13-C retrieval fallback merge guarantee
+
+P13-C retrieval treats ChromaDB as an optional local accelerator, not as the durable source of truth. SQLite `retrieval_cases` remains the deterministic fallback source for searchable cases. Every retrieval query now checks both ChromaDB and SQLite fallback candidates, merges the two sources by `case_id`, deterministically recalculates score and route from `retrieval_text`, and then applies `top_k`.
+
+This means a non-empty ChromaDB result cannot hide SQLite fallback-only cases, including cases saved after an optional ChromaDB upsert failure. Retrieval results remain advisory only: they require user confirmation, are not auto-confirmed, do not allow automatic generation, and do not perform storage commits.

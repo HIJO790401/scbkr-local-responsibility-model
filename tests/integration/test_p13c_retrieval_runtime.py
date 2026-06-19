@@ -97,3 +97,50 @@ def test_p13c_chromadb_upsert_failure_keeps_sqlite_and_fallback_query(tmp_path, 
     assert q["requires_user_confirmation"] is True
     assert q["auto_confirmed"] is False
     assert q["generation_allowed"] is False
+
+
+def test_p13c_merged_query_keeps_sqlite_fallback_only_case_when_chromadb_nonempty(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
+    import apps.api.main as main
+    import core.ledger.jsonl_ledger as ledger
+    import core.retrieval.retrieval_runtime as runtime
+    main = importlib.reload(main); ledger = importlib.reload(ledger); runtime = importlib.reload(runtime)
+    main.MODEL_SETTINGS.update({"mode":"local","enabled":True})
+
+    def commit_task(raw_input, output):
+        t=main.create_task({"raw_input":raw_input, "task_type":"coding"})
+        t=main.create_scbkr(t["task_id"]); t=main.confirm_task(t["task_id"], {"signature":"sig"})
+        t["generation_result"]={"status":"waiting_review","review_passed":False,"storage_confirmed":False,"output":output}; t["status"]="waiting_review"; main.save_task(t)
+        t=main.review(t["task_id"], {"review_decision":"pass","reviewer_signature":"sig"})
+        t=main.storage_request(t["task_id"])
+        return main.storage_confirm(t["task_id"], {"storage_confirmed":True,"confirmed_by":"user","signature":"sig","selected_targets":["corpus"]})
+
+    t_a = commit_task("legacy alpha retrieval case", "legacy alpha retrieval implementation")
+    indexed_a = main.index_task_retrieval(t_a["task_id"])
+    case_a = indexed_a["indexed_cases"][0]
+
+    def fail_optional_upsert(case):
+        return {"backend":"deterministic_fallback","status":"unavailable","embedding_status":"fallback_keyword","error_message":"optional chromadb unavailable"}
+
+    monkeypatch.setattr(runtime, "upsert_retrieval_case", fail_optional_upsert)
+    monkeypatch.setattr(main, "index_task_storage_cases", runtime.index_task_storage_cases)
+    t_b = commit_task("needle fallback only beta exact", "needle fallback only beta exact implementation")
+    indexed_b = main.index_task_retrieval(t_b["task_id"])
+    case_b = indexed_b["indexed_cases"][0]
+    assert case_b["backend"] == "deterministic_fallback"
+
+    monkeypatch.setattr(runtime, "is_chromadb_available", lambda: True)
+    monkeypatch.setattr(runtime, "query_similar_cases", lambda *a, **k: {"backend":"chromadb","status":"ok","candidates":[{"case_id":case_a["case_id"],"retrieval_text":case_a["retrieval_text"],"score":0.99,"route":"A"}]})
+    monkeypatch.setattr(main, "query_retrieval_cases", runtime.query_retrieval_cases)
+
+    q=main.retrieval_query({"query_text":"needle fallback only beta exact", "top_k":10, "case_type":"any"})
+    ids = [candidate["case_id"] for candidate in q["candidates"]]
+    assert case_b["case_id"] in ids
+    assert ids.index(case_b["case_id"]) < ids.index(case_a["case_id"])
+    assert q["requires_user_confirmation"] is True
+    assert q["auto_confirmed"] is False
+    assert q["generation_allowed"] is False
+
+    events = [e["event_type"] for e in ledger.read_ledger_events()]
+    assert "retrieval_query_completed" in events
+    assert "retrieval_fallback_merged" in events
