@@ -18,9 +18,13 @@ def test_success_and_failed_case_building_sanitizes_secrets():
     with pytest.raises(ValueError): build_success_case_from_storage_item(task(False), item(), {"review_result":{"review_passed":False}})
 
 def test_memory_rule_draft_rejected_signed_rule_accepted():
-    draft={"task_id":"t1","rule_hash":"rh","relative_path":"memory/x.json","payload":{"memory_rule_confirmed_plan":{"memory_rule_status":"draft"}}}
-    with pytest.raises(ValueError): build_memory_rule_case(draft)
-    signed={**draft,"reviewer_signature":"sig","payload":{"memory_rule_confirmed_plan":{"memory_rule_status":"confirmed_plan","rule_statement":"Always test","required_behavior":["test"],"forbidden_patterns":["skip"]}}}
+    base={"task_id":"t1","rule_hash":"rh","relative_path":"memory/x.json"}
+    for plan in ({"memory_rule_status":"draft"}, {"memory_rule_status":None}, {}):
+        with pytest.raises(ValueError):
+            build_memory_rule_case({**base,"reviewer_signature":"sig","payload":{"memory_rule_confirmed_plan":plan}})
+    with pytest.raises(ValueError):
+        build_memory_rule_case({**base,"reviewer_signature":"","payload":{"memory_rule_confirmed_plan":{"memory_rule_status":"confirmed_plan"}}})
+    signed={**base,"reviewer_signature":"sig","payload":{"memory_rule_confirmed_plan":{"memory_rule_status":"confirmed_plan","rule_statement":"Always test","required_behavior":["test"],"forbidden_patterns":["skip"]}}}
     assert build_memory_rule_case(signed)["case_type"] == "signed_memory_rule"
 
 def test_similarity_routes_and_query_flags(tmp_path):

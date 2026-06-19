@@ -43,8 +43,10 @@ def build_success_case_from_storage_item(task: dict[str, Any], storage_item: dic
 def build_memory_rule_case(memory_rule: dict[str, Any]) -> dict[str, Any]:
     payload = memory_rule.get("payload") or memory_rule.get("memory_rule_confirmed_plan") or {}
     plan = payload.get("memory_rule_confirmed_plan") or payload
-    if plan.get("memory_rule_status") not in ("confirmed_plan", None) or not memory_rule.get("reviewer_signature"):
-        raise ValueError("signed memory rule with reviewer_signature is required")
+    if plan.get("memory_rule_status") != "confirmed_plan":
+        raise ValueError("memory_rule_status must be confirmed_plan")
+    if not str(memory_rule.get("reviewer_signature") or "").strip():
+        raise ValueError("reviewer_signature is required")
     if not memory_rule.get("relative_path") or not memory_rule.get("rule_hash"):
         raise ValueError("relative_path and rule_hash are required")
     scope = payload.get("scope") or plan.get("scope") or {"applies_to_task_types": plan.get("applies_to_task_types", []), "trigger_conditions": plan.get("trigger_conditions", []), "forbidden_patterns": plan.get("forbidden_patterns", []), "required_behavior": plan.get("required_behavior", [])}

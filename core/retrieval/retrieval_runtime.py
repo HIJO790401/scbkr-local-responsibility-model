@@ -8,7 +8,7 @@ from core.ledger.jsonl_ledger import append_ledger_event
 from core.storage.sqlite_runtime import save_ledger_index, save_retrieval_case, list_retrieval_cases, save_retrieval_query_result, save_task, list_storage_items
 from core.storage.runtime_paths import REPO_ROOT
 from core.retrieval.case_builder import build_success_case_from_storage_item, build_memory_rule_case, hash_retrieval_text
-from core.retrieval.similarity import rank_candidates, route_from_score
+from core.retrieval.similarity import rank_candidates, route_from_score, score_similarity
 from core.retrieval.vector_store import upsert_retrieval_case, query_similar_cases, get_vector_store_status, is_chromadb_available
 from core.retrieval.retrieval_result import new_query_id, now, query_hash
 
@@ -57,16 +57,33 @@ def index_memory_rule_case(memory_rule: dict[str, Any]) -> dict[str, Any]:
         _append('retrieval_case_index_failed', task_id=memory_rule.get('task_id'), payload={'error_message':str(exc)})
         raise
 
+
+def _ensure_candidate_scores(query_text: str, candidates: list[dict[str, Any]], backend: str) -> list[dict[str, Any]]:
+    scored = []
+    for candidate in candidates:
+        candidate = dict(candidate)
+        text = candidate.get('retrieval_text') or ''
+        if 'score' not in candidate or 'route' not in candidate:
+            if not text:
+                continue
+            candidate['score'] = score_similarity(query_text, text)
+            candidate['route'] = route_from_score(candidate['score'])
+        candidate.setdefault('backend', backend)
+        candidate.setdefault('similarity_source', 'deterministic_rescore' if backend == 'chromadb' else 'deterministic_fallback')
+        scored.append(candidate)
+    scored.sort(key=lambda item: (-float(item.get('score', 0.0)), item.get('case_id', '')))
+    return scored
+
 def query_retrieval_cases(query_text: str, task_id: str | None=None, top_k: int=3, case_type: str | None=None) -> dict[str, Any]:
     if not str(query_text or '').strip(): raise ValueError('query_text is required')
     _append('retrieval_query_requested', task_id=task_id, payload={'top_k':top_k,'case_type':case_type})
     try:
         backend='deterministic_fallback'; candidates=[]
         if is_chromadb_available():
-            res=query_similar_cases(query_text, top_k, case_type); backend=res.get('backend', backend); candidates=res.get('candidates', [])
+            res=query_similar_cases(query_text, top_k, case_type); backend=res.get('backend', backend); candidates=_ensure_candidate_scores(query_text, res.get('candidates', []), backend)
         if not candidates or backend!='chromadb':
             if backend!='chromadb': _append('retrieval_fallback_used', task_id=task_id, payload={'backend':'deterministic_fallback'})
-            candidates=rank_candidates(query_text, list_retrieval_cases(task_id=None, case_type=case_type, limit=200), top_k); backend='deterministic_fallback'
+            candidates=_ensure_candidate_scores(query_text, rank_candidates(query_text, list_retrieval_cases(task_id=None, case_type=case_type, limit=200), top_k), 'deterministic_fallback'); backend='deterministic_fallback'
         route=route_from_score(candidates[0].get('score',0.0)) if candidates else 'none'
         result={'query_id':new_query_id(),'task_id':task_id,'query_text_hash':query_hash(query_text),'backend':backend,'route':route,'top_k':top_k,'candidates':candidates,'requires_user_confirmation':True,'auto_confirmed':False,'generation_allowed':False,'created_at':now()}
         save_retrieval_query_result(result); _append('retrieval_query_completed', task_id=task_id, payload={'backend':backend,'route':route,'top_k':top_k,'candidate_count':len(candidates)})

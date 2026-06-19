@@ -1,9 +1,28 @@
-"""Legacy/P9 vector case helpers retained for P13-C compatibility."""
-from __future__ import annotations
-from datetime import UTC, datetime
-from typing import Any
+"""Pure P9 vector case helpers for responsibility-chain retrieval routes.
 
-def build_vector_case_from_storage_plan(task: dict[str, Any], scbkr: dict[str, Any], storage_plan: dict[str, Any], case_id: str) -> dict[str, Any]:
+P13-C retrieval cases live in ``case_builder.py``. This module intentionally
+keeps the legacy P9 vector-case shape aligned with schemas/vector_case.schema.json.
+"""
+
+VALID_EMBEDDING_STATUSES = ("not_created", "created_later")
+BLOCKED_CASE_FIELDS = (
+    "failure_report_draft",
+    "memory_rule_status",
+    "memory_rule_confirmed",
+    "memory_rule_stored",
+    "rule_candidate_status",
+)
+
+
+def _dimension_summary(scbkr, dimension):
+    value = scbkr.get(dimension, "")
+    if isinstance(value, dict):
+        return " ".join(str(item) for item in value.values())
+    return str(value)
+
+
+def build_vector_case_from_storage_plan(task, scbkr, storage_commit_plan, case_id=None):
+    """Build a schema-valid P9 vector case without P13-C retrieval fields."""
     return {
         "case_id": case_id,
         "task_id": task.get("task_id"),
