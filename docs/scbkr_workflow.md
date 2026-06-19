@@ -252,3 +252,15 @@ Each state-changing API step performs local persistence and appends a replay eve
 9. `POST /api/tasks/{task_id}/memory-rule-confirm`: `save_task` + `memory_rule_confirmed_plan_created` event; no `data/memory` write.
 
 JSONL is the append-only replay ledger. SQLite `ledger_index` is only an index and can be rebuilt from JSONL.
+
+## P13-B physical storage workflow
+
+Success path:
+
+`review_passed → storage_request → storage_confirm(signature) → physical write corpus / logic / exports → storage_committed`.
+
+Failure-to-memory-rule path:
+
+`review_failed → failure_report_draft → memory_rule_draft → memory_rule_confirmed_plan(signature) → physical write signed memory rule`.
+
+P13-B writes successful reviewed content to corpus/logic/exports only after the storage signature. It writes memory only for signed rules; it does not store raw failed output or unsigned memory drafts as memory.

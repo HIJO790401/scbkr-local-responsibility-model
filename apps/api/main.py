@@ -7,6 +7,7 @@ is initialized here.
 
 from datetime import UTC, datetime
 from itertools import count
+from uuid import uuid4
 from typing import Any
 from urllib.error import URLError, HTTPError
 from urllib.request import Request, urlopen
@@ -27,13 +28,18 @@ from core.review_rules.rule_confirmation import confirm_memory_rule_plan
 from core.review_rules.rule_draft import build_memory_rule_draft
 from core.scbkr.confirmation import all_dimensions_confirmed, confirm_all_dimensions
 from core.scbkr.generator import create_scbkr_draft
+from core.storage.physical_store import commit_memory_rule, commit_storage_items
 from core.storage.sqlite_runtime import (
     get_task_ledger,
     init_sqlite_runtime,
     list_tasks as list_persisted_tasks,
     load_task,
+    list_memory_rules as list_persisted_memory_rules,
+    list_storage_items as list_persisted_storage_items,
     save_ledger_index,
+    save_memory_rule,
     save_scbkr_confirmation,
+    save_storage_item,
     save_task,
 )
 from core.storage.storage_plan import build_storage_commit_plan
@@ -64,6 +70,16 @@ def _now() -> str:
 
 def _ensure_runtime() -> None:
     init_sqlite_runtime()
+
+
+def _generate_task_id() -> str:
+    """Generate a persisted-task ID that does not collide with memory or SQLite."""
+    for _ in range(5):
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        task_id = f"task-{timestamp}-{uuid4().hex[:8]}"
+        if task_id not in TASKS and load_task(task_id) is None:
+            return task_id
+    raise RuntimeError("failed to generate unique task_id after 5 attempts")
 
 
 def _append_task_event(
@@ -204,7 +220,7 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
     raw_input = str(payload.get("raw_input", "")).strip()
     if not raw_input:
         raise HTTPException(status_code=400, detail="raw_input is required")
-    task_id = f"task-{next(_TASK_COUNTER):04d}"
+    task_id = _generate_task_id()
     task = {
         "task_id": task_id,
         "trace_id": f"trace-{task_id}",
@@ -389,60 +405,139 @@ def storage_request(task_id: str) -> dict[str, Any]:
 @app.post("/api/tasks/{task_id}/storage-confirm")
 def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
+    status_before = task.get("status")
+    requested_event: dict[str, Any] | None = None
     try:
-        status_before = task.get("status")
+        if task.get("review_passed") is not True or task.get("review_result", {}).get("review_passed") is not True:
+            raise ValueError("storage commit requires review_passed task")
+        if task.get("status") not in ("review_passed", "waiting_storage_confirm", "storage_requested"):
+            raise ValueError("task status must allow storage commit")
+        for required_key in ("generation_result", "review_result", "scbkr"):
+            if required_key not in task:
+                raise ValueError(f"{required_key} is required before storage commit")
+        if not all_dimensions_confirmed(task["scbkr"]):
+            raise ValueError("SCBKR must be fully confirmed before storage commit")
+        if "storage_request" not in task and "storage_plan" not in task:
+            raise ValueError("storage_request or storage_plan is required before storage commit")
+        if payload.get("storage_confirmed") is not True:
+            raise ValueError("storage_confirmed=true is required")
+        if payload.get("confirmed_by") != "user":
+            raise ValueError("confirmed_by=user is required")
+        signature = str(payload.get("signature") or payload.get("storage_signature") or "").strip()
+        if not signature:
+            raise ValueError("signature is required")
+
+        selected_targets = payload.get("selected_targets") or ["corpus", "logic", "exports"]
+        plan_targets = [target for target in selected_targets if target in ("vector_db", "corpus", "logic", "memory")]
+        if not plan_targets:
+            plan_targets = ["corpus", "logic"]
+        requested_event = _append_task_event(
+            "storage_physical_write_requested",
+            task,
+            status_before=status_before,
+            status_after=status_before,
+            payload={"selected_targets": selected_targets, "confirmed_by": "user"},
+        )
         task["storage_plan"] = build_storage_commit_plan(
             task,
             task.get("review_result", {}),
-            payload.get("selected_targets", ["vector_db"]),
-            storage_signature=payload.get("storage_signature"),
-            storage_notes=payload.get("storage_notes", "P13-A MVP plan only; no physical write."),
+            plan_targets,
+            storage_signature=signature if "memory" in plan_targets else None,
+            storage_notes=payload.get("storage_notes", "P13-B physical storage commit."),
         )
+        task["storage_plan"]["selected_targets"] = list(dict.fromkeys([*selected_targets, "corpus", "logic", "exports"]))
+        task["storage_plan"]["physical_write_performed"] = False
+        items = commit_storage_items(task, task["storage_plan"], source_event_id=requested_event["event_id"])
+        for item in items:
+            save_storage_item(item)
+            _append_task_event(
+                "storage_item_written",
+                task,
+                status_before=status_before,
+                status_after="storage_committed",
+                payload={
+                    "target": item.get("target"),
+                    "content_hash": item.get("content_hash"),
+                    "relative_path": item.get("relative_path"),
+                    "physical_write_performed": True,
+                },
+            )
+        task["storage_items"] = items
         task["storage_confirmed"] = True
-        task["physical_write_performed"] = False
-        task["status"] = "completed"
+        task["physical_write_performed"] = True
+        task["status"] = "storage_committed"
+        task["storage_plan"]["physical_write_performed"] = True
+        task["storage_plan"]["next_required_action"] = "storage_committed"
         save_task(task)
         _append_task_event(
-            "storage_plan_confirmed",
+            "storage_physical_write_completed",
             task,
             status_before=status_before,
             status_after=task["status"],
-            payload={
-                "selected_targets": task["storage_plan"].get("selected_targets", []),
-                "physical_write_performed": False,
-            },
+            payload={"item_count": len(items), "physical_write_performed": True},
         )
         return task
     except PermissionError as exc:
+        _append_task_event("storage_physical_write_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error_message": str(exc), "physical_write_performed": False})
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ValueError as exc:
+    except Exception as exc:
+        task["physical_write_performed"] = False
+        _append_task_event("storage_physical_write_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error_message": str(exc), "physical_write_performed": False})
+        save_task(task)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/tasks/{task_id}/memory-rule-confirm")
 def memory_rule_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
+    status_before = task.get("status")
     try:
+        if task.get("review_passed") is not False and task.get("status") != "review_failed":
+            raise ValueError("memory rule storage requires review_failed task")
+        if "failure_report_draft" not in task.get("review_result", {}) and task.get("review_result", {}).get("status") != "review_failed":
+            raise ValueError("review_failed result or failure_report_draft is required")
         if "memory_rule_draft" not in task:
             raise ValueError("memory_rule_draft is required before confirmation")
-        reviewer_signature = payload.get("reviewer_signature", "")
-        if not str(reviewer_signature).strip():
+        reviewer_signature = str(payload.get("reviewer_signature", "")).strip()
+        if not reviewer_signature:
             raise ValueError("reviewer_signature is required")
-        status_before = task.get("status")
+        requested_event = _append_task_event(
+            "memory_rule_physical_write_requested",
+            task,
+            status_before=status_before,
+            status_after=status_before,
+            payload={"physical_write_performed": False},
+        )
         task["memory_rule_confirmed_plan"] = confirm_memory_rule_plan(task["memory_rule_draft"], reviewer_signature)
-        task["physical_write_performed"] = False
+        rule = commit_memory_rule(task, source_event_id=requested_event["event_id"])
+        save_memory_rule(rule)
+        task["memory_rule_stored"] = True
+        task["memory_rule_physical_write_performed"] = True
+        task["physical_write_performed"] = task.get("physical_write_performed", False)
         save_task(task)
         _append_task_event(
-            "memory_rule_confirmed_plan_created",
+            "memory_rule_written",
             task,
             status_before=status_before,
             status_after=task.get("status"),
-            payload={"physical_write_performed": False},
+            payload={"rule_hash": rule.get("rule_hash"), "relative_path": rule.get("relative_path")},
+        )
+        _append_task_event(
+            "memory_rule_physical_write_completed",
+            task,
+            status_before=status_before,
+            status_after=task.get("status"),
+            payload={"physical_write_performed": True, "rule_hash": rule.get("rule_hash")},
         )
         return task
     except PermissionError as exc:
+        _append_task_event("memory_rule_physical_write_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error_message": str(exc)})
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ValueError as exc:
+    except Exception as exc:
+        task["memory_rule_stored"] = False
+        task["memory_rule_physical_write_performed"] = False
+        save_task(task)
+        _append_task_event("memory_rule_physical_write_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error_message": str(exc)})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -454,6 +549,17 @@ def list_tasks() -> dict[str, Any]:
 @app.get("/api/tasks/{task_id}")
 def get_task(task_id: str) -> dict[str, Any]:
     return _get_task(task_id)
+
+
+@app.get("/api/tasks/{task_id}/storage-items")
+def get_task_storage_items(task_id: str) -> dict[str, Any]:
+    _get_task(task_id)
+    return {"storage_items": list_persisted_storage_items(task_id=task_id, limit=50)}
+
+
+@app.get("/api/memory-rules")
+def get_memory_rules() -> dict[str, Any]:
+    return {"memory_rules": list_persisted_memory_rules(limit=50)}
 
 
 @app.get("/api/tasks/{task_id}/ledger")
