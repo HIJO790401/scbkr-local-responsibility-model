@@ -1,8 +1,7 @@
-"""P13-A FastAPI MVP runtime for the local SCBKR Web App.
+"""P13-A/B/C FastAPI MVP runtime for the local SCBKR Web App.
 
 Tasks are cached in memory and persisted to local SQLite. Flow events are
-appended to a JSONL replay ledger; no ChromaDB, memory store, or desktop runtime
-is initialized here.
+appended to a JSONL replay ledger; retrieval is advisory and no desktop runtime is initialized here.
 """
 
 from datetime import UTC, datetime
@@ -47,8 +46,10 @@ from core.storage.storage_request import build_storage_request
 from core.workflow.generation_flow import build_generation_messages, assert_task_can_generate
 from core.workflow.generation_result import build_generation_result
 from core.workflow.review_flow import apply_review_decision
+from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
+from core.retrieval.vector_store import get_vector_store_status
 
-app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.13.0-p13a")
+app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.13.0-p13c")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],
@@ -145,7 +146,7 @@ def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, s
 @app.get("/health")
 def health() -> dict[str, Any]:
     _ensure_runtime()
-    return {"ok": True, "service": "scbkr-api", "runtime": "P13-A SQLite + JSONL runtime"}
+    return {"ok": True, "service": "scbkr-api", "runtime": "P13-A/B/C SQLite + JSONL retrieval runtime"}
 
 
 @app.get("/api/system/status")
@@ -153,7 +154,7 @@ def system_status() -> dict[str, Any]:
     return {
         "api_url": "http://localhost:8787",
         "web_url": "http://localhost:5500",
-        "runtime": "P13-A SQLite + JSONL runtime",
+        "runtime": "P13-A/B/C SQLite + JSONL retrieval runtime",
         "physical_write_performed": False,
         "tasks_count": len(TASKS),
         "model": _public_model_settings(),
@@ -233,7 +234,7 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
         "review_passed": False,
         "storage_confirmed": False,
         "physical_write_performed": False,
-        "runtime": "P13-A SQLite + JSONL runtime",
+        "runtime": "P13-A/B/C SQLite + JSONL retrieval runtime",
     }
     TASKS[task_id] = task
     save_task(task)
@@ -538,6 +539,50 @@ def memory_rule_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]
         task["memory_rule_physical_write_performed"] = False
         save_task(task)
         _append_task_event("memory_rule_physical_write_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error_message": str(exc)})
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/tasks/{task_id}/retrieval/index")
+def index_task_retrieval(task_id: str) -> dict[str, Any]:
+    task = _get_task(task_id)
+    if task.get("status") != "storage_committed" or task.get("physical_write_performed") is not True or task.get("review_passed") is not True:
+        raise HTTPException(status_code=400, detail="storage_committed review_passed task with physical writes required")
+    try:
+        return index_task_storage_cases(task)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/memory-rules/index")
+def index_memory_rules() -> dict[str, Any]:
+    indexed = []
+    for rule in list_persisted_memory_rules(limit=200):
+        try:
+            indexed.append(index_memory_rule_case(rule))
+        except ValueError:
+            continue
+    return {"indexed_cases": indexed, "backend_status": get_vector_store_status()}
+
+
+@app.post("/api/retrieval/query")
+def retrieval_query(payload: dict[str, Any]) -> dict[str, Any]:
+    case_type = payload.get("case_type")
+    if case_type == "any":
+        case_type = None
+    try:
+        return query_retrieval_cases(str(payload.get("query_text", "")), top_k=int(payload.get("top_k", 3)), case_type=case_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/tasks/{task_id}/retrieval/query")
+def task_retrieval_query(task_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    task = _get_task(task_id)
+    try:
+        result = retrieve_for_task(task, top_k=int((payload or {}).get("top_k", 3)))
+        TASKS[task_id] = task
+        return result
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

@@ -1,72 +1,66 @@
-"""Pure P9 responsibility-chain similarity scoring placeholders."""
+"""Deterministic pure-Python fallback similarity for P13-C retrieval."""
+from __future__ import annotations
+import re
+from collections import Counter
+from math import sqrt
+from typing import Any
 
-from core.retrieval.vector_case import assert_case_eligible_for_retrieval
+_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]")
 
-SIMILARITY_ROUTES = ("A", "B", "C", "none")
+def build_token_fingerprint(text: str | None) -> dict[str, int]:
+    if not text:
+        return {}
+    tokens = [t.lower() for t in _TOKEN_RE.findall(str(text)) if t.strip()]
+    return dict(Counter(tokens))
 
-
-def _tokens(text):
-    return {token for token in str(text).lower().replace("｜", " ").replace("/", " ").split() if token}
-
-
-def score_task_type_match(query_task_type, case_task_type):
-    """Score exact task type match."""
-    return 1.0 if query_task_type == case_task_type else 0.0
-
-
-def score_text_overlap(query_text, case_text):
-    """Score simple caller-supplied text overlap without embeddings."""
-    query_tokens = _tokens(query_text)
-    case_tokens = _tokens(case_text)
-    if not query_tokens or not case_tokens:
+def score_similarity(query_text: str | None, candidate_text: str | None) -> float:
+    q = build_token_fingerprint(query_text)
+    c = build_token_fingerprint(candidate_text)
+    if not q or not c:
         return 0.0
-    return len(query_tokens & case_tokens) / len(query_tokens | case_tokens)
+    common = set(q) & set(c)
+    dot = sum(q[t] * c[t] for t in common)
+    qn = sqrt(sum(v*v for v in q.values()))
+    cn = sqrt(sum(v*v for v in c.values()))
+    cosine = dot / (qn * cn) if qn and cn else 0.0
+    jaccard = len(common) / len(set(q) | set(c))
+    return round((0.75 * cosine) + (0.25 * jaccard), 6)
 
-
-def score_scbkr_dimension_overlap(scbkr_draft, case_scbkr_summary):
-    """Score overlap across S/C/B/K/R responsibility-chain dimensions."""
-    scores = []
-    for dimension in ("S", "C", "B", "K", "R"):
-        scores.append(score_text_overlap(scbkr_draft.get(dimension, ""), case_scbkr_summary.get(dimension, "")))
-    return sum(scores) / len(scores)
-
-
-def score_case_similarity(query, task_type, scbkr_draft, case):
-    """Score a candidate case using task type, query text, and SCBKR dimensions."""
-    assert_case_eligible_for_retrieval(case)
-    task_score = score_task_type_match(task_type, case.get("task_type"))
-    text_score = score_text_overlap(query, case.get("task_summary", ""))
-    dimension_score = score_scbkr_dimension_overlap(scbkr_draft, case.get("scbkr_summary", {}))
-    return round((task_score * 0.35) + (text_score * 0.25) + (dimension_score * 0.40), 6)
-
-
-def route_from_score(score):
-    """Map a numeric similarity score to A/B/C/none route."""
-    if score >= 0.75:
-        return "A"
-    if score >= 0.45:
-        return "B"
-    if score > 0:
-        return "C"
+def route_from_score(score: float) -> str:
+    if score >= 0.75: return "A"
+    if score >= 0.35: return "B"
+    if score > 0: return "C"
     return "none"
 
+def rank_candidates(query_text: str, candidates: list[dict[str, Any]], top_k: int = 3) -> list[dict[str, Any]]:
+    ranked=[]
+    for candidate in candidates:
+        text = candidate.get("retrieval_text") or candidate.get("case_json", {}).get("retrieval_text") or ""
+        score = score_similarity(query_text, text)
+        ranked.append({**candidate, "score": score, "route": route_from_score(score)})
+    ranked.sort(key=lambda x: (-x["score"], x.get("case_id", "")))
+    return ranked[:max(0, int(top_k or 3))]
 
-def rank_candidate_cases(query, task_type, scbkr_draft, candidate_cases, top_k=3):
-    """Rank caller-supplied eligible candidate cases without vector runtime access."""
-    ranked_cases = []
-    for case in candidate_cases:
+
+def _case_text(case: dict[str, Any]) -> str:
+    parts=[case.get("task_summary"), case.get("raw_input"), case.get("task_type")]
+    scbkr=case.get("scbkr_summary") or {}
+    if isinstance(scbkr, dict): parts.extend(scbkr.values())
+    parts.append(case.get("retrieval_text"))
+    return "\n".join(str(p) for p in parts if p)
+
+
+def score_case_similarity(query_text: str, task_type: str, scbkr: dict[str, Any], case: dict[str, Any]) -> float:
+    query = "\n".join([query_text or "", task_type or "", *(str(v) for v in (scbkr or {}).values())])
+    return score_similarity(query, _case_text(case))
+
+
+def rank_candidate_cases(query_text: str, task_type: str, scbkr: dict[str, Any], cases: list[dict[str, Any]], top_k: int = 3) -> list[dict[str, Any]]:
+    from core.retrieval.vector_case import assert_case_eligible_for_retrieval
+    ranked=[]
+    for case in cases:
         assert_case_eligible_for_retrieval(case)
-        score = score_case_similarity(query, task_type, scbkr_draft, case)
-        ranked_cases.append(
-            {
-                "case_id": case.get("case_id"),
-                "task_id": case.get("task_id"),
-                "task_type": case.get("task_type"),
-                "task_summary": case.get("task_summary"),
-                "score": score,
-                "similarity_route": route_from_score(score),
-                "scbkr_summary": case.get("scbkr_summary"),
-            }
-        )
-    ranked_cases.sort(key=lambda item: item["score"], reverse=True)
-    return ranked_cases[:top_k]
+        score=score_case_similarity(query_text, task_type, scbkr, case)
+        ranked.append({**case, "score": score, "route": route_from_score(score)})
+    ranked.sort(key=lambda x: (-x["score"], x.get("case_id", "")))
+    return ranked[:top_k]

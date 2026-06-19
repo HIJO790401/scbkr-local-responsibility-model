@@ -163,3 +163,20 @@ def test_save_memory_rule_and_list_memory_rules_redacts_api_key(tmp_path):
     rows = list_memory_rules(task_id="task-1", sqlite_path=sqlite_path)
     assert rows[0]["rule_id"] == rule["rule_id"]
     assert rows[0]["payload"]["token"] == "***REDACTED***"
+
+
+def test_retrieval_tables_and_save_list_helpers(tmp_path):
+    sqlite_path = tmp_path / "scbkr.sqlite3"
+    init_sqlite_runtime(sqlite_path)
+    names = table_names(sqlite_path)
+    assert "retrieval_cases" in names
+    assert "retrieval_queries" in names
+    from core.storage.sqlite_runtime import save_retrieval_case, list_retrieval_cases, save_retrieval_query_result, list_retrieval_query_results
+    case={"case_id":"case-1","task_id":"task-1","case_type":"success_case","retrieval_text":"hello","retrieval_text_hash":"hash","api_key":"secret"}
+    save_retrieval_case(case, sqlite_path=sqlite_path)
+    rows=list_retrieval_cases(sqlite_path=sqlite_path)
+    assert rows[0]["case_id"] == "case-1"
+    assert rows[0]["api_key"] == "***REDACTED***"
+    result={"query_id":"q-1","task_id":"task-1","query_text_hash":"h","backend":"deterministic_fallback","route":"A","top_k":3,"api_key":"secret"}
+    save_retrieval_query_result(result, sqlite_path=sqlite_path)
+    assert list_retrieval_query_results(sqlite_path=sqlite_path)[0]["query_id"] == "q-1"

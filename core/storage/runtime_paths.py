@@ -1,8 +1,7 @@
-"""Runtime filesystem paths for P13-A local persistence.
+"""Runtime filesystem paths for SCBKR local persistence and storage.
 
 This module only defines paths and creates the minimal runtime directories when
-asked. It does not open SQLite, write JSONL, call models, or create any P13-B/C
-storage directories.
+asked. It does not open SQLite, write JSONL, call models, or eagerly create optional vector storage directories.
 """
 
 import os
@@ -17,9 +16,10 @@ CORPUS_DIR = DATA_DIR / "corpus"
 LOGIC_DIR = DATA_DIR / "logic"
 EXPORTS_DIR = DATA_DIR / "exports"
 MEMORY_DIR = DATA_DIR / "memory"
+VECTOR_DB_DIR = DATA_DIR / "vector_db"
 
 
 def ensure_runtime_dirs() -> None:
-    """Create only the P13-A runtime directories required for SQLite/JSONL."""
+    """Create P13-A/B runtime directories; vector_db is lazy-created by retrieval runtime only."""
     for directory in (DATA_DIR, LEDGER_DIR, CORPUS_DIR, LOGIC_DIR, EXPORTS_DIR, MEMORY_DIR):
         directory.mkdir(parents=True, exist_ok=True)
