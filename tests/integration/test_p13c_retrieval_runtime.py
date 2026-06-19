@@ -49,3 +49,51 @@ def test_p13c_review_failed_and_memory_rule_index(tmp_path, monkeypatch):
     main.memory_rule_confirm(t["task_id"], {"reviewer_signature":"sig"})
     after=main.index_memory_rules()["indexed_cases"]
     assert any(c["case_type"] == "signed_memory_rule" for c in after)
+
+
+def test_p13c_chromadb_upsert_failure_keeps_sqlite_and_fallback_query(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
+    import apps.api.main as main
+    import core.ledger.jsonl_ledger as ledger
+    import core.retrieval.retrieval_runtime as runtime
+    main = importlib.reload(main); ledger = importlib.reload(ledger); runtime = importlib.reload(runtime)
+    main.MODEL_SETTINGS.update({"mode":"local","enabled":True})
+
+    def fail_optional_upsert(case):
+        return {
+            "backend": "deterministic_fallback",
+            "status": "unavailable",
+            "embedding_status": "fallback_keyword",
+            "error_message": "optional chromadb unavailable",
+        }
+
+    monkeypatch.setattr(runtime, "upsert_retrieval_case", fail_optional_upsert)
+    monkeypatch.setattr(main, "index_task_storage_cases", runtime.index_task_storage_cases)
+
+    t=main.create_task({"raw_input":"build resilient fallback retrieval", "task_type":"coding"})
+    t=main.create_scbkr(t["task_id"]); t=main.confirm_task(t["task_id"], {"signature":"sig"})
+    t["generation_result"]={"status":"waiting_review","review_passed":False,"storage_confirmed":False,"output":"resilient fallback retrieval implementation"}; t["status"]="waiting_review"; main.save_task(t)
+    t=main.review(t["task_id"], {"review_decision":"pass","reviewer_signature":"sig"})
+    t=main.storage_request(t["task_id"])
+    t=main.storage_confirm(t["task_id"], {"storage_confirmed":True,"confirmed_by":"user","signature":"sig","selected_targets":["corpus"]})
+
+    indexed=main.index_task_retrieval(t["task_id"])
+    assert indexed["indexed_cases"]
+    assert indexed["indexed_cases"][0]["backend"] == "deterministic_fallback"
+    assert indexed["indexed_cases"][0]["embedding_status"] == "fallback_keyword"
+
+    with sqlite3.connect(tmp_path/"scbkr.sqlite3") as conn:
+        assert conn.execute("select count(*) from retrieval_cases").fetchone()[0] > 0
+
+    events = [e["event_type"] for e in ledger.read_ledger_events(task_id=t["task_id"])]
+    assert "retrieval_backend_unavailable" in events
+    assert "retrieval_fallback_used" in events
+    assert "retrieval_case_index_completed" in events
+
+    q=main.retrieval_query({"query_text":"resilient fallback retrieval", "top_k":3, "case_type":"any"})
+    assert q["backend"] == "deterministic_fallback"
+    assert q["candidates"]
+    assert all("score" in candidate and "route" in candidate for candidate in q["candidates"])
+    assert q["requires_user_confirmation"] is True
+    assert q["auto_confirmed"] is False
+    assert q["generation_allowed"] is False

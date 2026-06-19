@@ -97,3 +97,7 @@ P13-C adds two SQLite index tables while keeping JSONL as the workflow replay le
 `data/vector_db` is reserved for the optional local ChromaDB backend and is created lazily only by retrieval indexing/vector runtime when ChromaDB is actually used. ChromaDB is optional, local-only, and must not call cloud services or external embedding APIs. When ChromaDB is unavailable, SQLite retrieval cases plus deterministic JSON/Python similarity provide fallback retrieval.
 
 JSONL remains the main append-only process ledger. P13-C appends retrieval request/completion/failure and fallback events, while SQLite remains an index/result cache for `retrieval_cases` and `retrieval_queries`.
+
+### P13-C optional vector store and fallback source
+
+`vector_db` / ChromaDB is an optional local acceleration store, not the source of truth for retrieval. SQLite `retrieval_cases` is the fallback query source and must remain usable when ChromaDB is unavailable, corrupted, or unwritable. JSONL ledger events record optional backend unavailability and fallback use with `retrieval_backend_unavailable` and `retrieval_fallback_used`, while completed indexing still records `retrieval_case_index_completed` when SQLite cases are saved.

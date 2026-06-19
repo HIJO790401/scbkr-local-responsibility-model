@@ -272,3 +272,7 @@ P13-B writes successful reviewed content to corpus/logic/exports only after the 
 `memory_rule_confirmed` → memory rule physical write → retrieval index signed rule → future tasks may retrieve it as a rule hint → user still confirms.
 
 Retrieval is auxiliary replay, not decision authority. It can show similar prior responsibility chains, acceptance criteria, and signed rules, but it cannot confirm SCBKR, generate output, or commit storage for the user.
+
+### P13-C retrieval index fallback flow
+
+The retrieval index flow is: `storage_committed` → build `retrieval_case` → save SQLite `retrieval_case` → try optional ChromaDB upsert → if ChromaDB fails, append fallback/unavailable events → retrieval remains available through deterministic fallback. ChromaDB failure is not a core task failure and must not block SQLite retrieval indexing.
