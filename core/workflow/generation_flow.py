@@ -8,6 +8,7 @@ persists task workflow runtime state.
 import json
 
 from core.model_gateway.openai_compatible import build_chat_completion_payload
+from core.scbkr.confirmation import all_dimensions_confirmed
 from core.model_gateway.response_parser import parse_chat_completion_response
 from core.model_gateway.settings import can_enable_generate
 from core.workflow.generation_result import build_generation_result
@@ -25,6 +26,8 @@ def assert_task_can_generate(task, scbkr, model_settings, permissions):
         raise ValueError("task.storage_confirmed must remain false before generation")
     if scbkr.get("confirmation_status") != "confirmed":
         raise ValueError("scbkr.confirmation_status must be confirmed before generation")
+    if all_dimensions_confirmed(scbkr) is not True:
+        raise ValueError("S/C/B/K/R dimensions must all be confirmed before generation")
     if can_enable_generate(model_settings, permissions) is not True:
         raise ValueError("model gateway is not enabled for generation")
     return True

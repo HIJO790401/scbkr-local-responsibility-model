@@ -3,6 +3,7 @@ import json
 import pytest
 
 from core.model_gateway.settings import DEFAULT_MODEL_SETTINGS
+from core.scbkr.confirmation import confirm_all_dimensions
 from core.workflow.generation_flow import (
     assert_task_can_generate,
     build_generation_messages,
@@ -43,6 +44,8 @@ def make_scbkr(**overrides):
         "confirmation_status": "confirmed",
     }
     scbkr.update(overrides)
+    if scbkr.get("confirmation_status") == "confirmed":
+        confirm_all_dimensions(scbkr)
     return scbkr
 
 

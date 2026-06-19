@@ -22,6 +22,7 @@ from core.permissions.permission_checker import assert_permission_allowed, valid
 from core.permissions.permission_flags import DEFAULT_PERMISSION_SETTINGS
 from core.review_rules.rule_confirmation import confirm_memory_rule_plan
 from core.review_rules.rule_draft import build_memory_rule_draft
+from core.scbkr.confirmation import all_dimensions_confirmed, confirm_all_dimensions
 from core.scbkr.generator import create_scbkr_draft
 from core.storage.storage_plan import build_storage_commit_plan
 from core.storage.storage_request import build_storage_request
@@ -184,15 +185,20 @@ def create_scbkr(task_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/tasks/{task_id}/confirm")
-def confirm_task(task_id: str) -> dict[str, Any]:
+def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     task = _get_task(task_id)
     if "scbkr" not in task:
         raise HTTPException(status_code=400, detail="SCBKR draft required before confirm")
-    task["confirmed"] = True
-    task["status"] = "confirmed"
-    task["scbkr"]["confirmation_status"] = "confirmed"
-    for key in ("S", "C", "B", "K", "R"):
-        task["scbkr"][key]["confirmation_status"] = "confirmed"
+    payload = payload or {}
+    confirm_all_dimensions(
+        task["scbkr"],
+        confirmed_by=payload.get("confirmed_by", "user"),
+        confirmation_statement=payload.get("confirmation_statement"),
+        signature=payload.get("signature"),
+    )
+    if all_dimensions_confirmed(task["scbkr"]):
+        task["confirmed"] = True
+        task["status"] = "confirmed"
     return task
 
 
