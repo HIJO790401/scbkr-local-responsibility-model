@@ -588,3 +588,11 @@ P13-A now supports local workflow persistence without expanding into P13-B/P13-C
 - New API tasks use collision-resistant IDs in the form `task-{UTC timestamp}-{uuid8}` so a process restart cannot reset the in-memory counter and overwrite an older persisted task.
 - Tests and local isolated runs can set `SCBKR_DATA_DIR` to redirect SQLite and JSONL runtime files away from the default `data/` directory; the integration tests use this to avoid deleting production-like repo data.
 - `ledger_index` rebuild first clears the SQLite index, then recreates it from JSONL so dirty rows not present in the append-only ledger are removed.
+
+### P13-B physical storage layer
+
+- P13-B supports local JSON physical writes after `review_passed` plus explicit storage confirmation (`storage_confirmed=true`, `confirmed_by="user"`, and a non-empty signature): successful content is written to `data/corpus`, responsibility-chain logic to `data/logic`, and replay/export bundles to `data/exports`.
+- Signed memory rules are written to `data/memory` only after `memory_rule_confirmed_plan` is created with a user `reviewer_signature`.
+- `physical_write_performed=true` appears only after a legal storage commit succeeds.
+- `vector_db`, ChromaDB, embeddings, and vector search remain P13-C pending; P13-B does not create `data/vector_db`.
+- P13-B does not include desktop packaging, Electron, Tauri, or installers.

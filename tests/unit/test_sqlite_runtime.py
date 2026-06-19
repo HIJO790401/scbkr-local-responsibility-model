@@ -11,8 +11,12 @@ from core.storage.sqlite_runtime import (
     list_tasks,
     load_task,
     save_ledger_index,
+    save_memory_rule,
+    save_storage_item,
     save_scbkr_confirmation,
     save_task,
+    list_memory_rules,
+    list_storage_items,
 )
 
 
@@ -44,7 +48,7 @@ def test_init_sqlite_runtime_creates_required_tables(tmp_path):
 
     init_sqlite_runtime(sqlite_path)
 
-    assert {"tasks", "scbkr_confirmations", "ledger_index", "system_events"} <= table_names(sqlite_path)
+    assert {"tasks", "scbkr_confirmations", "ledger_index", "system_events", "storage_items", "memory_rules"} <= table_names(sqlite_path)
 
 
 def test_save_task_and_load_task_round_trip(tmp_path):
@@ -118,3 +122,44 @@ def test_clear_ledger_index_removes_only_index_rows(tmp_path):
 
     assert result["deleted_count"] == 1
     assert get_task_ledger("task-1", sqlite_path=sqlite_path) == []
+
+
+def test_save_storage_item_and_list_storage_items_redacts_api_key(tmp_path):
+    sqlite_path = tmp_path / "runtime.sqlite3"
+    item = {
+        "item_id": "storage:corpus:task-1:abc",
+        "task_id": "task-1",
+        "target": "corpus",
+        "relative_path": "corpus/task-1-abc.json",
+        "content_hash": "abc",
+        "source_event_id": "evt-1",
+        "physical_write_performed": True,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "payload": {"api_key": "secret"},
+    }
+
+    save_storage_item(item, sqlite_path=sqlite_path)
+
+    rows = list_storage_items(task_id="task-1", sqlite_path=sqlite_path)
+    assert rows[0]["item_id"] == item["item_id"]
+    assert rows[0]["payload"]["api_key"] == "***REDACTED***"
+
+
+def test_save_memory_rule_and_list_memory_rules_redacts_api_key(tmp_path):
+    sqlite_path = tmp_path / "runtime.sqlite3"
+    rule = {
+        "rule_id": "memory:task-1:abc",
+        "task_id": "task-1",
+        "rule_hash": "abc",
+        "relative_path": "memory/task-1-abc.json",
+        "reviewer_signature": "sig",
+        "scope": "{}",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "payload": {"token": "secret"},
+    }
+
+    save_memory_rule(rule, sqlite_path=sqlite_path)
+
+    rows = list_memory_rules(task_id="task-1", sqlite_path=sqlite_path)
+    assert rows[0]["rule_id"] == rule["rule_id"]
+    assert rows[0]["payload"]["token"] == "***REDACTED***"

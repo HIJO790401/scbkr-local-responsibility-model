@@ -64,7 +64,7 @@ SQLite tables:
 - `ledger_index`: event metadata, JSONL line number, and payload hash for lookup.
 - `system_events`: minimal system event table reserved for local runtime notes.
 
-P13-A intentionally does not write four-library physical stores:
+P13-A intentionally did not write four-library physical stores before the P13-B physical storage layer:
 
 - No `data/vector_db`.
 - No `data/corpus`.
@@ -78,3 +78,11 @@ P13-A intentionally does not write four-library physical stores:
 - `ledger_index` may be cleared and rebuilt from JSONL; rebuild must not rewrite, truncate, delete, or otherwise mutate the JSONL ledger file.
 - SQLite task upsert remains valid for saving mutable task snapshots, but new task creation must use collision-resistant task IDs so an API restart cannot overwrite an existing persisted task through ID collision.
 - `SCBKR_DATA_DIR` can redirect runtime data for tests or local isolation. When it is unset, runtime data continues to default to the repository `data/` directory.
+
+## P13-B physical storage and indexes
+
+- `storage_items` indexes physical JSON writes with `item_id`, `task_id`, `target`, `relative_path`, `content_hash`, `source_event_id`, `physical_write_performed`, `created_at`, and sanitized `item_json`.
+- `memory_rules` indexes signed memory-rule JSON writes with `rule_id`, `task_id`, `rule_hash`, `relative_path`, `reviewer_signature`, `scope`, `created_at`, and sanitized `rule_json`.
+- Physical store JSON files live under `data/corpus`, `data/logic`, `data/exports`, and `data/memory`; each filename includes the task ID and the first 12 characters of the content hash.
+- `data/corpus` stores only review-passed generation payloads; `data/logic` stores sealed SCBKR responsibility logic and review/storage context; `data/exports` stores sanitized replay bundles; `data/memory` stores only signed `memory_rule_confirmed_plan` rules.
+- JSONL remains the workflow replay ledger and records physical-write request/completion/failure events. SQLite remains an index for tasks, ledger rows, storage items, and memory rules; the JSON physical files are the content store.

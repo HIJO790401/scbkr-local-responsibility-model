@@ -100,7 +100,8 @@ def test_memory_rule_confirm_requires_existing_draft_and_signature():
     plan = confirmed.json()["memory_rule_confirmed_plan"]
     assert plan["memory_rule_status"] == "confirmed_plan"
     assert plan["physical_write_performed"] is False
-    assert "memory_rule_stored" not in confirmed.json()
+    assert confirmed.json()["memory_rule_stored"] is True
+    assert confirmed.json()["memory_rule_physical_write_performed"] is True
 
 
 def test_external_model_test_requires_high_risk_confirmation_before_call():

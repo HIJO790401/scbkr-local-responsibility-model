@@ -13,9 +13,13 @@ DATA_DIR = Path(os.environ.get("SCBKR_DATA_DIR", REPO_ROOT / "data")).expanduser
 SQLITE_PATH = DATA_DIR / "scbkr.sqlite3"
 LEDGER_DIR = DATA_DIR / "ledger"
 LEDGER_JSONL_PATH = LEDGER_DIR / "audit-log.jsonl"
+CORPUS_DIR = DATA_DIR / "corpus"
+LOGIC_DIR = DATA_DIR / "logic"
+EXPORTS_DIR = DATA_DIR / "exports"
+MEMORY_DIR = DATA_DIR / "memory"
 
 
 def ensure_runtime_dirs() -> None:
     """Create only the P13-A runtime directories required for SQLite/JSONL."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    for directory in (DATA_DIR, LEDGER_DIR, CORPUS_DIR, LOGIC_DIR, EXPORTS_DIR, MEMORY_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
