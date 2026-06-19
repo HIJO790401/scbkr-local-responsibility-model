@@ -115,6 +115,30 @@ def all_dimensions_confirmed(scbkr: dict[str, Any]) -> bool:
     return all(is_dimension_snapshot_valid(scbkr, dimension_key) for dimension_key in VALID_DIMENSIONS)
 
 
+def get_confirmed_dimension_payload(scbkr: dict[str, Any], dimension_key: str) -> dict[str, Any]:
+    """Return the sealed business payload for one confirmed dimension.
+
+    The returned payload is a defensive copy of confirmed_snapshot.payload only;
+    live dimension dictionaries and confirmation metadata are intentionally not
+    exposed to model prompts.
+    """
+    if is_dimension_snapshot_valid(scbkr, dimension_key) is not True:
+        raise ValueError(f"SCBKR dimension {dimension_key} sealed snapshot is invalid")
+    confirmed_snapshot = scbkr[dimension_key]["confirmed_snapshot"]
+    payload = confirmed_snapshot.get("payload")
+    if not isinstance(payload, dict):
+        raise ValueError(f"SCBKR dimension {dimension_key} sealed snapshot payload is invalid")
+    return deepcopy(payload)
+
+
+def build_model_visible_scbkr_payload(scbkr: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Build the only SCBKR payload allowed to be visible to generation models."""
+    return {
+        dimension_key: get_confirmed_dimension_payload(scbkr, dimension_key)
+        for dimension_key in VALID_DIMENSIONS
+    }
+
+
 def build_scbkr_confirmed_snapshot(scbkr: dict[str, Any]) -> dict[str, Any]:
     """Build a replayable snapshot of the confirmed five-dimension chain."""
     return {

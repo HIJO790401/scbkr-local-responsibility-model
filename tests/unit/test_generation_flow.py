@@ -178,3 +178,62 @@ def test_generation_result_helpers_keep_review_and_storage_locked():
     assert result["storage_confirmed"] is False
     assert error["review_passed"] is False
     assert error["storage_confirmed"] is False
+
+
+def _user_payload(messages):
+    return json.loads(messages[1]["content"])
+
+
+def test_build_generation_messages_excludes_confirmation_metadata_from_prompt():
+    scbkr = make_scbkr()
+    scbkr["K"]["confirmation_statement"] = "metadata must not leak"
+    scbkr["K"]["confirmed_at"] = "2099-01-01T00:00:00+00:00"
+    messages = build_generation_messages(make_task(), scbkr)
+    content = messages[1]["content"]
+
+    assert "metadata must not leak" not in content
+    assert "2099-01-01T00:00:00+00:00" not in content
+    assert "confirmation_statement" not in content
+    assert "confirmed_at" not in content
+    assert "snapshot_hash" not in content
+    assert "confirmed_snapshot" not in content
+
+
+def test_metadata_change_after_confirm_does_not_change_generation_prompt():
+    scbkr = make_scbkr()
+    before = build_generation_messages(make_task(), scbkr)
+
+    scbkr["K"]["confirmation_statement"] = "更新確認文字，不改業務 payload"
+    scbkr["K"]["confirmed_at"] = "2099-01-01T00:00:00+00:00"
+    after = build_generation_messages(make_task(), scbkr)
+
+    assert before == after
+
+
+def test_business_payload_change_after_confirm_rejects_generation_messages():
+    scbkr = make_scbkr()
+    scbkr["S"]["task_name"] = "竄改後任務名稱"
+
+    with pytest.raises(ValueError, match="sealed snapshots"):
+        build_generation_messages(make_task(), scbkr)
+
+
+def test_b_business_payload_change_after_confirm_rejects_generation_gate():
+    scbkr = make_scbkr()
+    scbkr["B"].setdefault("data_write_scope", []).append("竄改：允許寫入 data")
+
+    with pytest.raises(ValueError, match="sealed snapshots"):
+        assert_task_can_generate(make_task(), scbkr, make_model_settings(), {"external_api": False})
+
+
+def test_acceptance_criteria_comes_from_sealed_r_payload_not_live_r():
+    scbkr = make_scbkr()
+    sealed_criteria = scbkr["R"]["confirmed_snapshot"]["payload"]["acceptance_criteria"]
+    scbkr["R"]["acceptance_criteria"] = ["live tamper should be rejected"]
+
+    with pytest.raises(ValueError, match="sealed snapshots"):
+        build_generation_messages(make_task(), scbkr)
+
+    scbkr["R"]["acceptance_criteria"] = sealed_criteria
+    messages = build_generation_messages(make_task(), scbkr)
+    assert _user_payload(messages)["acceptance_criteria"] == sealed_criteria

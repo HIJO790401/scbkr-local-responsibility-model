@@ -108,3 +108,22 @@ curl http://localhost:8787/api/settings/permissions
 ## 下一階段
 
 P13 可在「桌面封裝 / 本地主機手機連線 / 持久化 runtime」三選一。
+
+### P12 sealed snapshot acceptance updates
+
+- The sealed `confirmed_snapshot.payload` is the only model-visible source for the confirmed S/C/B/K/R responsibility chain.
+- The live dimension dictionaries are runtime state containers and must not be passed directly into generation prompts.
+- Schema validation must accept confirmed SCBKR payloads, including per-dimension seal metadata such as `confirmed`, `snapshot_hash`, and `confirmed_snapshot`.
+- P12 remains a Web MVP boundary and does not include desktop packaging, Electron, Tauri, installers, or new local database/vector/ledger runtimes.
+
+### P13-A persistence acceptance updates
+
+- Creating a task persists the task in `data/scbkr.sqlite3`.
+- Creating a task appends `task_created` to `data/ledger/audit-log.jsonl`.
+- SCBKR draft and confirm steps save the task and latest SCBKR confirmation to SQLite.
+- Confirm appends `scbkr_confirmed` with `confirmed_snapshot_hash` payload metadata.
+- Clearing the in-memory `TASKS` cache must not lose tasks; `GET /api/tasks/{task_id}` can restore from SQLite.
+- `GET /api/tasks/{task_id}/ledger` reads task events from JSONL.
+- `POST /api/ledger/rebuild-index` rebuilds SQLite `ledger_index` from JSONL without modifying JSONL.
+- Storage confirmation remains plan-only and must not perform vector/corpus/logic/memory physical writes.
+- Memory rule confirmation remains plan-only and must not write `data/memory`.

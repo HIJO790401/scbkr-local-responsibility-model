@@ -234,3 +234,21 @@ failure_report_draft 只能當來源，不是規則本身。
 沒有使用者簽名，不得建立 confirmed plan。
 P11 不產生 memory_rule_stored。
 實體 memory runtime 尚未實作。
+
+## P13-A persistence and replay workflow
+
+P13-A keeps `TASKS` as a runtime cache, while SQLite and JSONL preserve the workflow across API restarts.
+
+Each state-changing API step performs local persistence and appends a replay event:
+
+1. `POST /api/tasks/create`: `save_task` + `task_created` JSONL event.
+2. `POST /api/tasks/{task_id}/scbkr`: `save_task`, `save_scbkr_confirmation` + `scbkr_draft_created` event.
+3. `POST /api/tasks/{task_id}/confirm`: `save_task`, `save_scbkr_confirmation` + `scbkr_confirmed` event.
+4. `POST /api/tasks/{task_id}/generate`: `generation_requested`, then `generation_completed` or `generation_failed`.
+5. `POST /api/tasks/{task_id}/review`: `save_task` + `review_passed`, `review_failed`, or `rollback_requested` event.
+6. `POST /api/tasks/{task_id}/storage-request`: `save_task` + `storage_request_created` event.
+7. `POST /api/tasks/{task_id}/storage-confirm`: `save_task` + `storage_plan_confirmed` event; no physical write.
+8. `POST /api/tasks/{task_id}/memory-rule-draft`: `save_task` + `memory_rule_draft_created` event.
+9. `POST /api/tasks/{task_id}/memory-rule-confirm`: `save_task` + `memory_rule_confirmed_plan_created` event; no `data/memory` write.
+
+JSONL is the append-only replay ledger. SQLite `ledger_index` is only an index and can be rebuilt from JSONL.
