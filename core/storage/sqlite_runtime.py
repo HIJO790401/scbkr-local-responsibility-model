@@ -1,4 +1,4 @@
-"""SQLite runtime persistence for P13-A.
+"""SQLite runtime persistence for P13-A/B/C.
 
 SQLite stores mutable local task state and ledger indexes. JSONL remains the
 append-only replay source.
@@ -119,6 +119,31 @@ def init_sqlite_runtime(sqlite_path: str | Path | None = None) -> dict[str, Any]
                 scope TEXT,
                 created_at TEXT,
                 rule_json TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS retrieval_cases (
+                case_id TEXT PRIMARY KEY,
+                task_id TEXT,
+                case_type TEXT,
+                source_target TEXT,
+                relative_path TEXT,
+                content_hash TEXT,
+                retrieval_text_hash TEXT,
+                embedding_status TEXT,
+                backend TEXT,
+                created_at TEXT,
+                case_json TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS retrieval_queries (
+                query_id TEXT PRIMARY KEY,
+                task_id TEXT,
+                query_text_hash TEXT,
+                backend TEXT,
+                route TEXT,
+                top_k INTEGER,
+                created_at TEXT,
+                result_json TEXT
             );
             """
         )
@@ -406,3 +431,72 @@ def list_memory_rules(task_id: str | None = None, sqlite_path: str | Path | None
         else:
             rows = conn.execute("SELECT rule_json FROM memory_rules WHERE task_id = ? ORDER BY created_at DESC LIMIT ?", (task_id, limit)).fetchall()
     return [json.loads(row["rule_json"]) for row in rows]
+
+
+
+def save_retrieval_case(case: dict[str, Any], sqlite_path: str | Path | None = None) -> dict[str, Any]:
+    init_sqlite_runtime(sqlite_path)
+    safe_case = _sanitize_index_payload(case)
+    with _connect(sqlite_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO retrieval_cases (
+                case_id, task_id, case_type, source_target, relative_path, content_hash,
+                retrieval_text_hash, embedding_status, backend, created_at, case_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(case_id) DO UPDATE SET
+                task_id=excluded.task_id, case_type=excluded.case_type, source_target=excluded.source_target,
+                relative_path=excluded.relative_path, content_hash=excluded.content_hash,
+                retrieval_text_hash=excluded.retrieval_text_hash, embedding_status=excluded.embedding_status,
+                backend=excluded.backend, created_at=excluded.created_at, case_json=excluded.case_json
+            """,
+            (safe_case["case_id"], safe_case.get("task_id"), safe_case.get("case_type"), safe_case.get("source_target"),
+             safe_case.get("relative_path"), safe_case.get("content_hash") or safe_case.get("rule_hash"), safe_case.get("retrieval_text_hash"),
+             safe_case.get("embedding_status", "fallback_keyword"), safe_case.get("backend", "deterministic_fallback"),
+             safe_case.get("created_at") or _now(), _json(safe_case)),
+        )
+    return {"case_id": safe_case["case_id"]}
+
+
+def load_retrieval_case(case_id: str, sqlite_path: str | Path | None = None) -> dict[str, Any] | None:
+    init_sqlite_runtime(sqlite_path)
+    with _connect(sqlite_path) as conn:
+        row = conn.execute("SELECT case_json FROM retrieval_cases WHERE case_id = ?", (case_id,)).fetchone()
+    return json.loads(row["case_json"]) if row else None
+
+
+def list_retrieval_cases(task_id: str | None = None, case_type: str | None = None, sqlite_path: str | Path | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    init_sqlite_runtime(sqlite_path)
+    clauses=[]; params=[]
+    if task_id: clauses.append("task_id = ?"); params.append(task_id)
+    if case_type and case_type != "any": clauses.append("case_type = ?"); params.append(case_type)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    with _connect(sqlite_path) as conn:
+        rows=conn.execute(f"SELECT case_json FROM retrieval_cases{where} ORDER BY created_at DESC LIMIT ?", (*params, limit)).fetchall()
+    return [json.loads(row["case_json"]) for row in rows]
+
+
+def save_retrieval_query_result(result: dict[str, Any], sqlite_path: str | Path | None = None) -> dict[str, Any]:
+    init_sqlite_runtime(sqlite_path)
+    safe_result = _sanitize_index_payload(result)
+    with _connect(sqlite_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO retrieval_queries (query_id, task_id, query_text_hash, backend, route, top_k, created_at, result_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(query_id) DO UPDATE SET task_id=excluded.task_id, query_text_hash=excluded.query_text_hash,
+                backend=excluded.backend, route=excluded.route, top_k=excluded.top_k, created_at=excluded.created_at, result_json=excluded.result_json
+            """,
+            (safe_result["query_id"], safe_result.get("task_id"), safe_result.get("query_text_hash"), safe_result.get("backend"), safe_result.get("route"), safe_result.get("top_k"), safe_result.get("created_at") or _now(), _json(safe_result)),
+        )
+    return {"query_id": safe_result["query_id"]}
+
+
+def list_retrieval_query_results(task_id: str | None = None, sqlite_path: str | Path | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    init_sqlite_runtime(sqlite_path)
+    with _connect(sqlite_path) as conn:
+        if task_id:
+            rows=conn.execute("SELECT result_json FROM retrieval_queries WHERE task_id = ? ORDER BY created_at DESC LIMIT ?", (task_id, limit)).fetchall()
+        else:
+            rows=conn.execute("SELECT result_json FROM retrieval_queries ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    return [json.loads(row["result_json"]) for row in rows]

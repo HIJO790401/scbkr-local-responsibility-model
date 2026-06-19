@@ -596,3 +596,14 @@ P13-A now supports local workflow persistence without expanding into P13-B/P13-C
 - `physical_write_performed=true` appears only after a legal storage commit succeeds.
 - `vector_db`, ChromaDB, embeddings, and vector search remain P13-C pending; P13-B does not create `data/vector_db`.
 - P13-B does not include desktop packaging, Electron, Tauri, or installers.
+
+### P13-C similar-case retrieval runtime
+
+P13-C now supports advisory retrieval over legally committed local content without adding desktop packaging:
+
+- `storage_committed` tasks can be indexed as retrieval cases after review pass, storage confirmation, physical write, and signature.
+- Signed memory rules can be indexed as retrieval cases; unsigned memory-rule drafts are not indexed.
+- Similarity queries return deterministic `A` / `B` / `C` / `none` routes.
+- Retrieval results are hints only: `requires_user_confirmation=true`, `auto_confirmed=false`, and `generation_allowed=false`.
+- ChromaDB is optional. If local ChromaDB is unavailable, SCBKR uses deterministic pure-Python fallback retrieval or reports the backend as unavailable without crashing.
+- P13-C does not include desktop packaging. Tauri, Electron, installers, and sandbox mode remain P14 scope.

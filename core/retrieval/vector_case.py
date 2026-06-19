@@ -1,4 +1,8 @@
-"""Pure P9 vector case helpers for responsibility-chain retrieval routes."""
+"""Pure P9 vector case helpers for responsibility-chain retrieval routes.
+
+P13-C retrieval cases live in ``case_builder.py``. This module intentionally
+keeps the legacy P9 vector-case shape aligned with schemas/vector_case.schema.json.
+"""
 
 VALID_EMBEDDING_STATUSES = ("not_created", "created_later")
 BLOCKED_CASE_FIELDS = (
@@ -18,7 +22,7 @@ def _dimension_summary(scbkr, dimension):
 
 
 def build_vector_case_from_storage_plan(task, scbkr, storage_commit_plan, case_id=None):
-    """Build a vector case dictionary without physical vector writes or embedding."""
+    """Build a schema-valid P9 vector case without P13-C retrieval fields."""
     return {
         "case_id": case_id,
         "task_id": task.get("task_id"),

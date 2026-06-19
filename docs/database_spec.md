@@ -86,3 +86,14 @@ P13-A intentionally did not write four-library physical stores before the P13-B 
 - Physical store JSON files live under `data/corpus`, `data/logic`, `data/exports`, and `data/memory`; each filename includes the task ID and the first 12 characters of the content hash.
 - `data/corpus` stores only review-passed generation payloads; `data/logic` stores sealed SCBKR responsibility logic and review/storage context; `data/exports` stores sanitized replay bundles; `data/memory` stores only signed `memory_rule_confirmed_plan` rules.
 - JSONL remains the workflow replay ledger and records physical-write request/completion/failure events. SQLite remains an index for tasks, ledger rows, storage items, and memory rules; the JSON physical files are the content store.
+
+## P13-C retrieval indexes and optional vector backend
+
+P13-C adds two SQLite index tables while keeping JSONL as the workflow replay ledger:
+
+- `retrieval_cases`: indexes committed success cases and signed memory-rule retrieval cases with `case_id`, `task_id`, `case_type`, `source_target`, `relative_path`, `content_hash`, `retrieval_text_hash`, `embedding_status`, `backend`, `created_at`, and sanitized `case_json`.
+- `retrieval_queries`: stores advisory query results with `query_id`, `task_id`, `query_text_hash`, `backend`, `route`, `top_k`, `created_at`, and sanitized `result_json`.
+
+`data/vector_db` is reserved for the optional local ChromaDB backend and is created lazily only by retrieval indexing/vector runtime when ChromaDB is actually used. ChromaDB is optional, local-only, and must not call cloud services or external embedding APIs. When ChromaDB is unavailable, SQLite retrieval cases plus deterministic JSON/Python similarity provide fallback retrieval.
+
+JSONL remains the main append-only process ledger. P13-C appends retrieval request/completion/failure and fallback events, while SQLite remains an index/result cache for `retrieval_cases` and `retrieval_queries`.
