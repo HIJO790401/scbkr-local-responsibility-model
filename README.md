@@ -572,3 +572,13 @@ Wen-Yao Hsu / ShenYao888π
 - If only confirmation metadata is modified after sealing, the model-visible payload remains unchanged.
 - `schemas/scbkr.schema.json` recognizes confirmed dimensions and their seal fields while preserving the original business-field schemas.
 - Desktop packaging is not designed yet and remains pending; this Web MVP does not add Electron, Tauri, or an installer.
+
+### P13-A SQLite + JSONL persistence runtime
+
+P13-A now supports local workflow persistence without expanding into P13-B/P13-C storage runtimes:
+
+- Tasks are saved to `data/scbkr.sqlite3` with Python's standard `sqlite3` runtime.
+- Flow events are appended to `data/ledger/audit-log.jsonl`, which is the replay source of record and must not be overwritten.
+- SQLite `ledger_index` stores query/index metadata and can be rebuilt from the JSONL ledger.
+- `GET /api/tasks/{task_id}` can recover a task from SQLite after the in-memory `TASKS` cache is cleared.
+- P13-A does not add ChromaDB, embeddings, memory physical write, corpus/logic/vector physical write, desktop packaging, Electron, Tauri, or installers.

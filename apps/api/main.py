@@ -1,7 +1,8 @@
-"""P12 FastAPI MVP runtime for the local SCBKR Web App.
+"""P13-A FastAPI MVP runtime for the local SCBKR Web App.
 
-This module intentionally uses an in-memory store. It does not write SQLite,
-ChromaDB, ledger JSONL, memory, or the four storage targets.
+Tasks are cached in memory and persisted to local SQLite. Flow events are
+appended to a JSONL replay ledger; no ChromaDB, memory store, or desktop runtime
+is initialized here.
 """
 
 from datetime import UTC, datetime
@@ -20,17 +21,28 @@ from core.model_gateway.response_parser import parse_chat_completion_response
 from core.model_gateway.settings import DEFAULT_MODEL_SETTINGS, mask_api_key, validate_model_settings
 from core.permissions.permission_checker import assert_permission_allowed, validate_permission_settings
 from core.permissions.permission_flags import DEFAULT_PERMISSION_SETTINGS
+from core.ledger.ledger_event import build_ledger_event
+from core.ledger.jsonl_ledger import append_ledger_event, read_ledger_events, rebuild_ledger_index_from_jsonl
 from core.review_rules.rule_confirmation import confirm_memory_rule_plan
 from core.review_rules.rule_draft import build_memory_rule_draft
 from core.scbkr.confirmation import all_dimensions_confirmed, confirm_all_dimensions
 from core.scbkr.generator import create_scbkr_draft
+from core.storage.sqlite_runtime import (
+    get_task_ledger,
+    init_sqlite_runtime,
+    list_tasks as list_persisted_tasks,
+    load_task,
+    save_ledger_index,
+    save_scbkr_confirmation,
+    save_task,
+)
 from core.storage.storage_plan import build_storage_commit_plan
 from core.storage.storage_request import build_storage_request
 from core.workflow.generation_flow import build_generation_messages, assert_task_can_generate
 from core.workflow.generation_result import build_generation_result
 from core.workflow.review_flow import apply_review_decision
 
-app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.12.0-mvp")
+app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.13.0-p13a")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],
@@ -49,15 +61,49 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+
+def _ensure_runtime() -> None:
+    init_sqlite_runtime()
+
+
+def _append_task_event(
+    event_type: str,
+    task: dict[str, Any],
+    status_before: str | None = None,
+    status_after: str | None = None,
+    payload: dict[str, Any] | None = None,
+    message: str | None = None,
+    layer: str = "SYSTEM",
+) -> dict[str, Any]:
+    _ensure_runtime()
+    event = build_ledger_event(
+        event_type,
+        task_id=task.get("task_id"),
+        trace_id=task.get("trace_id"),
+        ledger_id=task.get("ledger_id"),
+        status_before=status_before,
+        status_after=status_after,
+        layer=layer,
+        payload=payload or {},
+        message=message,
+    )
+    append_result = append_ledger_event(event)
+    save_ledger_index(event, line_number=append_result["line_number"], jsonl_path=append_result["ledger_path"])
+    return event
+
 def _public_model_settings() -> dict[str, Any]:
     return {**MODEL_SETTINGS, "api_key": mask_api_key(MODEL_SETTINGS.get("api_key", ""))}
 
 
 def _get_task(task_id: str) -> dict[str, Any]:
     task = TASKS.get(task_id)
-    if task is None:
+    if task is not None:
+        return task
+    persisted_task = load_task(task_id)
+    if persisted_task is None:
         raise HTTPException(status_code=404, detail="task not found")
-    return task
+    TASKS[task_id] = persisted_task
+    return persisted_task
 
 
 def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, str]]) -> dict[str, Any]:
@@ -82,7 +128,8 @@ def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, s
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "service": "scbkr-api", "runtime": "MVP in-memory runtime"}
+    _ensure_runtime()
+    return {"ok": True, "service": "scbkr-api", "runtime": "P13-A SQLite + JSONL runtime"}
 
 
 @app.get("/api/system/status")
@@ -90,7 +137,7 @@ def system_status() -> dict[str, Any]:
     return {
         "api_url": "http://localhost:8787",
         "web_url": "http://localhost:5500",
-        "runtime": "MVP in-memory runtime",
+        "runtime": "P13-A SQLite + JSONL runtime",
         "physical_write_performed": False,
         "tasks_count": len(TASKS),
         "model": _public_model_settings(),
@@ -170,17 +217,29 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
         "review_passed": False,
         "storage_confirmed": False,
         "physical_write_performed": False,
-        "runtime": "MVP in-memory runtime",
+        "runtime": "P13-A SQLite + JSONL runtime",
     }
     TASKS[task_id] = task
+    save_task(task)
+    _append_task_event("task_created", task, status_after=task["status"], payload={"task_type": task["task_type"]})
     return task
 
 
 @app.post("/api/tasks/{task_id}/scbkr")
 def create_scbkr(task_id: str) -> dict[str, Any]:
     task = _get_task(task_id)
+    status_before = task.get("status")
     task["scbkr"] = create_scbkr_draft(task["raw_input"], task["task_type"])
     task["status"] = "waiting_user_confirm"
+    save_task(task)
+    save_scbkr_confirmation(task_id, task["scbkr"])
+    _append_task_event(
+        "scbkr_draft_created",
+        task,
+        status_before=status_before,
+        status_after=task["status"],
+        payload={"confirmation_status": task["scbkr"].get("confirmation_status")},
+    )
     return task
 
 
@@ -196,15 +255,27 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
         confirmation_statement=payload.get("confirmation_statement"),
         signature=payload.get("signature"),
     )
+    status_before = task.get("status")
     if all_dimensions_confirmed(task["scbkr"]):
         task["confirmed"] = True
         task["status"] = "confirmed"
+    save_task(task)
+    save_scbkr_confirmation(task_id, task["scbkr"])
+    _append_task_event(
+        "scbkr_confirmed",
+        task,
+        status_before=status_before,
+        status_after=task["status"],
+        payload={"confirmed_snapshot_hash": task["scbkr"].get("confirmed_snapshot_hash")},
+    )
     return task
 
 
 @app.post("/api/tasks/{task_id}/generate")
 def generate(task_id: str) -> dict[str, Any]:
     task = _get_task(task_id)
+    status_before = task.get("status")
+    _append_task_event("generation_requested", task, status_before=status_before, status_after=status_before)
     try:
         assert_permission_allowed(PERMISSIONS, "model_generate")
         if MODEL_SETTINGS["mode"] in ("external", "hybrid"):
@@ -213,10 +284,20 @@ def generate(task_id: str) -> dict[str, Any]:
         response = _post_openai_compatible(MODEL_SETTINGS, build_generation_messages(task, task["scbkr"]))
         task["generation_result"] = build_generation_result(task, task["scbkr"], parse_chat_completion_response(response))
         task["status"] = "waiting_review"
+        save_task(task)
+        _append_task_event(
+            "generation_completed",
+            task,
+            status_before=status_before,
+            status_after=task["status"],
+            payload={"generation_status": task["generation_result"].get("status")},
+        )
         return task
     except PermissionError as exc:
+        _append_task_event("generation_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error": str(exc)})
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
+        _append_task_event("generation_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error": str(exc)})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -232,9 +313,15 @@ def review(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             rollback_layer=payload.get("rollback_layer"),
             reviewer_signature=payload.get("reviewer_signature"),
         )
+        status_before = task.get("status")
         task["review_result"] = result
         task["review_passed"] = result.get("review_passed", False)
         task["status"] = result["status"]
+        save_task(task)
+        event_type = "rollback_requested" if result.get("status") == "rollback_requested" else result.get("status", "review_failed")
+        if event_type not in ("review_passed", "review_failed", "rollback_requested"):
+            event_type = "review_failed"
+        _append_task_event(event_type, task, status_before=status_before, status_after=task["status"], payload={"review_passed": task["review_passed"]})
         return task
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -263,6 +350,7 @@ def memory_rule_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         if task.get("review_result", {}).get("status") != "review_failed":
             raise ValueError("task review_result.status must be review_failed before memory rule draft")
+        status_before = task.get("status")
         task["memory_rule_draft"] = build_memory_rule_draft(
             task,
             task["review_result"],
@@ -273,6 +361,8 @@ def memory_rule_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             payload["forbidden_patterns"],
             payload["required_behavior"],
         )
+        save_task(task)
+        _append_task_event("memory_rule_draft_created", task, status_before=status_before, status_after=task.get("status"), payload={"rule_status": task["memory_rule_draft"].get("rule_status")})
         return task
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -284,8 +374,11 @@ def memory_rule_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 def storage_request(task_id: str) -> dict[str, Any]:
     task = _get_task(task_id)
     try:
+        status_before = task.get("status")
         task["storage_request"] = build_storage_request(task, task.get("review_result", {}))
         task["status"] = "waiting_storage_confirm"
+        save_task(task)
+        _append_task_event("storage_request_created", task, status_before=status_before, status_after=task["status"], payload={"candidate_targets": task["storage_request"].get("candidate_targets", [])})
         return task
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -297,15 +390,28 @@ def storage_request(task_id: str) -> dict[str, Any]:
 def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
     try:
+        status_before = task.get("status")
         task["storage_plan"] = build_storage_commit_plan(
             task,
             task.get("review_result", {}),
             payload.get("selected_targets", ["vector_db"]),
             storage_signature=payload.get("storage_signature"),
-            storage_notes=payload.get("storage_notes", "P12 MVP plan only; no physical write."),
+            storage_notes=payload.get("storage_notes", "P13-A MVP plan only; no physical write."),
         )
         task["storage_confirmed"] = True
+        task["physical_write_performed"] = False
         task["status"] = "completed"
+        save_task(task)
+        _append_task_event(
+            "storage_plan_confirmed",
+            task,
+            status_before=status_before,
+            status_after=task["status"],
+            payload={
+                "selected_targets": task["storage_plan"].get("selected_targets", []),
+                "physical_write_performed": False,
+            },
+        )
         return task
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -322,7 +428,17 @@ def memory_rule_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]
         reviewer_signature = payload.get("reviewer_signature", "")
         if not str(reviewer_signature).strip():
             raise ValueError("reviewer_signature is required")
+        status_before = task.get("status")
         task["memory_rule_confirmed_plan"] = confirm_memory_rule_plan(task["memory_rule_draft"], reviewer_signature)
+        task["physical_write_performed"] = False
+        save_task(task)
+        _append_task_event(
+            "memory_rule_confirmed_plan_created",
+            task,
+            status_before=status_before,
+            status_after=task.get("status"),
+            payload={"physical_write_performed": False},
+        )
         return task
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -330,6 +446,22 @@ def memory_rule_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/tasks")
+def list_tasks() -> dict[str, Any]:
+    return {"tasks": list_persisted_tasks(limit=50)}
+
+
 @app.get("/api/tasks/{task_id}")
 def get_task(task_id: str) -> dict[str, Any]:
     return _get_task(task_id)
+
+
+@app.get("/api/tasks/{task_id}/ledger")
+def get_task_ledger_events(task_id: str) -> dict[str, Any]:
+    _get_task(task_id)
+    return {"task_id": task_id, "events": read_ledger_events(task_id=task_id), "index": get_task_ledger(task_id)}
+
+
+@app.post("/api/ledger/rebuild-index")
+def rebuild_ledger_index() -> dict[str, Any]:
+    return rebuild_ledger_index_from_jsonl()

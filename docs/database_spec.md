@@ -46,3 +46,28 @@ P10 不寫 `data/vector_db`。
 P10 不寫 ledger。
 P10 只建立 permission settings schema 與 pure permission checker。
 SQLite / ChromaDB runtime 仍未實作。
+
+## P13-A SQLite + JSONL persistence runtime
+
+P13-A adds a minimal local persistence runtime:
+
+- SQLite path: `data/scbkr.sqlite3`.
+- JSONL ledger path: `data/ledger/audit-log.jsonl`.
+- JSONL is the original append-only replay ledger.
+- SQLite stores mutable task state and query indexes; it is not the immutable source of truth.
+- `ledger_index` can be rebuilt from JSONL by `POST /api/ledger/rebuild-index`.
+
+SQLite tables:
+
+- `tasks`: current task state and full `task_json` snapshot.
+- `scbkr_confirmations`: latest SCBKR confirmation JSON and `confirmed_snapshot_hash`.
+- `ledger_index`: event metadata, JSONL line number, and payload hash for lookup.
+- `system_events`: minimal system event table reserved for local runtime notes.
+
+P13-A intentionally does not write four-library physical stores:
+
+- No `data/vector_db`.
+- No `data/corpus`.
+- No `data/logic`.
+- No `data/memory`.
+- No ChromaDB, embeddings, or memory physical write.
