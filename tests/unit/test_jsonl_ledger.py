@@ -2,7 +2,7 @@ import json
 
 from core.ledger.ledger_event import build_ledger_event
 from core.ledger.jsonl_ledger import append_ledger_event, read_ledger_events, rebuild_ledger_index_from_jsonl
-from core.storage.sqlite_runtime import get_task_ledger, init_sqlite_runtime
+from core.storage.sqlite_runtime import get_task_ledger, init_sqlite_runtime, save_ledger_index
 
 
 def test_append_ledger_event_creates_jsonl(tmp_path):
@@ -67,3 +67,36 @@ def test_rebuild_ledger_index_from_jsonl_does_not_modify_jsonl(tmp_path):
     assert result["jsonl_unchanged"] is True
     assert result["indexed_count"] == 1
     assert get_task_ledger("task-1", sqlite_path=sqlite_path)[0]["event_id"] == event["event_id"]
+
+
+def test_rebuild_ledger_index_clears_dirty_rows_and_preserves_jsonl_bytes(tmp_path):
+    sqlite_path = tmp_path / "runtime.sqlite3"
+    ledger_path = tmp_path / "audit-log.jsonl"
+    event = build_ledger_event("task_created", task_id="task-clean")
+    dirty_event = build_ledger_event("task_created", task_id="task-dirty")
+    append_ledger_event(event, ledger_path=ledger_path)
+    before = ledger_path.read_bytes()
+    save_ledger_index(dirty_event, line_number=99, sqlite_path=sqlite_path, jsonl_path=str(ledger_path))
+
+    result = rebuild_ledger_index_from_jsonl(sqlite_path=sqlite_path, ledger_path=ledger_path)
+
+    assert ledger_path.read_bytes() == before
+    assert result["jsonl_unchanged"] is True
+    assert result["indexed_count"] == 1
+    assert get_task_ledger("task-dirty", sqlite_path=sqlite_path) == []
+    assert get_task_ledger("task-clean", sqlite_path=sqlite_path)[0]["event_id"] == event["event_id"]
+
+
+def test_rebuild_ledger_index_missing_jsonl_returns_zero_without_crashing(tmp_path):
+    sqlite_path = tmp_path / "runtime.sqlite3"
+    ledger_path = tmp_path / "missing-audit-log.jsonl"
+    dirty_event = build_ledger_event("task_created", task_id="task-dirty")
+    save_ledger_index(dirty_event, line_number=99, sqlite_path=sqlite_path, jsonl_path=str(ledger_path))
+
+    result = rebuild_ledger_index_from_jsonl(sqlite_path=sqlite_path, ledger_path=ledger_path)
+
+    assert result["indexed_count"] == 0
+    assert result["skipped_count"] == 0
+    assert result["jsonl_unchanged"] is True
+    assert not ledger_path.exists()
+    assert get_task_ledger("task-dirty", sqlite_path=sqlite_path) == []

@@ -582,3 +582,9 @@ P13-A now supports local workflow persistence without expanding into P13-B/P13-C
 - SQLite `ledger_index` stores query/index metadata and can be rebuilt from the JSONL ledger.
 - `GET /api/tasks/{task_id}` can recover a task from SQLite after the in-memory `TASKS` cache is cleared.
 - P13-A does not add ChromaDB, embeddings, memory physical write, corpus/logic/vector physical write, desktop packaging, Electron, Tauri, or installers.
+
+### P13-A data-safety fixes
+
+- New API tasks use collision-resistant IDs in the form `task-{UTC timestamp}-{uuid8}` so a process restart cannot reset the in-memory counter and overwrite an older persisted task.
+- Tests and local isolated runs can set `SCBKR_DATA_DIR` to redirect SQLite and JSONL runtime files away from the default `data/` directory; the integration tests use this to avoid deleting production-like repo data.
+- `ledger_index` rebuild first clears the SQLite index, then recreates it from JSONL so dirty rows not present in the append-only ledger are removed.

@@ -5,10 +5,11 @@ asked. It does not open SQLite, write JSONL, call models, or create any P13-B/C
 storage directories.
 """
 
+import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = REPO_ROOT / "data"
+DATA_DIR = Path(os.environ.get("SCBKR_DATA_DIR", REPO_ROOT / "data")).expanduser()
 SQLITE_PATH = DATA_DIR / "scbkr.sqlite3"
 LEDGER_DIR = DATA_DIR / "ledger"
 LEDGER_JSONL_PATH = LEDGER_DIR / "audit-log.jsonl"

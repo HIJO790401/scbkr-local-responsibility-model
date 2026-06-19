@@ -13,15 +13,24 @@ import sqlite3
 from typing import Any
 
 from core.ledger.ledger_event import build_ledger_event
-from core.storage.runtime_paths import SQLITE_PATH, ensure_runtime_dirs
+from core.storage.runtime_paths import REPO_ROOT, SQLITE_PATH, ensure_runtime_dirs
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _connect(sqlite_path: str | Path = SQLITE_PATH) -> sqlite3.Connection:
-    ensure_runtime_dirs()
+def _runtime_sqlite_path(sqlite_path: str | Path | None = None) -> Path:
+    if sqlite_path is not None:
+        return Path(sqlite_path)
+    import os
+
+    return Path(os.environ.get("SCBKR_DATA_DIR", REPO_ROOT / "data")).expanduser() / "scbkr.sqlite3"
+
+
+def _connect(sqlite_path: str | Path | None = None) -> sqlite3.Connection:
+    sqlite_path = _runtime_sqlite_path(sqlite_path)
+    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(sqlite_path)
     conn.row_factory = sqlite3.Row
     return conn
@@ -35,7 +44,7 @@ def _bool_int(value: Any) -> int:
     return 1 if value is True else 0
 
 
-def init_sqlite_runtime(sqlite_path: str | Path = SQLITE_PATH) -> dict[str, Any]:
+def init_sqlite_runtime(sqlite_path: str | Path | None = None) -> dict[str, Any]:
     """Create P13-A SQLite tables when missing."""
     with _connect(sqlite_path) as conn:
         conn.executescript(
@@ -90,10 +99,10 @@ def init_sqlite_runtime(sqlite_path: str | Path = SQLITE_PATH) -> dict[str, Any]
             );
             """
         )
-    return {"sqlite_path": str(sqlite_path), "status": "ready"}
+    return {"sqlite_path": str(_runtime_sqlite_path(sqlite_path)), "status": "ready"}
 
 
-def save_task(task: dict[str, Any], sqlite_path: str | Path = SQLITE_PATH) -> dict[str, Any]:
+def save_task(task: dict[str, Any], sqlite_path: str | Path | None = None) -> dict[str, Any]:
     """Upsert a task state snapshot into SQLite."""
     init_sqlite_runtime(sqlite_path)
     now = _now()
@@ -139,10 +148,10 @@ def save_task(task: dict[str, Any], sqlite_path: str | Path = SQLITE_PATH) -> di
                 now,
             ),
         )
-    return {"task_id": task["task_id"], "sqlite_path": str(sqlite_path), "updated_at": now}
+    return {"task_id": task["task_id"], "sqlite_path": str(_runtime_sqlite_path(sqlite_path)), "updated_at": now}
 
 
-def load_task(task_id: str, sqlite_path: str | Path = SQLITE_PATH) -> dict[str, Any] | None:
+def load_task(task_id: str, sqlite_path: str | Path | None = None) -> dict[str, Any] | None:
     init_sqlite_runtime(sqlite_path)
     with _connect(sqlite_path) as conn:
         row = conn.execute("SELECT task_json FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
@@ -151,7 +160,7 @@ def load_task(task_id: str, sqlite_path: str | Path = SQLITE_PATH) -> dict[str, 
     return json.loads(row["task_json"])
 
 
-def list_tasks(sqlite_path: str | Path = SQLITE_PATH, limit: int = 50) -> list[dict[str, Any]]:
+def list_tasks(sqlite_path: str | Path | None = None, limit: int = 50) -> list[dict[str, Any]]:
     init_sqlite_runtime(sqlite_path)
     with _connect(sqlite_path) as conn:
         rows = conn.execute(
@@ -165,7 +174,7 @@ def list_tasks(sqlite_path: str | Path = SQLITE_PATH, limit: int = 50) -> list[d
     return [json.loads(row["task_json"]) for row in rows]
 
 
-def save_scbkr_confirmation(task_id: str, scbkr: dict[str, Any], sqlite_path: str | Path = SQLITE_PATH) -> dict[str, Any]:
+def save_scbkr_confirmation(task_id: str, scbkr: dict[str, Any], sqlite_path: str | Path | None = None) -> dict[str, Any]:
     init_sqlite_runtime(sqlite_path)
     now = _now()
     with _connect(sqlite_path) as conn:
@@ -196,7 +205,7 @@ def save_scbkr_confirmation(task_id: str, scbkr: dict[str, Any], sqlite_path: st
 def save_ledger_index(
     event: dict[str, Any],
     line_number: int | None = None,
-    sqlite_path: str | Path = SQLITE_PATH,
+    sqlite_path: str | Path | None = None,
     jsonl_path: str | None = None,
 ) -> dict[str, Any]:
     init_sqlite_runtime(sqlite_path)
@@ -238,7 +247,16 @@ def save_ledger_index(
     return {"event_id": event["event_id"], "line_number": line_number}
 
 
-def get_task_ledger(task_id: str, sqlite_path: str | Path = SQLITE_PATH) -> list[dict[str, Any]]:
+
+def clear_ledger_index(sqlite_path: str | Path | None = None) -> dict[str, Any]:
+    """Clear the rebuildable SQLite ledger index without touching JSONL."""
+    init_sqlite_runtime(sqlite_path)
+    with _connect(sqlite_path) as conn:
+        deleted_count = conn.execute("SELECT COUNT(*) FROM ledger_index").fetchone()[0]
+        conn.execute("DELETE FROM ledger_index")
+    return {"sqlite_path": str(_runtime_sqlite_path(sqlite_path)), "deleted_count": deleted_count}
+
+def get_task_ledger(task_id: str, sqlite_path: str | Path | None = None) -> list[dict[str, Any]]:
     init_sqlite_runtime(sqlite_path)
     with _connect(sqlite_path) as conn:
         rows = conn.execute(
@@ -256,7 +274,7 @@ def save_system_event(
     event_type: str,
     message: str,
     payload: dict[str, Any] | None = None,
-    sqlite_path: str | Path = SQLITE_PATH,
+    sqlite_path: str | Path | None = None,
 ) -> dict[str, Any]:
     init_sqlite_runtime(sqlite_path)
     event = build_ledger_event(event_type, message=message, payload=payload or {})
