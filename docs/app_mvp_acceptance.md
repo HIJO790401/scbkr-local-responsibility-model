@@ -7,6 +7,10 @@
 - 前端可顯示 API health、任務輸入、SCBKR 五維、模型狀態、權限狀態。
 - 任務流程遵守：create → scbkr → confirm → generate → review → storage-request → storage-confirm。
 - 生成必須受 confirmed、P5 model settings、P10 permission lock 限制。
+- 一鍵 confirm 後 S/C/B/K/R 必須全部 confirmed，但 UI 不新增五個確認頁，避免大重構。
+- 每一維都必須有 `snapshot_hash`。
+- 每一維都必須有 `confirmed_snapshot`。
+- generate 前必須檢查 S/C/B/K/R 五維全 confirmed。
 - 入庫只產生 plan，`physical_write_performed = false`。
 - review_failed 只產生 `failure_report_draft`；不得自動建立 `memory_rule_draft`。
 - `memory_rule_draft` 只能由 `POST /api/tasks/{task_id}/memory-rule-draft` 在使用者明確提供判詞、規則與 scope 後建立。
