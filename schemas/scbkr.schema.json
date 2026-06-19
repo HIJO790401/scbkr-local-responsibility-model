@@ -18,51 +18,128 @@
     "pending_questions"
   ],
   "properties": {
-    "S": { "$ref": "#/$defs/S" },
-    "C": { "$ref": "#/$defs/C" },
-    "B": { "$ref": "#/$defs/B" },
-    "K": { "$ref": "#/$defs/K" },
-    "R": { "$ref": "#/$defs/R" },
+    "S": {
+      "$ref": "#/$defs/S"
+    },
+    "C": {
+      "$ref": "#/$defs/C"
+    },
+    "B": {
+      "$ref": "#/$defs/B"
+    },
+    "K": {
+      "$ref": "#/$defs/K"
+    },
+    "R": {
+      "$ref": "#/$defs/R"
+    },
     "source_mode": {
       "type": "string",
-      "enum": ["new", "retrieved", "hybrid", "manual"],
+      "enum": [
+        "new",
+        "retrieved",
+        "hybrid",
+        "manual"
+      ],
       "default": "new"
     },
     "similarity_route": {
       "type": "string",
-      "enum": ["A", "B", "C", "none"],
+      "enum": [
+        "A",
+        "B",
+        "C",
+        "none"
+      ],
       "default": "none"
     },
     "source_case_ids": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "default": []
     },
     "confirmation_status": {
       "type": "string",
-      "enum": ["draft", "waiting_user_confirm", "confirmed", "modified"],
+      "enum": [
+        "draft",
+        "waiting_user_confirm",
+        "confirmed",
+        "modified"
+      ],
       "default": "draft"
     },
     "pending_questions": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "default": []
+    },
+    "confirmed": {
+      "type": "boolean"
+    },
+    "confirmed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "confirmed_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "confirmation_statement": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signature": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "confirmed_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "confirmed_snapshot_hash": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "$defs": {
     "stringArray": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "default": []
     },
     "questionArray": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "default": []
     },
     "confirmationStatus": {
       "type": "string",
-      "enum": ["draft", "waiting_user_confirm", "confirmed", "modified"],
+      "enum": [
+        "draft",
+        "waiting_user_confirm",
+        "confirmed",
+        "modified"
+      ],
       "default": "draft"
     },
     "S": {
@@ -80,15 +157,89 @@
         "pending_questions"
       ],
       "properties": {
-        "task_name": { "type": "string" },
-        "user_instruction": { "type": "string" },
-        "task_subject": { "type": "string" },
-        "input_content": { "type": "string" },
-        "output_format": { "type": "string" },
-        "interface_type": { "type": "string" },
-        "platform_type": { "type": "string" },
-        "confirmation_status": { "$ref": "#/$defs/confirmationStatus" },
-        "pending_questions": { "$ref": "#/$defs/questionArray" }
+        "task_name": {
+          "type": "string"
+        },
+        "user_instruction": {
+          "type": "string"
+        },
+        "task_subject": {
+          "type": "string"
+        },
+        "input_content": {
+          "type": "string"
+        },
+        "output_format": {
+          "type": "string"
+        },
+        "interface_type": {
+          "type": "string"
+        },
+        "platform_type": {
+          "type": "string"
+        },
+        "confirmation_status": {
+          "$ref": "#/$defs/confirmationStatus"
+        },
+        "pending_questions": {
+          "$ref": "#/$defs/questionArray"
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "confirmed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmation_statement": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshot_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed_snapshot": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dimension_key",
+                "payload"
+              ],
+              "properties": {
+                "dimension_key": {
+                  "const": "S"
+                },
+                "payload": {
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        }
       }
     },
     "C": {
@@ -106,15 +257,89 @@
         "pending_questions"
       ],
       "properties": {
-        "flow_steps": { "$ref": "#/$defs/stringArray" },
-        "execution_order": { "$ref": "#/$defs/stringArray" },
-        "data_flow": { "$ref": "#/$defs/stringArray" },
-        "event_flow": { "$ref": "#/$defs/stringArray" },
-        "core_logic": { "$ref": "#/$defs/stringArray" },
-        "dependencies": { "$ref": "#/$defs/stringArray" },
-        "failure_impact": { "$ref": "#/$defs/stringArray" },
-        "test_conditions": { "$ref": "#/$defs/stringArray" },
-        "pending_questions": { "$ref": "#/$defs/questionArray" }
+        "flow_steps": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "execution_order": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "data_flow": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "event_flow": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "core_logic": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "dependencies": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "failure_impact": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "test_conditions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "pending_questions": {
+          "$ref": "#/$defs/questionArray"
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "confirmed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmation_statement": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshot_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed_snapshot": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dimension_key",
+                "payload"
+              ],
+              "properties": {
+                "dimension_key": {
+                  "const": "C"
+                },
+                "payload": {
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        }
       }
     },
     "B": {
@@ -133,20 +358,97 @@
         "pending_questions"
       ],
       "properties": {
-        "data_read_scope": { "$ref": "#/$defs/stringArray" },
-        "data_write_scope": { "$ref": "#/$defs/stringArray" },
-        "local_scope": { "$ref": "#/$defs/stringArray" },
-        "external_scope": { "$ref": "#/$defs/stringArray" },
+        "data_read_scope": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "data_write_scope": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "local_scope": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "external_scope": {
+          "$ref": "#/$defs/stringArray"
+        },
         "permission_switches": {
           "type": "object",
-          "additionalProperties": { "type": "boolean" },
+          "additionalProperties": {
+            "type": "boolean"
+          },
           "default": {}
         },
-        "stop_conditions": { "$ref": "#/$defs/stringArray" },
-        "error_handling": { "$ref": "#/$defs/stringArray" },
-        "sensitive_operation_confirm": { "type": "boolean", "default": false },
-        "storage_conditions": { "$ref": "#/$defs/stringArray" },
-        "pending_questions": { "$ref": "#/$defs/questionArray" }
+        "stop_conditions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "error_handling": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "sensitive_operation_confirm": {
+          "type": "boolean",
+          "default": false
+        },
+        "storage_conditions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "pending_questions": {
+          "$ref": "#/$defs/questionArray"
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "confirmed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmation_statement": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshot_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed_snapshot": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dimension_key",
+                "payload"
+              ],
+              "properties": {
+                "dimension_key": {
+                  "const": "B"
+                },
+                "payload": {
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        }
       }
     },
     "K": {
@@ -164,19 +466,91 @@
         "pending_questions"
       ],
       "properties": {
-        "references": { "$ref": "#/$defs/stringArray" },
-        "technical_docs": { "$ref": "#/$defs/stringArray" },
-        "corpus_sources": { "$ref": "#/$defs/stringArray" },
+        "references": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "technical_docs": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "corpus_sources": {
+          "$ref": "#/$defs/stringArray"
+        },
         "style_settings": {
           "type": "object",
           "additionalProperties": true,
           "default": {}
         },
-        "framework_choice": { "type": "string" },
-        "model_basis": { "$ref": "#/$defs/stringArray" },
-        "history_cases": { "$ref": "#/$defs/stringArray" },
-        "source_credibility": { "$ref": "#/$defs/stringArray" },
-        "pending_questions": { "$ref": "#/$defs/questionArray" }
+        "framework_choice": {
+          "type": "string"
+        },
+        "model_basis": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "history_cases": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "source_credibility": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "pending_questions": {
+          "$ref": "#/$defs/questionArray"
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "confirmed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmation_statement": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshot_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed_snapshot": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dimension_key",
+                "payload"
+              ],
+              "properties": {
+                "dimension_key": {
+                  "const": "K"
+                },
+                "payload": {
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        }
       }
     },
     "R": {
@@ -194,15 +568,90 @@
         "pending_questions"
       ],
       "properties": {
-        "expected_outputs": { "$ref": "#/$defs/stringArray" },
-        "acceptance_criteria": { "$ref": "#/$defs/stringArray" },
-        "ledger_requirements": { "$ref": "#/$defs/stringArray" },
-        "storage_options": { "$ref": "#/$defs/stringArray" },
-        "signature_status": { "type": "string" },
-        "review_status": { "type": "string" },
-        "replay_requirements": { "$ref": "#/$defs/stringArray" },
-        "memory_rule_generated": { "type": "boolean", "default": false },
-        "pending_questions": { "$ref": "#/$defs/questionArray" }
+        "expected_outputs": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "acceptance_criteria": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "ledger_requirements": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "storage_options": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "signature_status": {
+          "type": "string"
+        },
+        "review_status": {
+          "type": "string"
+        },
+        "replay_requirements": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "memory_rule_generated": {
+          "type": "boolean",
+          "default": false
+        },
+        "pending_questions": {
+          "$ref": "#/$defs/questionArray"
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "confirmed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmation_statement": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshot_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed_snapshot": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "dimension_key",
+                "payload"
+              ],
+              "properties": {
+                "dimension_key": {
+                  "const": "R"
+                },
+                "payload": {
+                  "type": "object"
+                }
+              }
+            }
+          ]
+        }
       }
     }
   }
