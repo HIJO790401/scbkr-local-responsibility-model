@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from core.storage.runtime_paths import LEDGER_JSONL_PATH, SQLITE_PATH, ensure_runtime_dirs
+from core.storage.runtime_paths import LEDGER_JSONL_PATH, REPO_ROOT, SQLITE_PATH, ensure_runtime_dirs
 
 REQUIRED_P13_EVENT_FIELDS = (
     "event_id",
@@ -77,7 +77,15 @@ def _line_count(path: Path) -> int:
         return sum(1 for _ in ledger_file)
 
 
-def append_ledger_event(event: dict[str, Any] | str | Path, ledger_path: str | Path = LEDGER_JSONL_PATH) -> dict[str, Any] | None:
+def _runtime_ledger_path(ledger_path: str | Path | None = None) -> Path:
+    if ledger_path is not None:
+        return Path(ledger_path)
+    import os
+
+    return Path(os.environ.get("SCBKR_DATA_DIR", REPO_ROOT / "data")).expanduser() / "ledger" / "audit-log.jsonl"
+
+
+def append_ledger_event(event: dict[str, Any] | str | Path, ledger_path: str | Path | None = None) -> dict[str, Any] | None:
     """Append one event to JSONL without truncating existing ledger content.
 
     P13-A signature is append_ledger_event(event, ledger_path=...). For backward
@@ -90,10 +98,9 @@ def append_ledger_event(event: dict[str, Any] | str | Path, ledger_path: str | P
         event_obj = ledger_path
         validate_ledger_event_shape(event_obj)
     else:
-        path = Path(ledger_path)
+        path = _runtime_ledger_path(ledger_path)
         event_obj = event
         _validate_p13_event(event_obj)
-        ensure_runtime_dirs()
 
     path.parent.mkdir(parents=True, exist_ok=True)
     line_number = _line_count(path) + 1
@@ -111,17 +118,17 @@ def append_ledger_event(event: dict[str, Any] | str | Path, ledger_path: str | P
     }
 
 
-def read_ledger_events(task_id: str | Path | None = None, ledger_path: str | Path = LEDGER_JSONL_PATH) -> list[dict[str, Any]]:
+def read_ledger_events(task_id: str | Path | None = None, ledger_path: str | Path | None = None) -> list[dict[str, Any]]:
     """Read JSONL ledger events, optionally filtering by task_id.
 
     For P2 compatibility, read_ledger_events(path) is treated as path-only when
     the first argument points to a JSONL path and ledger_path is left as default.
     """
-    if isinstance(task_id, (str, Path)) and Path(task_id).suffix == ".jsonl" and ledger_path == LEDGER_JSONL_PATH:
+    if isinstance(task_id, (str, Path)) and Path(task_id).suffix == ".jsonl" and ledger_path is None:
         path = Path(task_id)
         task_filter = None
     else:
-        path = Path(ledger_path)
+        path = _runtime_ledger_path(ledger_path)
         task_filter = task_id
 
     if not path.exists():
@@ -150,30 +157,32 @@ def read_ledger_events(task_id: str | Path | None = None, ledger_path: str | Pat
 
 
 def rebuild_ledger_index_from_jsonl(
-    sqlite_path: str | Path = SQLITE_PATH,
-    ledger_path: str | Path = LEDGER_JSONL_PATH,
+    sqlite_path: str | Path | None = None,
+    ledger_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Rebuild the SQLite ledger_index from JSONL without modifying JSONL."""
-    from core.storage.sqlite_runtime import init_sqlite_runtime, save_ledger_index
+    from core.storage.sqlite_runtime import clear_ledger_index, init_sqlite_runtime, save_ledger_index
 
-    path = Path(ledger_path)
+    path = _runtime_ledger_path(ledger_path)
     before_bytes = path.read_bytes() if path.exists() else b""
     init_sqlite_runtime(sqlite_path)
+    clear_ledger_index(sqlite_path)
 
     indexed_count = 0
     skipped_count = 0
-    with path.open("r", encoding="utf-8") if path.exists() else open(Path("/dev/null"), "r", encoding="utf-8") as ledger_file:
-        for line_number, line in enumerate(ledger_file, start=1):
-            stripped_line = line.strip()
-            if not stripped_line:
-                continue
-            try:
-                event = json.loads(stripped_line)
-                _validate_p13_event(event)
-                save_ledger_index(event, line_number=line_number, sqlite_path=sqlite_path, jsonl_path=str(path))
-                indexed_count += 1
-            except Exception:
-                skipped_count += 1
+    if path.exists():
+        with path.open("r", encoding="utf-8") as ledger_file:
+            for line_number, line in enumerate(ledger_file, start=1):
+                stripped_line = line.strip()
+                if not stripped_line:
+                    continue
+                try:
+                    event = json.loads(stripped_line)
+                    _validate_p13_event(event)
+                    save_ledger_index(event, line_number=line_number, sqlite_path=sqlite_path, jsonl_path=str(path))
+                    indexed_count += 1
+                except Exception:
+                    skipped_count += 1
 
     after_bytes = path.read_bytes() if path.exists() else b""
     return {

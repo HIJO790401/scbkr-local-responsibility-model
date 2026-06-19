@@ -5,6 +5,7 @@ import pytest
 
 from core.ledger.ledger_event import build_ledger_event
 from core.storage.sqlite_runtime import (
+    clear_ledger_index,
     get_task_ledger,
     init_sqlite_runtime,
     list_tasks,
@@ -106,3 +107,14 @@ def test_sqlite_error_does_not_delete_jsonl(tmp_path):
         init_sqlite_runtime(sqlite_path)
 
     assert ledger_path.read_text(encoding="utf-8") == '{"event_id":"evt-existing"}\n'
+
+
+def test_clear_ledger_index_removes_only_index_rows(tmp_path):
+    sqlite_path = tmp_path / "runtime.sqlite3"
+    event = build_ledger_event("task_created", task_id="task-1")
+    save_ledger_index(event, line_number=1, sqlite_path=sqlite_path, jsonl_path="audit-log.jsonl")
+
+    result = clear_ledger_index(sqlite_path=sqlite_path)
+
+    assert result["deleted_count"] == 1
+    assert get_task_ledger("task-1", sqlite_path=sqlite_path) == []

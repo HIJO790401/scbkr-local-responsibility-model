@@ -7,6 +7,7 @@ is initialized here.
 
 from datetime import UTC, datetime
 from itertools import count
+from uuid import uuid4
 from typing import Any
 from urllib.error import URLError, HTTPError
 from urllib.request import Request, urlopen
@@ -64,6 +65,16 @@ def _now() -> str:
 
 def _ensure_runtime() -> None:
     init_sqlite_runtime()
+
+
+def _generate_task_id() -> str:
+    """Generate a persisted-task ID that does not collide with memory or SQLite."""
+    for _ in range(5):
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        task_id = f"task-{timestamp}-{uuid4().hex[:8]}"
+        if task_id not in TASKS and load_task(task_id) is None:
+            return task_id
+    raise RuntimeError("failed to generate unique task_id after 5 attempts")
 
 
 def _append_task_event(
@@ -204,7 +215,7 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
     raw_input = str(payload.get("raw_input", "")).strip()
     if not raw_input:
         raise HTTPException(status_code=400, detail="raw_input is required")
-    task_id = f"task-{next(_TASK_COUNTER):04d}"
+    task_id = _generate_task_id()
     task = {
         "task_id": task_id,
         "trace_id": f"trace-{task_id}",

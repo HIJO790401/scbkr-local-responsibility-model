@@ -71,3 +71,10 @@ P13-A intentionally does not write four-library physical stores:
 - No `data/logic`.
 - No `data/memory`.
 - No ChromaDB, embeddings, or memory physical write.
+
+## P13-A safety boundaries
+
+- JSONL is the only replay source for ledger recovery. The SQLite `ledger_index` table is a rebuildable index, not the authoritative ledger.
+- `ledger_index` may be cleared and rebuilt from JSONL; rebuild must not rewrite, truncate, delete, or otherwise mutate the JSONL ledger file.
+- SQLite task upsert remains valid for saving mutable task snapshots, but new task creation must use collision-resistant task IDs so an API restart cannot overwrite an existing persisted task through ID collision.
+- `SCBKR_DATA_DIR` can redirect runtime data for tests or local isolation. When it is unset, runtime data continues to default to the repository `data/` directory.
