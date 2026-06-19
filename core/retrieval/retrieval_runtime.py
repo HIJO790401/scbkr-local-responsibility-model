@@ -1,6 +1,7 @@
 """P13-C retrieval orchestration; retrieval is advisory and never confirms or generates."""
 from __future__ import annotations
 import json
+import re
 from pathlib import Path
 from typing import Any
 from core.ledger.ledger_event import build_ledger_event
@@ -11,6 +12,14 @@ from core.retrieval.case_builder import build_success_case_from_storage_item, bu
 from core.retrieval.similarity import rank_candidates, route_from_score, score_similarity
 from core.retrieval.vector_store import upsert_retrieval_case, query_similar_cases, get_vector_store_status, is_chromadb_available
 from core.retrieval.retrieval_result import new_query_id, now, query_hash
+
+_SENSITIVE_ERROR_RE = re.compile(r"(?i)(api[_-]?key|token|secret|authorization|access[_-]?token|refresh[_-]?token)(\s*[=:]\s*)?[^\s,;]*")
+
+
+def _sanitize_error_message(exc: BaseException) -> str:
+    message = str(exc) or exc.__class__.__name__
+    return _SENSITIVE_ERROR_RE.sub("[REDACTED]", message)[:500]
+
 
 def _data_dir():
     import os
@@ -46,7 +55,7 @@ def index_task_storage_cases(task: dict[str, Any]) -> dict[str, Any]:
         _append('retrieval_case_index_completed', task=task, payload={'candidate_count':len(cases),'backend':get_vector_store_status()['backend']})
         return {'indexed_cases': cases, 'backend_status': get_vector_store_status(), 'vector_db_created': (_data_dir()/ 'vector_db').exists()}
     except Exception as exc:
-        _append('retrieval_case_index_failed', task=task, payload={'error_message':str(exc)})
+        _append('retrieval_case_index_failed', task=task, payload={'error_message':_sanitize_error_message(exc)})
         raise
 
 def index_memory_rule_case(memory_rule: dict[str, Any]) -> dict[str, Any]:
@@ -58,42 +67,109 @@ def index_memory_rule_case(memory_rule: dict[str, Any]) -> dict[str, Any]:
         _append('retrieval_case_index_completed', task_id=memory_rule.get('task_id'), payload={'case_id':case['case_id'],'case_type':case['case_type'],'backend':case.get('backend')})
         return case
     except Exception as exc:
-        _append('retrieval_case_index_failed', task_id=memory_rule.get('task_id'), payload={'error_message':str(exc)})
+        _append('retrieval_case_index_failed', task_id=memory_rule.get('task_id'), payload={'error_message':_sanitize_error_message(exc)})
         raise
 
 
-def _ensure_candidate_scores(query_text: str, candidates: list[dict[str, Any]], backend: str) -> list[dict[str, Any]]:
-    scored = []
-    for candidate in candidates:
-        candidate = dict(candidate)
-        text = candidate.get('retrieval_text') or ''
-        if 'score' not in candidate or 'route' not in candidate:
-            if not text:
+def _candidate_retrieval_text(candidate: dict[str, Any]) -> str:
+    return str(candidate.get('retrieval_text') or candidate.get('case_json', {}).get('retrieval_text') or '')
+
+
+def _normalize_candidate(query_text: str, candidate: dict[str, Any], source_backend: str) -> dict[str, Any] | None:
+    normalized = dict(candidate)
+    retrieval_text = _candidate_retrieval_text(normalized).strip()
+    case_id = normalized.get('case_id')
+    if not case_id or not retrieval_text:
+        return None
+    score = score_similarity(query_text, retrieval_text)
+    normalized.update(
+        {
+            'case_id': case_id,
+            'retrieval_text': retrieval_text,
+            'score': score,
+            'route': route_from_score(score),
+            'backend': source_backend,
+            'similarity_source': 'deterministic_rescore',
+        }
+    )
+    return normalized
+
+
+def _metadata_completeness(candidate: dict[str, Any]) -> int:
+    return sum(1 for value in candidate.values() if value not in (None, '', [], {}))
+
+
+def _merge_candidate_sources(query_text: str, chroma_candidates: list[dict[str, Any]], sqlite_candidates: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
+    """Merge optional ChromaDB candidates with durable SQLite fallback candidates.
+
+    Every candidate is deterministically rescored from its retrieval_text so the
+    optional vector index can accelerate discovery but cannot decide final route.
+    """
+    merged_by_case_id: dict[str, dict[str, Any]] = {}
+    for source_backend, source_candidates in (
+        ('chromadb', chroma_candidates or []),
+        ('deterministic_fallback', sqlite_candidates or []),
+    ):
+        for candidate in source_candidates:
+            normalized = _normalize_candidate(query_text, candidate, source_backend)
+            if normalized is None:
                 continue
-            candidate['score'] = score_similarity(query_text, text)
-            candidate['route'] = route_from_score(candidate['score'])
-        candidate.setdefault('backend', backend)
-        candidate.setdefault('similarity_source', 'deterministic_rescore' if backend == 'chromadb' else 'deterministic_fallback')
-        scored.append(candidate)
-    scored.sort(key=lambda item: (-float(item.get('score', 0.0)), item.get('case_id', '')))
-    return scored
+            existing = merged_by_case_id.get(normalized['case_id'])
+            if existing is None:
+                merged_by_case_id[normalized['case_id']] = normalized
+                continue
+            if (normalized['score'], _metadata_completeness(normalized)) > (existing['score'], _metadata_completeness(existing)):
+                merged_by_case_id[normalized['case_id']] = normalized
+    merged = list(merged_by_case_id.values())
+    merged.sort(key=lambda item: (-float(item.get('score', 0.0)), item.get('case_id', '')))
+    return merged[:max(0, int(top_k or 3))]
+
+
+def _query_sqlite_fallback(query_text: str, case_type: str | None, top_k: int) -> list[dict[str, Any]]:
+    # Pull a wider durable set from SQLite so fallback-only exact matches can
+    # compete with ChromaDB candidates before final truncation.
+    return rank_candidates(query_text, list_retrieval_cases(task_id=None, case_type=case_type, limit=200), top_k=200)
+
 
 def query_retrieval_cases(query_text: str, task_id: str | None=None, top_k: int=3, case_type: str | None=None) -> dict[str, Any]:
     if not str(query_text or '').strip(): raise ValueError('query_text is required')
     _append('retrieval_query_requested', task_id=task_id, payload={'top_k':top_k,'case_type':case_type})
     try:
-        backend='deterministic_fallback'; candidates=[]
+        chroma_candidates: list[dict[str, Any]] = []
+        chroma_available = False
+        chroma_failed = False
         if is_chromadb_available():
-            res=query_similar_cases(query_text, top_k, case_type); backend=res.get('backend', backend); candidates=_ensure_candidate_scores(query_text, res.get('candidates', []), backend)
-        if not candidates or backend!='chromadb':
-            if backend!='chromadb': _append('retrieval_fallback_used', task_id=task_id, payload={'backend':'deterministic_fallback'})
-            candidates=_ensure_candidate_scores(query_text, rank_candidates(query_text, list_retrieval_cases(task_id=None, case_type=case_type, limit=200), top_k), 'deterministic_fallback'); backend='deterministic_fallback'
+            chroma_available = True
+            try:
+                res=query_similar_cases(query_text, top_k, case_type)
+                if res.get('backend') == 'chromadb':
+                    chroma_candidates = res.get('candidates', []) or []
+                elif res.get('status') in ('unavailable', 'fallback'):
+                    chroma_failed = True
+                    _append('retrieval_backend_unavailable', task_id=task_id, payload={'backend':res.get('backend', 'deterministic_fallback'), 'error_message':res.get('error_message', 'chromadb unavailable')})
+                    _append('retrieval_fallback_used', task_id=task_id, payload={'backend':'deterministic_fallback'})
+            except Exception as exc:
+                chroma_failed = True
+                _append('retrieval_backend_unavailable', task_id=task_id, payload={'backend':'chromadb','error_message':_sanitize_error_message(exc)})
+                _append('retrieval_fallback_used', task_id=task_id, payload={'backend':'deterministic_fallback'})
+        else:
+            _append('retrieval_fallback_used', task_id=task_id, payload={'backend':'deterministic_fallback'})
+
+        sqlite_candidates = _query_sqlite_fallback(query_text, case_type, top_k)
+        candidates = _merge_candidate_sources(query_text, chroma_candidates, sqlite_candidates, top_k)
+
+        if chroma_available and not chroma_failed:
+            backend = 'merged_chromadb_sqlite' if sqlite_candidates else 'chromadb+sqlite_fallback_checked'
+            _append('retrieval_fallback_merged', task_id=task_id, payload={'backend':backend,'chroma_candidate_count':len(chroma_candidates),'sqlite_candidate_count':len(sqlite_candidates),'merged_candidate_count':len(candidates)})
+        else:
+            backend = 'deterministic_fallback'
+
         route=route_from_score(candidates[0].get('score',0.0)) if candidates else 'none'
         result={'query_id':new_query_id(),'task_id':task_id,'query_text_hash':query_hash(query_text),'backend':backend,'route':route,'top_k':top_k,'candidates':candidates,'requires_user_confirmation':True,'auto_confirmed':False,'generation_allowed':False,'created_at':now()}
         save_retrieval_query_result(result); _append('retrieval_query_completed', task_id=task_id, payload={'backend':backend,'route':route,'top_k':top_k,'candidate_count':len(candidates)})
         return result
     except Exception as exc:
-        _append('retrieval_query_failed', task_id=task_id, payload={'error_message':str(exc)})
+        _append('retrieval_query_failed', task_id=task_id, payload={'error_message':_sanitize_error_message(exc)})
         raise
 
 def retrieve_for_task(task: dict[str, Any], top_k: int=3) -> dict[str, Any]:

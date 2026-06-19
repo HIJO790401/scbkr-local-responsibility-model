@@ -276,3 +276,11 @@ Retrieval is auxiliary replay, not decision authority. It can show similar prior
 ### P13-C retrieval index fallback flow
 
 The retrieval index flow is: `storage_committed` → build `retrieval_case` → save SQLite `retrieval_case` → try optional ChromaDB upsert → if ChromaDB fails, append fallback/unavailable events → retrieval remains available through deterministic fallback. ChromaDB failure is not a core task failure and must not block SQLite retrieval indexing.
+
+### P13-C retrieval query workflow
+
+Retrieval query flow:
+
+`query → try ChromaDB → always query SQLite fallback → merge candidates → deterministic rescore → route A/B/C/none → advisory result only → user still confirms`
+
+ChromaDB can accelerate candidate discovery, but SQLite fallback remains the stable navigation source. Retrieval does not become a decision gate: confirmation remains with the user, generation remains behind the P12 gate, and storage remains behind the P13-B gate.
