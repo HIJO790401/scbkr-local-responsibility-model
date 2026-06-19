@@ -264,3 +264,11 @@ Failure-to-memory-rule path:
 `review_failed → failure_report_draft → memory_rule_draft → memory_rule_confirmed_plan(signature) → physical write signed memory rule`.
 
 P13-B writes successful reviewed content to corpus/logic/exports only after the storage signature. It writes memory only for signed rules; it does not store raw failed output or unsigned memory drafts as memory.
+
+## P13-C retrieval workflow
+
+`storage_committed` → retrieval index → retrieval query → similar cases returned → user still confirms SCBKR → generation only after the normal P12 gate.
+
+`memory_rule_confirmed` → memory rule physical write → retrieval index signed rule → future tasks may retrieve it as a rule hint → user still confirms.
+
+Retrieval is auxiliary replay, not decision authority. It can show similar prior responsibility chains, acceptance criteria, and signed rules, but it cannot confirm SCBKR, generate output, or commit storage for the user.
