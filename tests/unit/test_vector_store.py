@@ -60,3 +60,64 @@ def test_vector_case_builder_matches_closed_schema_shape():
     assert "raw_input" not in case
     assert "created_at" not in case
     assert set(case["similarity_metadata"]) == set(schema["properties"]["similarity_metadata"]["required"])
+
+
+def _sample_case():
+    return {"case_id": "case-secret", "retrieval_text": "local retrieval API", "case_type": "success_case", "task_id": "task-1"}
+
+
+def _assert_fallback_unavailable(result):
+    assert result["backend"] == "deterministic_fallback"
+    assert result["status"] == "unavailable"
+    assert result["embedding_status"] == "fallback_keyword"
+
+
+def test_upsert_falls_back_when_persistent_client_raises(monkeypatch):
+    monkeypatch.setattr(vector_store, "is_chromadb_available", lambda: True)
+    monkeypatch.setattr(vector_store, "ensure_vector_store", lambda: (_ for _ in ()).throw(RuntimeError("PersistentClient failed api_key=abc token=def secret=ghi")))
+
+    result = vector_store.upsert_retrieval_case(_sample_case())
+
+    _assert_fallback_unavailable(result)
+    assert "api_key" not in result["error_message"].lower()
+    assert "token" not in result["error_message"].lower()
+    assert "secret" not in result["error_message"].lower()
+
+
+def test_upsert_falls_back_when_collection_creation_raises(monkeypatch):
+    class FakeClient:
+        def get_or_create_collection(self, *args, **kwargs):
+            raise RuntimeError("collection creation failed")
+
+    monkeypatch.setattr(vector_store, "is_chromadb_available", lambda: True)
+    monkeypatch.setattr(vector_store, "ensure_vector_store", lambda: FakeClient())
+
+    result = vector_store.upsert_retrieval_case(_sample_case())
+
+    _assert_fallback_unavailable(result)
+
+
+def test_upsert_falls_back_when_collection_upsert_raises(monkeypatch):
+    class FakeCollection:
+        def upsert(self, **kwargs):
+            raise RuntimeError("upsert failed")
+
+    class FakeClient:
+        def get_or_create_collection(self, *args, **kwargs):
+            return FakeCollection()
+
+    monkeypatch.setattr(vector_store, "is_chromadb_available", lambda: True)
+    monkeypatch.setattr(vector_store, "ensure_vector_store", lambda: FakeClient())
+
+    result = vector_store.upsert_retrieval_case(_sample_case())
+
+    _assert_fallback_unavailable(result)
+
+
+def test_upsert_falls_back_when_vector_db_path_unwritable(monkeypatch):
+    monkeypatch.setattr(vector_store, "is_chromadb_available", lambda: True)
+    monkeypatch.setattr(vector_store, "ensure_vector_store", lambda: (_ for _ in ()).throw(PermissionError("vector_db path is not writable")))
+
+    result = vector_store.upsert_retrieval_case(_sample_case())
+
+    _assert_fallback_unavailable(result)

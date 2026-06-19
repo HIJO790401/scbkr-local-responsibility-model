@@ -28,18 +28,17 @@ def build_vector_case_from_storage_plan(task, scbkr, storage_commit_plan, case_i
         "task_id": task.get("task_id"),
         "task_type": task.get("task_type"),
         "task_summary": task.get("task_name") or task.get("raw_input"),
-        "raw_input": task.get("raw_input"),
-        "scbkr_summary": {k: scbkr.get(k, "") for k in ("S","C","B","K","R")},
-        "review_passed": storage_plan.get("review_passed", True),
-        "storage_confirmed": storage_plan.get("storage_confirmed", True),
-        "storage_plan_status": storage_plan.get("storage_plan_status", "storage_confirmed_plan"),
-        "source": storage_plan.get("source", "storage_commit_plan"),
-        "embedding_status": storage_plan.get("embedding_status", "not_created"),
-        "physical_write_performed": storage_plan.get("physical_write_performed", False),
-        "created_at": datetime.now(UTC).isoformat(),
+        "scbkr_summary": {k: _dimension_summary(scbkr, k) for k in ("S","C","B","K","R")},
+        "review_passed": storage_commit_plan.get("review_passed", True),
+        "storage_confirmed": storage_commit_plan.get("storage_confirmed", True),
+        "storage_plan_status": storage_commit_plan.get("storage_plan_status", "storage_confirmed_plan"),
+        "source": storage_commit_plan.get("source", "storage_commit_plan"),
+        "similarity_metadata": storage_commit_plan.get("similarity_metadata", {"created_from": "storage_commit_plan", "route_hint": "deterministic_fallback", "tags": []}),
+        "embedding_status": storage_commit_plan.get("embedding_status", "not_created"),
+        "physical_write_performed": storage_commit_plan.get("physical_write_performed", False),
     }
 
-def assert_case_eligible_for_retrieval(case: dict[str, Any]) -> bool:
+def assert_case_eligible_for_retrieval(case: dict) -> bool:
     if case.get("review_passed") is not True: raise ValueError("review_passed case required")
     if case.get("storage_confirmed") is not True: raise ValueError("storage_confirmed case required")
     if case.get("storage_plan_status") != "storage_confirmed_plan": raise ValueError("confirmed storage plan required")

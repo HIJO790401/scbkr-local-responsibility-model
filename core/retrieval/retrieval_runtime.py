@@ -35,10 +35,14 @@ def index_task_storage_cases(task: dict[str, Any]) -> dict[str, Any]:
             if item.get('target') not in ('corpus','logic','exports'): continue
             payload=item.get('payload') or _read_payload(item['relative_path'])
             case=build_success_case_from_storage_item(task,item,payload)
+            case.update({'backend': 'deterministic_fallback', 'embedding_status': 'fallback_keyword'})
+            save_retrieval_case(case)
             status=upsert_retrieval_case(case)
-            case.update({'backend': status.get('backend'), 'embedding_status': status.get('embedding_status')})
+            case.update({'backend': status.get('backend', 'deterministic_fallback'), 'embedding_status': status.get('embedding_status', 'fallback_keyword')})
             save_retrieval_case(case); cases.append(case)
-            if status.get('status')=='unavailable': _append('retrieval_fallback_used', task=task, payload={'case_id':case['case_id'],'backend':status.get('backend')})
+            if status.get('status')=='unavailable':
+                _append('retrieval_backend_unavailable', task=task, payload={'case_id':case['case_id'],'backend':status.get('backend'),'error_message':status.get('error_message')})
+                _append('retrieval_fallback_used', task=task, payload={'case_id':case['case_id'],'backend':'deterministic_fallback'})
         _append('retrieval_case_index_completed', task=task, payload={'candidate_count':len(cases),'backend':get_vector_store_status()['backend']})
         return {'indexed_cases': cases, 'backend_status': get_vector_store_status(), 'vector_db_created': (_data_dir()/ 'vector_db').exists()}
     except Exception as exc:

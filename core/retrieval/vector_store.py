@@ -6,6 +6,7 @@ or external embedding API is needed.
 """
 from __future__ import annotations
 import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,24 @@ from core.retrieval.similarity import build_token_fingerprint, rank_candidates, 
 EMBEDDING_STATUS_FALLBACK = "fallback_keyword"
 EMBEDDING_STATUS_NOT_CREATED = "not_created"
 EMBEDDING_STATUS_LOCAL_CHROMADB = "local_chromadb_no_external_embedding"
+
+_SENSITIVE_ERROR_RE = re.compile(r"(?i)(api[_-]?key|token|secret|authorization|access[_-]?token|refresh[_-]?token)(\s*[=:]\s*)?[^\s,;]*")
+
+
+def _sanitize_error_message(exc: BaseException) -> str:
+    message = str(exc) or exc.__class__.__name__
+    return _SENSITIVE_ERROR_RE.sub("[REDACTED]", message)[:500]
+
+
+def _fallback_unavailable(exc: BaseException | None = None) -> dict[str, Any]:
+    result = {
+        "backend": "deterministic_fallback",
+        "status": "unavailable",
+        "embedding_status": EMBEDDING_STATUS_FALLBACK,
+    }
+    if exc is not None:
+        result["error_message"] = _sanitize_error_message(exc)
+    return result
 
 
 def _vector_dir() -> Path:
@@ -72,18 +91,21 @@ def _collection(client: Any):
 
 
 def upsert_retrieval_case(case: dict[str, Any]) -> dict[str, Any]:
-    client = ensure_vector_store()
-    if client is None:
-        return {"backend": "deterministic_fallback", "status": "unavailable", "embedding_status": EMBEDDING_STATUS_FALLBACK}
-    collection = _collection(client)
-    retrieval_text = case.get("retrieval_text", "")
-    collection.upsert(
-        ids=[case["case_id"]],
-        documents=[retrieval_text],
-        embeddings=[_local_fingerprint_embedding(retrieval_text)],
-        metadatas=[{"case_type": case.get("case_type", ""), "task_id": case.get("task_id", "")}],
-    )
-    return {"backend": "chromadb", "status": "upserted", "embedding_status": EMBEDDING_STATUS_LOCAL_CHROMADB}
+    try:
+        client = ensure_vector_store()
+        if client is None:
+            return _fallback_unavailable()
+        collection = _collection(client)
+        retrieval_text = case.get("retrieval_text", "")
+        collection.upsert(
+            ids=[case["case_id"]],
+            documents=[retrieval_text],
+            embeddings=[_local_fingerprint_embedding(retrieval_text)],
+            metadatas=[{"case_type": case.get("case_type", ""), "task_id": case.get("task_id", "")}],
+        )
+        return {"backend": "chromadb", "status": "upserted", "embedding_status": EMBEDDING_STATUS_LOCAL_CHROMADB}
+    except Exception as exc:
+        return _fallback_unavailable(exc)
 
 
 def _score_chromadb_candidates(query_text: str, ids: list[str], docs: list[str], top_k: int) -> list[dict[str, Any]]:
@@ -125,4 +147,4 @@ def query_similar_cases(query_text: str, top_k: int = 3, case_type: str | None =
         for candidate in candidates:
             candidate.setdefault("backend", "deterministic_fallback")
             candidate.setdefault("similarity_source", "deterministic_fallback")
-        return {"backend": "deterministic_fallback", "status": "fallback", "error_message": str(exc), "candidates": candidates, "embedding_status": EMBEDDING_STATUS_FALLBACK}
+        return {"backend": "deterministic_fallback", "status": "fallback", "error_message": _sanitize_error_message(exc), "candidates": candidates, "embedding_status": EMBEDDING_STATUS_FALLBACK}

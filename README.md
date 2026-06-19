@@ -607,3 +607,7 @@ P13-C now supports advisory retrieval over legally committed local content witho
 - Retrieval results are hints only: `requires_user_confirmation=true`, `auto_confirmed=false`, and `generation_allowed=false`.
 - ChromaDB is optional. If local ChromaDB is unavailable, SCBKR uses deterministic pure-Python fallback retrieval or reports the backend as unavailable without crashing.
 - P13-C does not include desktop packaging. Tauri, Electron, installers, and sandbox mode remain P14 scope.
+
+### P13-C retrieval stability
+
+P13-C treats deterministic fallback retrieval as SCBKR's minimum guaranteed retrieval path. ChromaDB is only an optional local acceleration backend: when it is available it may assist indexing and query, but if it is unavailable, corrupted, unwritable, or fails during collection creation or upsert, SCBKR falls back without interrupting the task. SQLite `retrieval_cases` remain the durable fallback query source, and retrieval results remain advisory only: they do not auto-confirm, auto-generate, or auto-commit storage.
