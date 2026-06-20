@@ -69,3 +69,23 @@ GitHub Actions uploads an artifact named `scbkr-windows-desktop-preview`. The ar
 ### P14-C boundaries
 
 P14-C does not add macOS/Linux production packages, code signing, auto-update, cloud accounts, bundled models, model downloads, or external embedding APIs. SCBKR gates remain authoritative: desktop launch does not bypass confirmation, sealed snapshot validation, `model_generate`, review, signed storage, memory rules, or advisory retrieval.
+
+### P14-C Windows sidecar staging rule
+
+Tauri v2 sidecars are staged under the `src-tauri` project using the configured
+external binary base name plus the Windows target triple. The preview config uses
+`bundle.externalBin = ["sidecar/scbkr-api"]`, so the Windows preview build must
+stage this file before `tauri build`:
+
+```text
+apps/desktop/src-tauri/sidecar/scbkr-api-x86_64-pc-windows-msvc.exe
+```
+
+The canonical PyInstaller output remains
+`dist/windows-preview/sidecar/scbkr-api.exe`. The Windows sidecar build script
+copies that executable to the Tauri staging path and fails if the target-triple
+file is not present. The desktop preview packaging script also checks the staged
+sidecar before building Tauri, then copies the Tauri desktop executable or NSIS
+installer into `dist/scbkr-windows-desktop-preview/desktop/`. If Tauri reports a
+successful build but no desktop executable or NSIS installer exists, preview
+packaging fails.

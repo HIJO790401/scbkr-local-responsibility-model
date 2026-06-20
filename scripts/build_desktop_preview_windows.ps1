@@ -15,6 +15,11 @@ npm --prefix apps/web run build
 
 powershell -ExecutionPolicy Bypass -File scripts/build_api_sidecar_windows.ps1
 
+$StagedSidecar = "apps\desktop\src-tauri\sidecar\scbkr-api-x86_64-pc-windows-msvc.exe"
+if (-not (Test-Path $StagedSidecar)) {
+  throw "Tauri sidecar staging file missing before build: $StagedSidecar"
+}
+
 npm --prefix apps/desktop install --package-lock=false
 npm --prefix apps/desktop run check:skeleton
 
@@ -25,18 +30,33 @@ try {
   Pop-Location
 }
 
+$NsisInstallers = @(Get-ChildItem -Path "apps\desktop\src-tauri\target\release\bundle\nsis" -Filter "*.exe" -File -ErrorAction SilentlyContinue)
+$DesktopExecutables = @(Get-ChildItem -Path "apps\desktop\src-tauri\target\release" -Filter "*.exe" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "scbkr-api-x86_64-pc-windows-msvc.exe" })
+$DesktopOutputs = @($NsisInstallers + $DesktopExecutables)
+if ($DesktopOutputs.Count -eq 0) {
+  throw "Tauri build completed but no desktop executable or NSIS installer was found under apps\desktop\src-tauri\target\release."
+}
+
 New-Item -ItemType Directory -Force -Path $PreviewDir | Out-Null
+$DesktopDir = Join-Path $PreviewDir "desktop"
+New-Item -ItemType Directory -Force -Path $DesktopDir | Out-Null
+foreach ($Output in $DesktopOutputs) {
+  Copy-Item -Force $Output.FullName $DesktopDir
+}
 Copy-Item -Force "dist\windows-preview\sidecar\scbkr-api.exe" $PreviewDir
+Copy-Item -Force $StagedSidecar $PreviewDir
 Copy-Item -Recurse -Force "apps\web\dist" (Join-Path $PreviewDir "web-dist")
 @"
 SCBKR Windows Desktop Preview Package
 
-Unsigned preview package. Not a final production installer.
+Unsigned preview package. Not a production installer and not a formal production release.
 No model is bundled.
 No API key is bundled.
-Sandbox Mode works without a model or API key.
-LM Studio local endpoint can be connected manually at http://127.0.0.1:1234/v1.
+Sandbox Mode can run without a model or API key.
+LM Studio local endpoint is optional and can be connected manually at http://127.0.0.1:1234/v1.
 User data is stored under the desktop app data directory via SCBKR_DATA_DIR.
+No code signing is performed.
+No auto-update is enabled.
 "@ | Set-Content -Encoding UTF8 (Join-Path $PreviewDir "README_PREVIEW.md")
 "0.14.0-p14c-preview" | Set-Content -Encoding UTF8 (Join-Path $PreviewDir "VERSION")
 

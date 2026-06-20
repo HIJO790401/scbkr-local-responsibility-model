@@ -58,3 +58,61 @@ def test_desktop_runtime_doc_p14c_terms():
     text = Path("docs/desktop_runtime.md").read_text(encoding="utf-8")
     for phrase in ("P14-C Windows Preview Package", "Sidecar runtime", "%APPDATA%/SCBKR/data", "scbkr-windows-desktop-preview", "no code signing", "no auto-update"):
         assert phrase in text
+
+
+def test_tauri_sidecar_external_bin_and_windows_staging_contract():
+    import json
+    config = json.loads(Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+    assert config["bundle"]["externalBin"] == ["sidecar/scbkr-api"]
+
+    api_script = Path("scripts/build_api_sidecar_windows.ps1").read_text(encoding="utf-8")
+    desktop_script = Path("scripts/build_desktop_preview_windows.ps1").read_text(encoding="utf-8")
+    expected = "apps\\desktop\\src-tauri\\sidecar"
+    expected_name = "scbkr-api-x86_64-pc-windows-msvc.exe"
+    assert expected in api_script
+    assert "scbkr-api-$TargetTriple.exe" in api_script
+    assert "x86_64-pc-windows-msvc" in api_script
+    assert expected_name in desktop_script
+    assert "Tauri sidecar staging file missing before build" in desktop_script
+
+
+def test_pyinstaller_sidecar_uses_explicit_app_import_and_hidden_imports():
+    sidecar_text = Path("apps/api/sidecar.py").read_text(encoding="utf-8")
+    assert "from apps.api.main import app" in sidecar_text
+    assert 'uvicorn.run(app, host=host, port=port, log_level="info")' in sidecar_text
+    assert 'uvicorn.run("apps.api.main:app"' not in sidecar_text
+
+    spec_text = Path("scripts/scbkr_api_sidecar.spec").read_text(encoding="utf-8")
+    for module in (
+        "apps.api.main",
+        "apps.api.sidecar",
+        "core",
+        "core.generation",
+        "core.model_gateway",
+        "core.permissions",
+        "core.ledger",
+        "core.review_rules",
+        "core.scbkr",
+        "core.storage",
+        "core.workflow",
+        "core.retrieval",
+    ):
+        assert f'"{module}"' in spec_text
+    assert "collect_submodules" in spec_text
+
+
+def test_desktop_preview_script_copies_tauri_outputs_and_fails_if_missing():
+    text = Path("scripts/build_desktop_preview_windows.ps1").read_text(encoding="utf-8")
+    assert "bundle\\nsis" in text
+    assert "target\\release" in text
+    assert "Tauri build completed but no desktop executable or NSIS installer" in text
+    assert "Copy-Item -Force $Output.FullName $DesktopDir" in text
+    assert "README_PREVIEW.md" in text
+    assert "VERSION" in text
+
+
+def test_windows_preview_workflow_uploads_complete_staged_artifact():
+    workflow = Path(".github/workflows/windows-desktop-preview.yml").read_text(encoding="utf-8")
+    assert "Stage preview artifact" in workflow
+    assert "scripts/build_desktop_preview_windows.ps1" in workflow
+    assert "path: dist/scbkr-windows-desktop-preview" in workflow

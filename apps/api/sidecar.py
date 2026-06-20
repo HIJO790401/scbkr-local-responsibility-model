@@ -46,8 +46,9 @@ def main() -> int:
     assert_port_available(host, port)
 
     import uvicorn
+    from apps.api.main import app
 
-    uvicorn.run("apps.api.main:app", host=host, port=port, log_level="info")
+    uvicorn.run(app, host=host, port=port, log_level="info")
     return 0
 
 
