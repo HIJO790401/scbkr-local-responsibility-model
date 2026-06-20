@@ -300,3 +300,11 @@ Desktop Shell Workflow:
 `Desktop shell → Web UI → FastAPI → SCBKR gates → Sandbox or local model → Review → Storage request → Signed storage confirm → Retrieval advisory result`
 
 Desktop launch is only a carrier. It does not replace user confirmation, sealed snapshot validation, `model_generate` permission, review, signed storage, or retrieval advisory locks.
+
+### P14-C Desktop Preview Workflow
+
+Desktop Preview Workflow:
+
+`Desktop App → start FastAPI sidecar → Web UI → SCBKR gates → sandbox or local model → review → signed storage → retrieval advisory result`
+
+The preview app may launch the local API sidecar and load packaged Web UI assets, but it must not perform model calls, generation, review, storage, memory writes, or retrieval confirmation by itself.

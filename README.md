@@ -631,3 +631,7 @@ P13-C SQLite fallback retrieval scores durable fallback cases before final `top_
 ### P14-B Desktop Launch Skeleton
 
 P14-B introduces a desktop-shell skeleton and desktop runtime contract. It does not build production installers. P14-C remains responsible for Windows installer, GitHub Actions release, packaged sidecar runtime, code signing, and production desktop distribution.
+
+### P14-C Windows Desktop Preview Package
+
+P14-C introduces the Windows desktop preview packaging path for an unsigned preview package. It is not a final production installer. No model is bundled, no API key is bundled, and Sandbox Mode works without a model or API key. LM Studio can still be connected manually through the local OpenAI-compatible endpoint at `http://127.0.0.1:1234/v1`. Preview user data is intended to live under the desktop app data directory via `SCBKR_DATA_DIR`; dev mode keeps the existing repo `data/` behavior. Future P14-D or later work may handle code signing, auto-update, and macOS/Linux packages.

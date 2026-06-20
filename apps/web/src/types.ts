@@ -42,11 +42,18 @@ export type DesktopStatus = {
   desktop_stage: string;
   desktop_shell: boolean;
   installer_built: boolean;
+  preview_package_built?: boolean;
   tauri_skeleton: boolean;
+  sidecar_supported?: boolean;
+  sidecar_running?: boolean;
   sandbox_available: boolean;
   api_status: string;
   model_mode: string;
   local_model_base_url: string;
+  sidecar_host?: string;
+  sidecar_port?: number;
+  data_dir?: string | null;
   external_call_required: boolean;
+  preview?: boolean;
   production_packaging: boolean;
 };

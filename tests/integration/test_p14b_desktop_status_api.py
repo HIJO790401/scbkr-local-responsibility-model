@@ -13,7 +13,7 @@ def test_desktop_status_api_contract_no_side_effects(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "_post_openai_compatible", fail_if_called)
 
     status = main.desktop_status()
-    assert status["desktop_stage"] == "P14-B"
+    assert status["desktop_stage"].startswith("P14-C")
     assert status["installer_built"] is False
     assert status["tauri_skeleton"] is True
     assert status["sandbox_available"] is True

@@ -49,3 +49,23 @@ Future desktop mode should use an app data directory. P14-B does not migrate P13
 - No cloud requirement.
 - No account or multi-user system.
 - No bundled or downloaded model.
+
+## P14-C Windows Preview Package
+
+P14-C adds the Windows preview packaging path. The package is an unsigned preview package, not a final production installer. It has no code signing and no auto-update.
+
+### Sidecar runtime
+
+The preview package includes a FastAPI sidecar target named `scbkr-api.exe`. The sidecar runs `apps.api.main:app` on `127.0.0.1:8787`, checks whether the port is already occupied, and must not bind to an external host. The sidecar does not call models, download models, or require API keys at startup. `/health` must be reachable after startup.
+
+### App data path
+
+The sidecar sets `SCBKR_DATA_DIR` to an app data location such as `%APPDATA%/SCBKR/data` unless the environment already provides an override. SQLite, JSONL, corpus, logic, exports, memory, and retrieval files should use that data directory in desktop preview mode. Dev mode keeps the existing repo `data/` behavior.
+
+### Preview artifact
+
+GitHub Actions uploads an artifact named `scbkr-windows-desktop-preview`. The artifact should include the desktop preview bundle, `scbkr-api.exe`, `README_PREVIEW.md`, and `VERSION` metadata. It must not include a model or API key.
+
+### P14-C boundaries
+
+P14-C does not add macOS/Linux production packages, code signing, auto-update, cloud accounts, bundled models, model downloads, or external embedding APIs. SCBKR gates remain authoritative: desktop launch does not bypass confirmation, sealed snapshot validation, `model_generate`, review, signed storage, memory rules, or advisory retrieval.

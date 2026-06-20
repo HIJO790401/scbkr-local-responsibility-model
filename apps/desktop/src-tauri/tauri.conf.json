@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SCBKR Local Responsibility Model",
-  "version": "0.14.0-p14b",
+  "version": "0.14.0-p14c-preview",
   "identifier": "com.shenyao.scbkr.local",
   "build": {
     "beforeDevCommand": "",
@@ -22,8 +22,15 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": [],
-    "createUpdaterArtifacts": false
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "createUpdaterArtifacts": false,
+    "publisher": "SCBKR Preview (unsigned)",
+    "copyright": "Unsigned preview package; not a production installer.",
+    "externalBin": [
+      "../sidecar/scbkr-api"
+    ]
   }
 }

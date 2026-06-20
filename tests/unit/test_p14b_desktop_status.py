@@ -22,7 +22,7 @@ def test_desktop_status_contract_and_no_external_call(tmp_path, monkeypatch):
     before_tasks = dict(main.TASKS)
     status = main.desktop_status()
 
-    assert status["desktop_stage"] == "P14-B"
+    assert status["desktop_stage"].startswith("P14-C")
     assert status["desktop_shell"] is True
     assert status["installer_built"] is False
     assert status["tauri_skeleton"] is True
@@ -40,7 +40,7 @@ def test_desktop_status_does_not_generate_store_or_change_retrieval(tmp_path, mo
     status = main.desktop_status()
     reloaded = main.get_task(task["task_id"])
 
-    assert status["desktop_stage"] == "P14-B"
+    assert status["desktop_stage"].startswith("P14-C")
     assert "generation_result" not in reloaded
     assert reloaded["physical_write_performed"] is False
     assert "retrieval_result" not in reloaded
@@ -63,8 +63,8 @@ def test_desktop_skeleton_files_and_tauri_config_exist():
     assert config["productName"] == "SCBKR Local Responsibility Model"
     assert config["identifier"] == "com.shenyao.scbkr.local"
     assert config["build"]["devUrl"] == "http://localhost:5500"
-    assert config["bundle"]["active"] is False
     assert config["bundle"]["createUpdaterArtifacts"] is False
+    assert "nsis" in config["bundle"].get("targets", [])
 
 
 def test_desktop_runtime_doc_contract_exists():
