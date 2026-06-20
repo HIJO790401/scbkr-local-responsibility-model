@@ -1,13 +1,8 @@
 import importlib
 import os
-import shutil
-import tempfile
 from pathlib import Path
 
 import pytest
-
-_TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="scbkr-p13b-test-"))
-os.environ["SCBKR_DATA_DIR"] = str(_TEST_DATA_DIR)
 
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
@@ -23,7 +18,7 @@ jsonl_ledger = importlib.reload(jsonl_ledger)
 from apps.api import main
 from apps.api.main import TASKS, app
 from core.ledger.jsonl_ledger import read_ledger_events
-from core.storage.runtime_paths import DATA_DIR, REPO_ROOT
+from core.storage.runtime_paths import REPO_ROOT
 from core.storage.sqlite_runtime import list_memory_rules, list_storage_items
 
 client = TestClient(app)
@@ -31,12 +26,10 @@ REPO_SQLITE_PATH = REPO_ROOT / "data" / "scbkr.sqlite3"
 REPO_LEDGER_JSONL_PATH = REPO_ROOT / "data" / "ledger" / "audit-log.jsonl"
 
 
-def setup_function():
-    os.environ["SCBKR_DATA_DIR"] = str(_TEST_DATA_DIR)
+@pytest.fixture(autouse=True)
+def isolated_runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
     TASKS.clear()
-    if DATA_DIR.exists():
-        shutil.rmtree(DATA_DIR)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
     main.MODEL_SETTINGS.update(
         {
             "mode": "local",
@@ -50,9 +43,8 @@ def setup_function():
     )
     main.PERMISSIONS.update({"model_generate": True, "external_api": False, "dangerous_operation_confirmed": False})
 
-
-def teardown_module():
-    shutil.rmtree(_TEST_DATA_DIR, ignore_errors=True)
+    yield tmp_path
+    TASKS.clear()
 
 
 def _mock_model_response(*args, **kwargs):
@@ -89,7 +81,7 @@ def create_review_failed_task(monkeypatch):
     return failed.json()
 
 
-def test_storage_confirm_with_signature_writes_corpus_logic_exports_and_indexes(monkeypatch):
+def test_storage_confirm_with_signature_writes_corpus_logic_exports_and_indexes(monkeypatch, isolated_runtime):
     repo_sqlite_existed = REPO_SQLITE_PATH.exists()
     repo_ledger_existed = REPO_LEDGER_JSONL_PATH.exists()
     task = create_review_passed_task(monkeypatch)
@@ -103,10 +95,10 @@ def test_storage_confirm_with_signature_writes_corpus_logic_exports_and_indexes(
     body = response.json()
     assert body["physical_write_performed"] is True
     assert body["status"] == "storage_committed"
-    assert (DATA_DIR / "corpus").is_dir()
-    assert (DATA_DIR / "logic").is_dir()
-    assert (DATA_DIR / "exports").is_dir()
-    assert not (DATA_DIR / "vector_db").exists()
+    assert (isolated_runtime / "corpus").is_dir()
+    assert (isolated_runtime / "logic").is_dir()
+    assert (isolated_runtime / "exports").is_dir()
+    assert not (isolated_runtime / "vector_db").exists()
     assert {item["target"] for item in list_storage_items(task_id=task["task_id"])} == {"corpus", "logic", "exports"}
     event_types = [event["event_type"] for event in read_ledger_events(task_id=task["task_id"])]
     assert "storage_physical_write_completed" in event_types
@@ -114,16 +106,16 @@ def test_storage_confirm_with_signature_writes_corpus_logic_exports_and_indexes(
     assert REPO_LEDGER_JSONL_PATH.exists() is repo_ledger_existed
 
 
-def test_storage_confirm_missing_signature_is_rejected(monkeypatch):
+def test_storage_confirm_missing_signature_is_rejected(monkeypatch, isolated_runtime):
     task = create_review_passed_task(monkeypatch)
 
     response = client.post(f"/api/tasks/{task['task_id']}/storage-confirm", json={"storage_confirmed": True, "confirmed_by": "user"})
 
     assert response.status_code == 400
-    assert not (DATA_DIR / "corpus").exists()
+    assert not (isolated_runtime / "corpus").exists()
 
 
-def test_review_failed_task_cannot_storage_commit(monkeypatch):
+def test_review_failed_task_cannot_storage_commit(monkeypatch, isolated_runtime):
     task = create_review_failed_task(monkeypatch)
 
     response = client.post(
@@ -132,10 +124,10 @@ def test_review_failed_task_cannot_storage_commit(monkeypatch):
     )
 
     assert response.status_code == 400
-    assert not (DATA_DIR / "corpus").exists()
+    assert not (isolated_runtime / "corpus").exists()
 
 
-def test_memory_rule_confirm_writes_memory_only_after_signature(monkeypatch):
+def test_memory_rule_confirm_writes_memory_only_after_signature(monkeypatch, isolated_runtime):
     task = create_review_failed_task(monkeypatch)
     draft_payload = {
         "user_failure_judgement": "user judged bad output",
@@ -147,11 +139,11 @@ def test_memory_rule_confirm_writes_memory_only_after_signature(monkeypatch):
     }
     draft = client.post(f"/api/tasks/{task['task_id']}/memory-rule-draft", json=draft_payload)
     assert draft.status_code == 200
-    assert not (DATA_DIR / "memory").exists()
+    assert not (isolated_runtime / "memory").exists()
 
     missing = client.post(f"/api/tasks/{task['task_id']}/memory-rule-confirm", json={"reviewer_signature": ""})
     assert missing.status_code == 400
-    assert not (DATA_DIR / "memory").exists()
+    assert not (isolated_runtime / "memory").exists()
 
     response = client.post(f"/api/tasks/{task['task_id']}/memory-rule-confirm", json={"reviewer_signature": "memory-sig"})
 
@@ -159,8 +151,8 @@ def test_memory_rule_confirm_writes_memory_only_after_signature(monkeypatch):
     body = response.json()
     assert body["memory_rule_stored"] is True
     assert body["memory_rule_physical_write_performed"] is True
-    assert (DATA_DIR / "memory").is_dir()
-    assert list((DATA_DIR / "memory").glob("*.json"))
+    assert (isolated_runtime / "memory").is_dir()
+    assert list((isolated_runtime / "memory").glob("*.json"))
     assert list_memory_rules(task_id=task["task_id"])
     event_types = [event["event_type"] for event in read_ledger_events(task_id=task["task_id"])]
     assert "memory_rule_physical_write_completed" in event_types

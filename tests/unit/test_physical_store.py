@@ -76,6 +76,10 @@ def test_commit_storage_items_writes_corpus_logic_exports_without_vector_db(tmp_
     items = commit_storage_items(task, task["storage_plan"])
 
     assert {item["target"] for item in items} == {"corpus", "logic", "exports"}
+    for item in items:
+        assert item["relative_path"].startswith(f"{item['target']}/")
+        assert "\\" not in item["relative_path"]
+        assert (tmp_path / item["relative_path"]).exists()
     assert (tmp_path / "corpus").is_dir()
     assert (tmp_path / "logic").is_dir()
     assert (tmp_path / "exports").is_dir()
@@ -129,6 +133,7 @@ def test_commit_memory_rule_writes_memory(tmp_path, monkeypatch):
     rule = commit_memory_rule(task)
 
     assert rule["relative_path"].startswith("memory/")
+    assert "\\" not in rule["relative_path"]
     assert (tmp_path / rule["relative_path"]).exists()
 
 

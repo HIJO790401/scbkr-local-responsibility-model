@@ -85,8 +85,13 @@ def write_json_atomic(path: str | Path, payload: Any) -> dict[str, Any]:
     return {"path": str(path), "content_hash": content_hash, "idempotent": False}
 
 
+def _relative_posix(path: Path, base: Path | None = None) -> str:
+    """Return metadata paths with stable POSIX separators on every OS."""
+    return path.relative_to(base or _active_data_dir()).as_posix()
+
+
 def _relative(path: Path) -> str:
-    return str(path.relative_to(_active_data_dir()))
+    return _relative_posix(path)
 
 
 def _sealed_scbkr(task: dict[str, Any]) -> dict[str, Any]:
