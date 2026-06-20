@@ -1,6 +1,9 @@
 param(
   [string]$Python = "python",
-  [string]$OutDir = "dist\windows-preview\sidecar"
+  [string]$OutDir = "dist\windows-preview\sidecar",
+  [string]$TauriSidecarDir = "apps\desktop\src-tauri\sidecar",
+  [string]$TargetTriple = "x86_64-pc-windows-msvc",
+  [switch]$SkipSmokeTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,15 +18,27 @@ Write-Host "Building SCBKR FastAPI sidecar preview executable..."
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 & $Python -m PyInstaller `
-  --onefile `
-  --name scbkr-api `
   --distpath $OutDir `
   --workpath "build\pyinstaller" `
-  --specpath "build\pyinstaller" `
-  apps\api\sidecar.py
+  --noconfirm `
+  scripts\scbkr_api_sidecar.spec
 
 $Exe = Join-Path $OutDir "scbkr-api.exe"
 if (-not (Test-Path $Exe)) {
   throw "Expected sidecar executable was not produced: $Exe"
 }
 Write-Host "Sidecar built: $Exe"
+
+New-Item -ItemType Directory -Force -Path $TauriSidecarDir | Out-Null
+$StagedSidecar = Join-Path $TauriSidecarDir "scbkr-api-$TargetTriple.exe"
+Copy-Item -Force $Exe $StagedSidecar
+if (-not (Test-Path $StagedSidecar)) {
+  throw "Expected Tauri sidecar staging file was not produced: $StagedSidecar"
+}
+Write-Host "Tauri sidecar staged: $StagedSidecar"
+
+if (-not $SkipSmokeTest) {
+  powershell -ExecutionPolicy Bypass -File scripts\smoke_api_sidecar_windows.ps1 -ExePath $Exe
+} else {
+  Write-Warning "Skipping sidecar runtime smoke test because -SkipSmokeTest was supplied."
+}

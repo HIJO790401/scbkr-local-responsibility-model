@@ -30,7 +30,7 @@
     "publisher": "SCBKR Preview (unsigned)",
     "copyright": "Unsigned preview package; not a production installer.",
     "externalBin": [
-      "../sidecar/scbkr-api"
+      "sidecar/scbkr-api"
     ]
   }
 }
