@@ -1,7 +1,7 @@
 """Pure model gateway settings validation and safety helpers."""
 
-MODEL_PROVIDERS = ("lm_studio", "ollama", "openai_compatible", "custom")
-MODEL_MODES = ("local", "external", "hybrid")
+MODEL_PROVIDERS = ("lm_studio", "ollama", "openai_compatible", "custom", "sandbox_mock_model")
+MODEL_MODES = ("local", "external", "hybrid", "sandbox")
 MODEL_TEST_STATUSES = ("untested", "success", "failed")
 
 DEFAULT_MODEL_SETTINGS = {
@@ -78,10 +78,12 @@ def can_enable_generate(settings, permissions):
     validate_model_settings(settings)
     if not settings["enabled"]:
         return False
-    if not settings["model_name"].strip():
+    if settings["mode"] != "sandbox" and not settings["model_name"].strip():
         return False
     if settings["last_test_status"] != "success":
         return False
     if settings["mode"] in ("external", "hybrid") and not permissions.get("external_api", False):
+        return False
+    if settings["mode"] == "sandbox" and not permissions.get("model_generate", False):
         return False
     return True

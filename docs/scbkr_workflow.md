@@ -276,3 +276,27 @@ Retrieval is auxiliary replay, not decision authority. It can show similar prior
 ### P13-C retrieval index fallback flow
 
 The retrieval index flow is: `storage_committed` → build `retrieval_case` → save SQLite `retrieval_case` → try optional ChromaDB upsert → if ChromaDB fails, append fallback/unavailable events → retrieval remains available through deterministic fallback. ChromaDB failure is not a core task failure and must not block SQLite retrieval indexing.
+
+### P13-C retrieval query workflow
+
+Retrieval query flow:
+
+`query → try ChromaDB → always query SQLite fallback → merge candidates → deterministic rescore → route A/B/C/none → advisory result only → user still confirms`
+
+ChromaDB can accelerate candidate discovery, but SQLite fallback remains the stable navigation source. Retrieval does not become a decision gate: confirmation remains with the user, generation remains behind the P12 gate, and storage remains behind the P13-B gate.
+
+### P14-A Sandbox Mode workflow
+
+Sandbox Mode flow:
+
+`task → SCBKR draft → user confirm → sealed snapshot check → sandbox mock generate → review → storage plan → storage confirm → retrieval indexing`
+
+Sandbox Mode is a workflow test key before desktop packaging. The mock model output can be fake, but the responsibility chain cannot be fake: user confirmation, P12 sealed validation, P10 `model_generate` permission, review, storage signature, and retrieval advisory locks remain active.
+
+### P14-B Desktop Shell Workflow
+
+Desktop Shell Workflow:
+
+`Desktop shell → Web UI → FastAPI → SCBKR gates → Sandbox or local model → Review → Storage request → Signed storage confirm → Retrieval advisory result`
+
+Desktop launch is only a carrier. It does not replace user confirmation, sealed snapshot validation, `model_generate` permission, review, signed storage, or retrieval advisory locks.

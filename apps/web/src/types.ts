@@ -14,6 +14,8 @@ export type ModelSettings = {
   enabled: boolean;
   last_test_status: string;
   last_test_message: string;
+  sandbox?: boolean;
+  external_call_performed?: boolean;
 };
 
 export type Permissions = Record<string, boolean | string | null>;
@@ -33,4 +35,18 @@ export type TaskSummary = {
   storage_request?: Record<string, any>;
   storage_plan?: Record<string, any>;
   memory_rule_draft?: Record<string, any>;
+};
+
+
+export type DesktopStatus = {
+  desktop_stage: string;
+  desktop_shell: boolean;
+  installer_built: boolean;
+  tauri_skeleton: boolean;
+  sandbox_available: boolean;
+  api_status: string;
+  model_mode: string;
+  local_model_base_url: string;
+  external_call_required: boolean;
+  production_packaging: boolean;
 };
