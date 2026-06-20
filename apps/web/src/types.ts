@@ -14,6 +14,8 @@ export type ModelSettings = {
   enabled: boolean;
   last_test_status: string;
   last_test_message: string;
+  sandbox?: boolean;
+  external_call_performed?: boolean;
 };
 
 export type Permissions = Record<string, boolean | string | null>;
