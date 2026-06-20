@@ -623,3 +623,7 @@ This means a non-empty ChromaDB result cannot hide SQLite fallback-only cases, i
 P14-A adds Sandbox Mode for the existing FastAPI/Web App workflow without desktop packaging. Sandbox Mode lets users test the full SCBKR responsibility-chain workflow without installing a local model or providing an API key. It uses a deterministic `sandbox_mock_model` output, marks results with `sandbox=true`, and records that no external model/API call was performed.
 
 Sandbox Mode only replaces model output. It still requires task creation, SCBKR draft creation, user confirmation, sealed snapshot validation, `model_generate` permission, user review, storage request, signed storage confirmation, and optional retrieval indexing/query. It does not auto-review, auto-store, auto-write memory, or bypass P12/P10/P13 gates.
+
+### P13-C SQLite fallback completeness
+
+P13-C SQLite fallback retrieval scores durable fallback cases before final `top_k` truncation. It must not first limit retrieval to the newest 200 rows, because older SQLite-only exact matches remain part of the durable fallback source and must be able to outrank stale optional ChromaDB candidates.

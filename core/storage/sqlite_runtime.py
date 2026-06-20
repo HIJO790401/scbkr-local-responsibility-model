@@ -465,14 +465,17 @@ def load_retrieval_case(case_id: str, sqlite_path: str | Path | None = None) -> 
     return json.loads(row["case_json"]) if row else None
 
 
-def list_retrieval_cases(task_id: str | None = None, case_type: str | None = None, sqlite_path: str | Path | None = None, limit: int = 50) -> list[dict[str, Any]]:
+def list_retrieval_cases(task_id: str | None = None, case_type: str | None = None, sqlite_path: str | Path | None = None, limit: int | None = 50) -> list[dict[str, Any]]:
     init_sqlite_runtime(sqlite_path)
     clauses=[]; params=[]
     if task_id: clauses.append("task_id = ?"); params.append(task_id)
     if case_type and case_type != "any": clauses.append("case_type = ?"); params.append(case_type)
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     with _connect(sqlite_path) as conn:
-        rows=conn.execute(f"SELECT case_json FROM retrieval_cases{where} ORDER BY created_at DESC LIMIT ?", (*params, limit)).fetchall()
+        if limit is None:
+            rows=conn.execute(f"SELECT case_json FROM retrieval_cases{where} ORDER BY created_at DESC", tuple(params)).fetchall()
+        else:
+            rows=conn.execute(f"SELECT case_json FROM retrieval_cases{where} ORDER BY created_at DESC LIMIT ?", (*params, limit)).fetchall()
     return [json.loads(row["case_json"]) for row in rows]
 
 

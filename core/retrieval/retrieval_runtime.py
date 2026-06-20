@@ -126,9 +126,10 @@ def _merge_candidate_sources(query_text: str, chroma_candidates: list[dict[str, 
 
 
 def _query_sqlite_fallback(query_text: str, case_type: str | None, top_k: int) -> list[dict[str, Any]]:
-    # Pull a wider durable set from SQLite so fallback-only exact matches can
-    # compete with ChromaDB candidates before final truncation.
-    return rank_candidates(query_text, list_retrieval_cases(task_id=None, case_type=case_type, limit=200), top_k=200)
+    # Score every durable SQLite fallback row before any top_k truncation so
+    # older exact matches cannot be hidden by newest-row limits or ChromaDB.
+    sqlite_cases = list_retrieval_cases(task_id=None, case_type=case_type, limit=None)
+    return rank_candidates(query_text, sqlite_cases, top_k=len(sqlite_cases))
 
 
 def query_retrieval_cases(query_text: str, task_id: str | None=None, top_k: int=3, case_type: str | None=None) -> dict[str, Any]:

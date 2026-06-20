@@ -105,3 +105,7 @@ JSONL remains the main append-only process ledger. P13-C appends retrieval reque
 ### Retrieval fallback source semantics
 
 SQLite `retrieval_cases` is the durable fallback source for P13-C retrieval. The optional local ChromaDB index may be incomplete because ChromaDB can be unavailable or an upsert can fail while the SQLite case is still saved. Query execution must therefore merge durable SQLite candidates with optional ChromaDB candidates and deterministically rescore the merged set before routing and truncation.
+
+### P13-C SQLite fallback ranking completeness
+
+Retrieval queries must not truncate SQLite `retrieval_cases` to the newest rows before deterministic scoring. Durable SQLite fallback rows are scored before final `top_k` truncation so older exact matches remain searchable and can outrank stale optional ChromaDB candidates.
