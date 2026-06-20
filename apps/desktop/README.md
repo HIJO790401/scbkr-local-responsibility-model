@@ -20,3 +20,20 @@ This folder provides the minimum Tauri-oriented structure and runtime contract f
 - No code signing.
 - No cloud account system.
 - No bundled large model.
+
+## P14-C Windows preview sidecar staging
+
+The Windows preview build must stage the PyInstaller sidecar before `tauri build`.
+Tauri v2 resolves the configured external binary name from `src-tauri`, then adds
+the Windows target triple. Therefore `src-tauri/tauri.conf.json` uses
+`bundle.externalBin = ["sidecar/scbkr-api"]`, and the build script must copy the
+sidecar to:
+
+```text
+apps/desktop/src-tauri/sidecar/scbkr-api-x86_64-pc-windows-msvc.exe
+```
+
+`scripts/build_api_sidecar_windows.ps1` creates both the distribution copy at
+`dist/windows-preview/sidecar/scbkr-api.exe` and the Tauri staging copy above.
+`scripts/build_desktop_preview_windows.ps1` fails before `tauri build` if the
+staged sidecar is missing, rather than producing a partial preview package.
