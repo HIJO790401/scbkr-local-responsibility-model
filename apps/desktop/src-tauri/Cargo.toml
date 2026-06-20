@@ -1,0 +1,11 @@
+[package]
+name = "scbkr_desktop_skeleton"
+version = "0.14.0-p14b"
+edition = "2021"
+publish = false
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

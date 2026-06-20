@@ -50,7 +50,7 @@ from core.workflow.review_flow import apply_review_decision
 from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
 from core.retrieval.vector_store import get_vector_store_status
 
-app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.14.0-p14a")
+app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.14.0-p14b")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],
@@ -176,6 +176,24 @@ def system_status() -> dict[str, Any]:
         "tasks_count": len(TASKS),
         "model": _public_model_settings(),
         "permissions": PERMISSIONS,
+    }
+
+
+
+
+@app.get("/api/desktop/status")
+def desktop_status() -> dict[str, Any]:
+    return {
+        "desktop_stage": "P14-B",
+        "desktop_shell": True,
+        "installer_built": False,
+        "tauri_skeleton": True,
+        "sandbox_available": True,
+        "api_status": "running",
+        "model_mode": MODEL_SETTINGS.get("mode"),
+        "local_model_base_url": MODEL_SETTINGS.get("base_url"),
+        "external_call_required": MODEL_SETTINGS.get("mode") in ("external", "hybrid"),
+        "production_packaging": False,
     }
 
 

@@ -36,3 +36,17 @@ export type TaskSummary = {
   storage_plan?: Record<string, any>;
   memory_rule_draft?: Record<string, any>;
 };
+
+
+export type DesktopStatus = {
+  desktop_stage: string;
+  desktop_shell: boolean;
+  installer_built: boolean;
+  tauri_skeleton: boolean;
+  sandbox_available: boolean;
+  api_status: string;
+  model_mode: string;
+  local_model_base_url: string;
+  external_call_required: boolean;
+  production_packaging: boolean;
+};

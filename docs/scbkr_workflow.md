@@ -292,3 +292,11 @@ Sandbox Mode flow:
 `task → SCBKR draft → user confirm → sealed snapshot check → sandbox mock generate → review → storage plan → storage confirm → retrieval indexing`
 
 Sandbox Mode is a workflow test key before desktop packaging. The mock model output can be fake, but the responsibility chain cannot be fake: user confirmation, P12 sealed validation, P10 `model_generate` permission, review, storage signature, and retrieval advisory locks remain active.
+
+### P14-B Desktop Shell Workflow
+
+Desktop Shell Workflow:
+
+`Desktop shell → Web UI → FastAPI → SCBKR gates → Sandbox or local model → Review → Storage request → Signed storage confirm → Retrieval advisory result`
+
+Desktop launch is only a carrier. It does not replace user confirmation, sealed snapshot validation, `model_generate` permission, review, signed storage, or retrieval advisory locks.

@@ -627,3 +627,7 @@ Sandbox Mode only replaces model output. It still requires task creation, SCBKR 
 ### P13-C SQLite fallback completeness
 
 P13-C SQLite fallback retrieval scores durable fallback cases before final `top_k` truncation. It must not first limit retrieval to the newest 200 rows, because older SQLite-only exact matches remain part of the durable fallback source and must be able to outrank stale optional ChromaDB candidates.
+
+### P14-B Desktop Launch Skeleton
+
+P14-B introduces a desktop-shell skeleton and desktop runtime contract. It does not build production installers. P14-C remains responsible for Windows installer, GitHub Actions release, packaged sidecar runtime, code signing, and production desktop distribution.
