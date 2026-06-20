@@ -41,3 +41,67 @@ def test_query_runtime_flags_and_empty_query(tmp_path, monkeypatch):
     assert result["requires_user_confirmation"] is True
     assert result["auto_confirmed"] is False
     assert result["generation_allowed"] is False
+
+
+def test_chromadb_low_score_does_not_hide_sqlite_exact_match(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
+    import core.retrieval.retrieval_runtime as runtime
+    save_retrieval_case({"case_id":"sqlite-exact","case_type":"success_case","task_id":"t2","retrieval_text":"unique fallback exact match phrase","retrieval_text_hash":"h2"})
+    monkeypatch.setattr(runtime, "is_chromadb_available", lambda: True)
+    monkeypatch.setattr(runtime, "query_similar_cases", lambda *a, **k: {"backend":"chromadb","status":"ok","candidates":[{"case_id":"old","retrieval_text":"unrelated old candidate","score":0.01,"route":"C"}]})
+    result = runtime.query_retrieval_cases("unique fallback exact match phrase", top_k=2)
+    assert result["candidates"][0]["case_id"] == "sqlite-exact"
+    assert result["candidates"][0]["route"] != "none"
+    assert result["backend"] in ("merged_chromadb_sqlite", "chromadb+sqlite_fallback_checked")
+
+
+def test_chromadb_candidates_still_check_sqlite_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
+    import core.retrieval.retrieval_runtime as runtime
+    save_retrieval_case({"case_id":"sqlite-used","case_type":"success_case","task_id":"t2","retrieval_text":"sqlite fallback participates","retrieval_text_hash":"h2"})
+    called = {"sqlite": False}
+    original = runtime.list_retrieval_cases
+    def wrapped_list(*args, **kwargs):
+        called["sqlite"] = True
+        return original(*args, **kwargs)
+    monkeypatch.setattr(runtime, "list_retrieval_cases", wrapped_list)
+    monkeypatch.setattr(runtime, "is_chromadb_available", lambda: True)
+    monkeypatch.setattr(runtime, "query_similar_cases", lambda *a, **k: {"backend":"chromadb","status":"ok","candidates":[{"case_id":"chroma","retrieval_text":"chroma result"}]})
+    result = runtime.query_retrieval_cases("sqlite fallback participates", top_k=3)
+    assert called["sqlite"] is True
+    assert any(c["case_id"] == "sqlite-used" for c in result["candidates"])
+
+
+def test_merge_deduplicates_same_case_id_and_scores_routes(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
+    import core.retrieval.retrieval_runtime as runtime
+    save_retrieval_case({"case_id":"dupe","case_type":"success_case","task_id":"t2","retrieval_text":"duplicate exact match","retrieval_text_hash":"h2"})
+    monkeypatch.setattr(runtime, "is_chromadb_available", lambda: True)
+    monkeypatch.setattr(runtime, "query_similar_cases", lambda *a, **k: {"backend":"chromadb","status":"ok","candidates":[{"case_id":"dupe","retrieval_text":"duplicate exact match","score":0.2,"route":"C"}]})
+    result = runtime.query_retrieval_cases("duplicate exact match", top_k=3)
+    ids = [c["case_id"] for c in result["candidates"]]
+    assert ids.count("dupe") == 1
+    assert "score" in result["candidates"][0]
+    assert "route" in result["candidates"][0]
+
+
+def test_chromadb_candidate_without_score_gets_score_and_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
+    import core.retrieval.retrieval_runtime as runtime
+    monkeypatch.setattr(runtime, "is_chromadb_available", lambda: True)
+    monkeypatch.setattr(runtime, "query_similar_cases", lambda *a, **k: {"backend":"chromadb","status":"ok","candidates":[{"case_id":"chroma","retrieval_text":"score route fill"}]})
+    result = runtime.query_retrieval_cases("score route fill", top_k=1)
+    assert result["candidates"][0]["case_id"] == "chroma"
+    assert result["candidates"][0]["score"] > 0
+    assert result["candidates"][0]["route"] != "none"
+
+
+def test_sqlite_fallback_only_case_not_shadowed_by_nonempty_chromadb(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
+    import core.retrieval.retrieval_runtime as runtime
+    save_retrieval_case({"case_id":"fallback-only","case_type":"success_case","task_id":"t2","retrieval_text":"fallback only searchable exact","retrieval_text_hash":"h2"})
+    monkeypatch.setattr(runtime, "is_chromadb_available", lambda: True)
+    monkeypatch.setattr(runtime, "query_similar_cases", lambda *a, **k: {"backend":"chromadb","status":"ok","candidates":[{"case_id":"old-chroma","retrieval_text":"some nonempty stale chroma candidate"}]})
+    result = runtime.query_retrieval_cases("fallback only searchable exact", top_k=2)
+    assert any(c["case_id"] == "fallback-only" for c in result["candidates"])
+    assert result["candidates"][0]["case_id"] == "fallback-only"
