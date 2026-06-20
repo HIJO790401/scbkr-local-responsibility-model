@@ -606,7 +606,7 @@ P13-C now supports advisory retrieval over legally committed local content witho
 - Similarity queries return deterministic `A` / `B` / `C` / `none` routes.
 - Retrieval results are hints only: `requires_user_confirmation=true`, `auto_confirmed=false`, and `generation_allowed=false`.
 - ChromaDB is optional. If local ChromaDB is unavailable, SCBKR uses deterministic pure-Python fallback retrieval or reports the backend as unavailable without crashing.
-- P13-C does not include desktop packaging. Tauri, Electron, installers, and sandbox mode remain P14 scope.
+- P13-C does not include desktop packaging. Tauri, Electron, installers, and full desktop packaging remain outside P13-C scope; P14-A adds Web/FastAPI Sandbox Mode only.
 
 ### P13-C retrieval stability
 
@@ -617,3 +617,9 @@ P13-C treats deterministic fallback retrieval as SCBKR's minimum guaranteed retr
 P13-C retrieval treats ChromaDB as an optional local accelerator, not as the durable source of truth. SQLite `retrieval_cases` remains the deterministic fallback source for searchable cases. Every retrieval query now checks both ChromaDB and SQLite fallback candidates, merges the two sources by `case_id`, deterministically recalculates score and route from `retrieval_text`, and then applies `top_k`.
 
 This means a non-empty ChromaDB result cannot hide SQLite fallback-only cases, including cases saved after an optional ChromaDB upsert failure. Retrieval results remain advisory only: they require user confirmation, are not auto-confirmed, do not allow automatic generation, and do not perform storage commits.
+
+### P14-A Sandbox Mode
+
+P14-A adds Sandbox Mode for the existing FastAPI/Web App workflow without desktop packaging. Sandbox Mode lets users test the full SCBKR responsibility-chain workflow without installing a local model or providing an API key. It uses a deterministic `sandbox_mock_model` output, marks results with `sandbox=true`, and records that no external model/API call was performed.
+
+Sandbox Mode only replaces model output. It still requires task creation, SCBKR draft creation, user confirmation, sealed snapshot validation, `model_generate` permission, user review, storage request, signed storage confirmation, and optional retrieval indexing/query. It does not auto-review, auto-store, auto-write memory, or bypass P12/P10/P13 gates.

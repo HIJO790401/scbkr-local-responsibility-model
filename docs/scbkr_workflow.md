@@ -284,3 +284,11 @@ Retrieval query flow:
 `query → try ChromaDB → always query SQLite fallback → merge candidates → deterministic rescore → route A/B/C/none → advisory result only → user still confirms`
 
 ChromaDB can accelerate candidate discovery, but SQLite fallback remains the stable navigation source. Retrieval does not become a decision gate: confirmation remains with the user, generation remains behind the P12 gate, and storage remains behind the P13-B gate.
+
+### P14-A Sandbox Mode workflow
+
+Sandbox Mode flow:
+
+`task → SCBKR draft → user confirm → sealed snapshot check → sandbox mock generate → review → storage plan → storage confirm → retrieval indexing`
+
+Sandbox Mode is a workflow test key before desktop packaging. The mock model output can be fake, but the responsibility chain cannot be fake: user confirmation, P12 sealed validation, P10 `model_generate` permission, review, storage signature, and retrieval advisory locks remain active.

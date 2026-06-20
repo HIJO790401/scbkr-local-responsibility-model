@@ -24,12 +24,12 @@
   "properties": {
     "provider": {
       "type": "string",
-      "enum": ["lm_studio", "ollama", "openai_compatible", "custom"],
+      "enum": ["lm_studio", "ollama", "openai_compatible", "custom", "sandbox_mock_model"],
       "default": "lm_studio"
     },
     "mode": {
       "type": "string",
-      "enum": ["local", "external", "hybrid"],
+      "enum": ["local", "external", "hybrid", "sandbox"],
       "default": "local"
     },
     "base_url": {
