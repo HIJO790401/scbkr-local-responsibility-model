@@ -11,10 +11,12 @@ from typing import Any
 from urllib.error import URLError, HTTPError
 from urllib.request import Request, urlopen
 import json
+import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from core.generation.sandbox_model import SANDBOX_PROVIDER, generate_with_sandbox_model
 from core.model_gateway.connection_test import make_test_status
 from core.model_gateway.openai_compatible import build_chat_completion_payload, build_headers
 from core.model_gateway.response_parser import parse_chat_completion_response
@@ -49,7 +51,7 @@ from core.workflow.review_flow import apply_review_decision
 from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
 from core.retrieval.vector_store import get_vector_store_status
 
-app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.13.0-p13c")
+app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.14.0-p14c-preview")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],
@@ -109,7 +111,23 @@ def _append_task_event(
     return event
 
 def _public_model_settings() -> dict[str, Any]:
-    return {**MODEL_SETTINGS, "api_key": mask_api_key(MODEL_SETTINGS.get("api_key", ""))}
+    public = {**MODEL_SETTINGS, "api_key": mask_api_key(MODEL_SETTINGS.get("api_key", ""))}
+    if MODEL_SETTINGS.get("mode") == "sandbox":
+        public.update({"sandbox": True, "provider": SANDBOX_PROVIDER, "external_call_performed": False})
+    return public
+
+
+def _apply_sandbox_defaults(settings: dict[str, Any]) -> dict[str, Any]:
+    if settings.get("mode") == "sandbox":
+        settings.update(
+            {
+                "provider": SANDBOX_PROVIDER,
+                "base_url": "",
+                "api_key": "",
+                "model_name": SANDBOX_PROVIDER,
+            }
+        )
+    return settings
 
 
 def _get_task(task_id: str) -> dict[str, Any]:
@@ -162,6 +180,31 @@ def system_status() -> dict[str, Any]:
     }
 
 
+
+
+@app.get("/api/desktop/status")
+def desktop_status() -> dict[str, Any]:
+    return {
+        "desktop_stage": "P14-C-preview",
+        "desktop_shell": True,
+        "installer_built": False,
+        "preview_package_built": False,
+        "tauri_skeleton": True,
+        "sidecar_supported": True,
+        "sidecar_running": os.environ.get("SCBKR_DESKTOP_PREVIEW") == "1",
+        "sandbox_available": True,
+        "api_status": "running",
+        "model_mode": MODEL_SETTINGS.get("mode"),
+        "local_model_base_url": MODEL_SETTINGS.get("base_url"),
+        "sidecar_host": os.environ.get("SCBKR_API_HOST", "127.0.0.1"),
+        "sidecar_port": int(os.environ.get("SCBKR_API_PORT", "8787")),
+        "data_dir": os.environ.get("SCBKR_DATA_DIR"),
+        "external_call_required": MODEL_SETTINGS.get("mode") in ("external", "hybrid"),
+        "preview": True,
+        "production_packaging": False,
+    }
+
+
 @app.get("/api/settings/model")
 def get_model_settings() -> dict[str, Any]:
     return _public_model_settings()
@@ -172,6 +215,7 @@ def set_model_settings(payload: dict[str, Any]) -> dict[str, Any]:
     next_settings = {**MODEL_SETTINGS, **payload, "last_test_status": "untested", "updated_at": _now()}
     if "api_key" not in payload:
         next_settings["api_key"] = MODEL_SETTINGS.get("api_key", "")
+    _apply_sandbox_defaults(next_settings)
     validate_model_settings(next_settings)
     MODEL_SETTINGS.clear()
     MODEL_SETTINGS.update(next_settings)
@@ -195,8 +239,11 @@ def set_permissions(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/model/test")
 def test_model() -> dict[str, Any]:
     try:
-        if not MODEL_SETTINGS.get("model_name", "").strip():
-            status = make_test_status(False, "model_name 未填，不可通過測試")
+        if MODEL_SETTINGS.get("mode") == "sandbox":
+            _apply_sandbox_defaults(MODEL_SETTINGS)
+            status = {**make_test_status(True, "Sandbox model test passed. No external model or API was called."), "test_result_kind": "no_external_call_for_sandbox"}
+        elif not MODEL_SETTINGS.get("model_name", "").strip():
+            status = {**make_test_status(False, "model_name 未填，不可通過測試"), "test_result_kind": "external_api_not_configured"}
         else:
             if MODEL_SETTINGS["mode"] in ("external", "hybrid"):
                 assert_permission_allowed(PERMISSIONS, "external_api_call")
@@ -204,16 +251,19 @@ def test_model() -> dict[str, Any]:
                 MODEL_SETTINGS,
                 [{"role": "user", "content": "請回覆 SCBKR model gateway test。"}],
             )
-            status = make_test_status(True, parse_chat_completion_response(response))
+            status = {**make_test_status(True, parse_chat_completion_response(response)), "test_result_kind": "local_model_success" if MODEL_SETTINGS["mode"] == "local" else "external_model_success"}
     except PermissionError as exc:
         status = make_test_status(False, f"external_api_call 權限或高風險確認未通過: {exc}")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        status = make_test_status(False, str(exc))
+        status = {**make_test_status(False, str(exc)), "test_result_kind": "local_model_unreachable" if MODEL_SETTINGS.get("mode") == "local" else "external_model_unreachable"}
     MODEL_SETTINGS.update(status)
     MODEL_SETTINGS["enabled"] = status["last_test_status"] == "success"
-    return _public_model_settings()
+    result = _public_model_settings()
+    if MODEL_SETTINGS.get("mode") == "sandbox":
+        result.update({"ok": True, "provider": SANDBOX_PROVIDER, "sandbox": True, "external_call_performed": False})
+    return result
 
 
 @app.post("/api/tasks/create")
@@ -298,8 +348,14 @@ def generate(task_id: str) -> dict[str, Any]:
         if MODEL_SETTINGS["mode"] in ("external", "hybrid"):
             assert_permission_allowed(PERMISSIONS, "external_api_call")
         assert_task_can_generate(task, task.get("scbkr", {}), MODEL_SETTINGS, PERMISSIONS)
-        response = _post_openai_compatible(MODEL_SETTINGS, build_generation_messages(task, task["scbkr"]))
-        task["generation_result"] = build_generation_result(task, task["scbkr"], parse_chat_completion_response(response))
+        if MODEL_SETTINGS.get("mode") == "sandbox":
+            sandbox_output = generate_with_sandbox_model(task, task["scbkr"])
+            task["generation_result"] = build_generation_result(task, task["scbkr"], sandbox_output["generated_text"])
+            task["generation_result"].update(sandbox_output)
+            task["generation_result"].update({"source": "sandbox_mock_model", "next_required_action": "user_review_required"})
+        else:
+            response = _post_openai_compatible(MODEL_SETTINGS, build_generation_messages(task, task["scbkr"]))
+            task["generation_result"] = build_generation_result(task, task["scbkr"], parse_chat_completion_response(response))
         task["status"] = "waiting_review"
         save_task(task)
         _append_task_event(
@@ -307,7 +363,7 @@ def generate(task_id: str) -> dict[str, Any]:
             task,
             status_before=status_before,
             status_after=task["status"],
-            payload={"generation_status": task["generation_result"].get("status")},
+            payload={"generation_status": task["generation_result"].get("status"), "sandbox": task["generation_result"].get("sandbox", False)},
         )
         return task
     except PermissionError as exc:

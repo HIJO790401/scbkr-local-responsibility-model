@@ -23,3 +23,14 @@ def ensure_runtime_dirs() -> None:
     """Create P13-A/B runtime directories; vector_db is lazy-created by retrieval runtime only."""
     for directory in (DATA_DIR, LEDGER_DIR, CORPUS_DIR, LOGIC_DIR, EXPORTS_DIR, MEMORY_DIR):
         directory.mkdir(parents=True, exist_ok=True)
+
+
+def desktop_preview_data_dir(app_name: str = "SCBKR") -> Path:
+    """Return the future desktop preview app data directory without mutating dev paths."""
+    base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Roaming")
+    return Path(base).expanduser() / app_name / "data"
+
+
+def current_data_dir() -> Path:
+    """Return the currently configured data directory for status/contract checks."""
+    return Path(os.environ.get("SCBKR_DATA_DIR", DATA_DIR)).expanduser()

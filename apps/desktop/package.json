@@ -1,0 +1,16 @@
+{
+  "name": "scbkr-desktop-skeleton",
+  "version": "0.14.0-p14c-preview",
+  "private": true,
+  "description": "P14-C Windows desktop preview package skeleton for SCBKR Local Responsibility Model. Unsigned preview, not production.",
+  "type": "module",
+  "scripts": {
+    "dev": "echo \"P14-B skeleton only: run apps/web and apps/api separately, then use Tauri dev in a Rust-enabled environment.\"",
+    "check:skeleton": "node -e \"const fs=require('fs'); ['src-tauri/tauri.conf.json','src-tauri/Cargo.toml','src-tauri/src/main.rs','src/App.tsx'].forEach(p=>{if(!fs.existsSync(p)) throw new Error(p+' missing')}); console.log('desktop skeleton ok')\"",
+    "tauri:build:preview": "tauri build",
+    "check:preview": "npm run check:skeleton"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
