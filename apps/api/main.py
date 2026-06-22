@@ -195,6 +195,23 @@ def _invalidate_downstream_after_scbkr_revision(task: dict[str, Any], status_bef
         )
     return had_downstream
 
+
+def _memory_rule_physical_write_bound(task: dict[str, Any]) -> bool:
+    if task.get("memory_rule_physical_write_performed") is True or task.get("memory_rule_stored") is True:
+        return True
+    if task.get("status") == "memory_rule_stored":
+        return True
+    if task.get("memory_rule_confirmed") is True and (task.get("memory_rule_result") or task.get("memory_rule_write_result")):
+        return True
+    return False
+
+
+def _task_response(task: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    response = dict(task)
+    response.pop("downstream_invalidated", None)
+    response.update(extra)
+    return response
+
 def _public_model_settings() -> dict[str, Any]:
     public = {**MODEL_SETTINGS, "api_key": mask_api_key(MODEL_SETTINGS.get("api_key", ""))}
     if MODEL_SETTINGS.get("mode") == "sandbox":
@@ -455,6 +472,8 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
     payload = payload or {}
     downstream_invalidated = False
     if "scbkr" in payload:
+        if _memory_rule_physical_write_bound(task):
+            raise HTTPException(status_code=400, detail="已寫入記憶庫規則的任務不可直接改寫 SCBKR，請建立新任務或走 rollback / clone flow。")
         if task.get("physical_write_performed") is True or task.get("status") in ("storage_committed", "completed"):
             raise HTTPException(status_code=400, detail="已入庫或已完成的任務不可直接改寫 SCBKR，請建立新任務或走 rollback / clone flow。")
         candidate = payload["scbkr"]
@@ -484,7 +503,8 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
         status_after=task["status"],
         payload={"confirmed_snapshot_hash": task["scbkr"].get("confirmed_snapshot_hash"), "downstream_invalidated": downstream_invalidated},
     )
-    task["downstream_invalidated"] = downstream_invalidated
+    if downstream_invalidated:
+        return _task_response(task, downstream_invalidated=True)
     return task
 
 
@@ -517,7 +537,7 @@ def generate(task_id: str) -> dict[str, Any]:
             status_after=task["status"],
             payload={"generation_status": task["generation_result"].get("status"), "sandbox": task["generation_result"].get("sandbox", False)},
         )
-        return task
+        return _task_response(task)
     except PermissionError as exc:
         _append_task_event("generation_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error": str(exc)})
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -547,7 +567,7 @@ def review(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if event_type not in ("review_passed", "review_failed", "rollback_requested"):
             event_type = "review_failed"
         _append_task_event(event_type, task, status_before=status_before, status_after=task["status"], payload={"review_passed": task["review_passed"]})
-        return task
+        return _task_response(task)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
@@ -825,7 +845,7 @@ def list_tasks() -> dict[str, Any]:
 
 @app.get("/api/tasks/{task_id}")
 def get_task(task_id: str) -> dict[str, Any]:
-    return _get_task(task_id)
+    return _task_response(_get_task(task_id))
 
 
 @app.get("/api/tasks/{task_id}/storage-items")
