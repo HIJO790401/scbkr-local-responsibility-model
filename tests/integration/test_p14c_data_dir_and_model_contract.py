@@ -67,3 +67,27 @@ def test_sandbox_and_ungated_generate_do_not_call_local_base_url(tmp_path, monke
     except Exception:
         pass
     assert called["value"] is False
+
+
+def test_enable_model_generate_permission_api_only_updates_model_generate(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
+    import apps.api.main as main
+    main = importlib.reload(main)
+
+    permissions = main.set_permissions({"model_generate": True})
+
+    assert permissions["model_generate"] is True
+    assert permissions["external_api"] is False
+    assert permissions["web_search"] is False
+    assert permissions["local_file_access"] is False
+    assert permissions["storage_write"] is False
+    assert permissions["memory_write"] is False
+
+
+def test_web_ui_contains_permission_refresh_and_sandbox_generate_guard():
+    source = open("apps/web/src/App.tsx", encoding="utf-8").read()
+
+    assert 'if ("model_generate" in result) setPermissions(result as Permissions);' in source
+    assert 'permissions?.model_generate !== true' in source
+    assert '沙盒生成前請先開啟 model_generate 權限。' in source
+    assert '/generate' in source

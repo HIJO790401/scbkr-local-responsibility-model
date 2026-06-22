@@ -68,6 +68,7 @@ def test_sandbox_generate_rejects_missing_model_generate_permission(tmp_path, mo
         main.generate(task["task_id"])
 
     assert exc.value.status_code == 403
+    assert exc.value.detail == "model_generate permission is required before sandbox generation"
 
 
 def test_sandbox_generate_metadata_and_locks(tmp_path, monkeypatch):
@@ -109,3 +110,50 @@ def test_sandbox_storage_confirm_still_requires_signature(tmp_path, monkeypatch)
 
     with pytest.raises(HTTPException):
         main.storage_confirm(task["task_id"], {"storage_confirmed": True, "confirmed_by": "user"})
+
+
+def test_sandbox_generate_bypasses_real_gateway_enabled_and_api_key(tmp_path, monkeypatch):
+    main = _reload_main(tmp_path, monkeypatch)
+    calls = {"external": 0}
+    def fail_external(*args, **kwargs):
+        calls["external"] += 1
+        raise AssertionError("sandbox generation must not call LM Studio, Ollama, or external API")
+    monkeypatch.setattr(main, "_post_openai_compatible", fail_external)
+    main.MODEL_SETTINGS.update({
+        "mode": "sandbox",
+        "provider": "sandbox_mock_model",
+        "base_url": "",
+        "api_key": "",
+        "model_name": "sandbox_mock_model",
+        "enabled": False,
+        "last_test_status": "untested",
+    })
+    main.PERMISSIONS.update({
+        "model_generate": True,
+        "external_api": False,
+        "web_search": False,
+        "local_file_access": False,
+        "storage_write": False,
+        "memory_write": False,
+    })
+    task = _confirmed_task(main)
+
+    generated = main.generate(task["task_id"])
+
+    assert generated["generation_result"]["sandbox"] is True
+    assert generated["generation_result"]["model_provider"] == "sandbox_mock_model"
+    assert generated["generation_result"]["external_call_performed"] is False
+    assert calls["external"] == 0
+
+
+def test_sandbox_generate_does_not_auto_review_storage_or_memory(tmp_path, monkeypatch):
+    main = _reload_main(tmp_path, monkeypatch)
+    main.PERMISSIONS.update({"model_generate": True})
+    task = main.generate(_confirmed_task(main)["task_id"])
+
+    assert task["status"] == "waiting_review"
+    assert task["review_passed"] is False
+    assert task["storage_confirmed"] is False
+    assert task.get("storage_request") is None
+    assert task.get("memory_rule_draft") is None
+    assert task.get("memory_rule_stored") is not True

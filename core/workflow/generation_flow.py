@@ -29,6 +29,8 @@ def assert_task_can_generate(task, scbkr, model_settings, permissions):
     if all_dimensions_confirmed(scbkr) is not True:
         raise ValueError("S/C/B/K/R dimensions must all be confirmed and match their sealed snapshots before generation")
     if can_enable_generate(model_settings, permissions) is not True:
+        if model_settings.get("mode") == "sandbox" and permissions.get("model_generate") is not True:
+            raise PermissionError("model_generate permission is required before sandbox generation")
         raise ValueError("model gateway is not enabled for generation")
     return True
 
