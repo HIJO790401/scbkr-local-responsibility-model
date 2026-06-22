@@ -79,3 +79,67 @@ def test_model_settings_page_contract_exists():
         "http://127.0.0.1:11434/v1",
     ):
         assert phrase in source
+
+
+def test_openai_compatible_omitted_api_key_preserves_saved_key(tmp_path, monkeypatch):
+    main = fresh_main(tmp_path, monkeypatch)
+    client = TestClient(main.app)
+    client.post("/api/settings/model", json={"provider": "openai_compatible", "base_url": "https://example.test/v1", "api_key": "sk-original", "model_name": "gpt-4.1-mini"})
+
+    data = client.post("/api/settings/model", json={"provider": "openai_compatible", "base_url": "https://example.test/v1", "model_name": "gpt-4.1"}).json()
+
+    assert main.MODEL_SETTINGS["api_key"] == "sk-original"
+    assert data["api_key"] != "sk-original"
+
+
+def test_openai_compatible_blank_api_key_without_clear_preserves_saved_key(tmp_path, monkeypatch):
+    main = fresh_main(tmp_path, monkeypatch)
+    client = TestClient(main.app)
+    client.post("/api/settings/model", json={"provider": "openai_compatible", "base_url": "https://example.test/v1", "api_key": "sk-original", "model_name": "gpt-4.1-mini"})
+
+    client.post("/api/settings/model", json={"provider": "openai_compatible", "base_url": "https://example.test/v1", "api_key": "", "model_name": "gpt-4.1"})
+
+    assert main.MODEL_SETTINGS["api_key"] == "sk-original"
+
+
+def test_openai_compatible_model_test_blank_api_key_preserves_saved_key(tmp_path, monkeypatch):
+    main = fresh_main(tmp_path, monkeypatch)
+    client = TestClient(main.app)
+    client.post("/api/settings/permissions", json={"external_api": True})
+    client.post("/api/settings/model", json={"provider": "openai_compatible", "base_url": "https://example.test/v1", "api_key": "sk-original", "model_name": "gpt-4.1-mini"})
+    monkeypatch.setattr(main, "_post_openai_compatible", lambda settings, messages: {"choices": [{"message": {"content": "ok"}}]})
+
+    data = client.post("/api/model/test", json={"provider": "openai_compatible", "base_url": "https://example.test/v1", "api_key": "", "model_name": "gpt-4.1"}).json()
+
+    assert main.MODEL_SETTINGS["api_key"] == "sk-original"
+    assert "last_test_status" in data
+
+
+def test_openai_compatible_new_api_key_updates_saved_key(tmp_path, monkeypatch):
+    main = fresh_main(tmp_path, monkeypatch)
+    client = TestClient(main.app)
+    client.post("/api/settings/model", json={"provider": "openai_compatible", "base_url": "https://example.test/v1", "api_key": "sk-original", "model_name": "gpt-4.1-mini"})
+
+    client.post("/api/settings/model", json={"provider": "openai_compatible", "base_url": "https://example.test/v1", "api_key": "sk-new", "model_name": "gpt-4.1"})
+
+    assert main.MODEL_SETTINGS["api_key"] == "sk-new"
+
+
+def test_openai_compatible_explicit_clear_api_key_clears_saved_key(tmp_path, monkeypatch):
+    main = fresh_main(tmp_path, monkeypatch)
+    client = TestClient(main.app)
+    client.post("/api/settings/model", json={"provider": "openai_compatible", "base_url": "https://example.test/v1", "api_key": "sk-original", "model_name": "gpt-4.1-mini"})
+
+    data = client.post("/api/settings/model", json={"provider": "openai_compatible", "base_url": "https://example.test/v1", "api_key": "", "clear_api_key": True, "model_name": "gpt-4.1"}).json()
+
+    assert main.MODEL_SETTINGS["api_key"] == ""
+    assert data["api_key"] == ""
+
+
+def test_model_settings_page_documents_blank_key_preservation_and_explicit_clear():
+    source = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
+    assert 'if (!form.api_key && form.provider === "openai_compatible") delete payload.api_key;' in source
+    assert 'clear_api_key: true' in source
+    assert "清除 API Key" in source
+    assert "Leave blank to keep the saved API key." in source
+    assert "Use “Clear API Key” to remove it." in source

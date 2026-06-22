@@ -256,8 +256,18 @@ def get_model_settings() -> dict[str, Any]:
     return _public_model_settings()
 
 
+def _model_payload_preserving_blank_api_key(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    provider = normalized.get("provider", MODEL_SETTINGS.get("provider"))
+    explicit_clear = normalized.pop("clear_api_key", False) is True
+    if provider == "openai_compatible" and normalized.get("api_key") == "" and not explicit_clear:
+        normalized.pop("api_key", None)
+    return normalized
+
+
 @app.post("/api/settings/model")
 def set_model_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _model_payload_preserving_blank_api_key(payload)
     next_settings = {**MODEL_SETTINGS, **payload, "enabled": False, "last_test_status": "untested", "last_test_message": "", "updated_at": _now()}
     if "api_key" not in payload:
         next_settings["api_key"] = MODEL_SETTINGS.get("api_key", "")
@@ -285,6 +295,7 @@ def set_permissions(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/model/test")
 def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     if payload:
+        payload = _model_payload_preserving_blank_api_key(payload)
         next_settings = {**MODEL_SETTINGS, **payload, "updated_at": _now()}
         if "api_key" not in payload:
             next_settings["api_key"] = MODEL_SETTINGS.get("api_key", "")
