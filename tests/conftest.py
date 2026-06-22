@@ -17,6 +17,7 @@ except Exception:
     class _Response:
         def __init__(self, status_code: int, payload: Any):
             self.status_code = status_code
+            self.headers: dict[str, str] = {}
             self._payload = payload
 
         def json(self) -> Any:
@@ -41,6 +42,30 @@ except Exception:
 
         def __init__(self, app: Any):
             self.app = app
+
+        def options(self, path: str, headers: dict[str, str] | None = None) -> _Response:
+            from apps.api import main
+
+            headers = headers or {}
+            origin = headers.get("Origin", "")
+            method = headers.get("Access-Control-Request-Method", "")
+            if origin not in main.LOCAL_DESKTOP_CORS_ORIGINS:
+                response = _Response(400, {"detail": "CORS origin denied"})
+                response.headers = {}
+                return response
+            response = _Response(200, "OK")
+            response.headers = {
+                "access-control-allow-origin": origin,
+                "access-control-allow-methods": ", ".join(main.LOCAL_DESKTOP_CORS_METHODS),
+            }
+            return response
+
+        def request(self, method: str, path: str, headers: dict[str, str] | None = None, json: dict[str, Any] | None = None) -> _Response:
+            if method.upper() == "OPTIONS":
+                return self.options(path, headers=headers)
+            if method.upper() == "POST":
+                return self.post(path, json=json)
+            return _Response(405, {"detail": "method not allowed"})
 
         def post(self, path: str, json: dict[str, Any] | None = None) -> _Response:
             from fastapi import HTTPException

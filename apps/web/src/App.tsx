@@ -1,12 +1,21 @@
 import { useEffect, useState } from "react";
 import type { DesktopStatus, ModelSettings, Permissions, ScbkrDimensionKey, TaskSummary, TaskType } from "./types";
 
-const API_URL = import.meta.env.VITE_SCBKR_API_URL ?? "http://localhost:8787";
+const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787";
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_SCBKR_API_URL ?? DEFAULT_API_BASE_URL);
+
+function normalizeApiBaseUrl(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function apiUrl(path: string): string {
+  return `${API_BASE_URL}/${path.replace(/^\/+/, "")}`;
+}
 const dimensions: ScbkrDimensionKey[] = ["S", "C", "B", "K", "R"];
 const taskTypes: TaskType[] = ["general", "coding", "info_search", "fraud_audit", "document_audit", "app_design", "game_design", "animation", "music", "privacy", "workflow", "private_memory"];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(apiUrl(path), {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
   });
@@ -58,8 +67,8 @@ function App() {
       <section className="top-status-bar" aria-label="系統狀態列">
         <div className="product-name">SCBKR 本地責任鏈模型｜自接入 MVP App</div>
         <div className="status-grid">
-          <span>API：{API_URL}</span><span>Health：{health}</span><span>Web：localhost:5500</span>
-          <span>模型：{model?.last_test_status ?? "unknown"}</span><span>Mode：{model?.mode ?? "unknown"}</span><span>Runtime：P14-B skeleton</span>
+          <span>API：{API_BASE_URL}</span><span>Health：{health}</span><span>Web：localhost:5500</span>
+          <span>模型：{model?.last_test_status ?? "unknown"}</span><span>Mode：{model?.mode ?? "unknown"}</span><span>Runtime：P14-C Windows Desktop Preview</span>
         </div>
       </section>
 
@@ -78,7 +87,7 @@ function App() {
 
 
 
-      <section className="panel"><div className="section-heading"><p className="eyebrow">Desktop Readiness / 桌面模式準備狀態</p><h2>P14-B Desktop Skeleton</h2></div><JsonBlock value={{ desktop_stage: desktopStatus?.desktop_stage, api_server_reachable: desktopStatus?.api_status === "running", sidecar_running: desktopStatus?.sidecar_running, sandbox_available: desktopStatus?.sandbox_available, local_model_endpoint_setting: desktopStatus?.local_model_base_url, api_sidecar: `${desktopStatus?.sidecar_host ?? "127.0.0.1"}:${desktopStatus?.sidecar_port ?? 8787}`, data_dir: desktopStatus?.data_dir ?? "app data / dev data", preview_package: desktopStatus?.preview_package_built ? "built" : "not built in dev", installer: desktopStatus?.installer_built ? "built" : "not a production installer", production_packaging: desktopStatus?.production_packaging ? "ready" : "future stage pending" }} /></section>
+      <section className="panel"><div className="section-heading"><p className="eyebrow">Desktop Readiness / 桌面模式準備狀態</p><h2>P14-C Windows Desktop Preview</h2></div><JsonBlock value={{ desktop_stage: desktopStatus?.desktop_stage, api_server_reachable: desktopStatus?.api_server_reachable ?? desktopStatus?.api_status === "running", sidecar_running: desktopStatus?.sidecar_running, sandbox_available: desktopStatus?.sandbox_available, local_model_endpoint_setting: desktopStatus?.local_model_base_url, api_sidecar: `${desktopStatus?.sidecar_host ?? "127.0.0.1"}:${desktopStatus?.sidecar_port ?? 8787}`, data_dir: desktopStatus?.data_dir ?? "app data / dev data", preview_package: desktopStatus?.preview_package_built ? "built" : "preview runtime", installer: desktopStatus?.installer_built ? "built" : "not a production installer", production_packaging: desktopStatus?.production_packaging ? "ready" : "future stage pending" }} /></section>
 
       <section className="layout-grid bottom-grid"><div className="panel"><div className="section-heading"><p className="eyebrow">模型與權限</p><h2>自接入設定狀態</h2></div><JsonBlock value={{ model, permissions, sandbox_active: model?.mode === "sandbox", no_external_model_called: model?.mode === "sandbox", no_api_key_required: model?.mode === "sandbox", workflow_testing_only: model?.mode === "sandbox" }} /><div className="action-grid"><button type="button" onClick={() => run("啟用 Sandbox Mode", () => api("/api/settings/model", { method: "POST", body: JSON.stringify({ mode: "sandbox" }) }))}>Sandbox Mode｜沙盒模式</button><button type="button" onClick={() => run("測試模型", () => api("/api/model/test", { method: "POST" }))}>測試模型連線</button><button type="button" onClick={() => run("開啟模型生成權限", () => api("/api/settings/permissions", { method: "POST", body: JSON.stringify({ model_generate: true }) }))}>開啟 model_generate</button></div><p className="lock-note">Sandbox Mode: Run the full SCBKR workflow without a real model or API key. No external model called. Workflow testing only.</p></div>
         <div className="panel"><div className="section-heading"><p className="eyebrow">生成 / 驗收 / 入庫計畫</p><h2>操作閉環</h2></div><div className="action-grid"><button type="button" disabled={!task?.confirmed} onClick={() => run("模型生成", () => api(`/api/tasks/${task?.task_id}/generate`, { method: "POST" }))}>開始生成</button><button type="button" disabled={!task?.generation_result} onClick={() => run("通過驗收", () => api(`/api/tasks/${task?.task_id}/review`, { method: "POST", body: JSON.stringify({ review_decision: "pass", review_message: "P12 UI pass" }) }))}>通過驗收</button><button type="button" disabled={!task?.generation_result} onClick={() => run("驗收失敗", () => api(`/api/tasks/${task?.task_id}/review`, { method: "POST", body: JSON.stringify({ review_decision: "fail", review_message: "P12 UI fail" }) }))}>驗收失敗 / P11 草案</button><button type="button" disabled={task?.status !== "review_passed"} onClick={() => run("入庫請求", () => api(`/api/tasks/${task?.task_id}/storage-request`, { method: "POST" }))}>產生入庫請求</button><button type="button" disabled={!task?.storage_request} onClick={() => run("入庫計畫", () => api(`/api/tasks/${task?.task_id}/storage-confirm`, { method: "POST", body: JSON.stringify({ storage_confirmed: true, confirmed_by: "user", signature: "user", selected_targets: ["corpus", "logic", "exports"] }) }))}>確認入庫計畫</button></div><p className="lock-note">{message}</p><JsonBlock value={{ generation_result: task?.generation_result, review_result: task?.review_result, storage_request: task?.storage_request, storage_plan: task?.storage_plan, memory_rule_draft: task?.memory_rule_draft }} /></div></section>

@@ -48,6 +48,8 @@ export type DesktopStatus = {
   sidecar_running?: boolean;
   sandbox_available: boolean;
   api_status: string;
+  api_server_reachable?: boolean;
+  api_url?: string;
   model_mode: string;
   local_model_base_url: string;
   sidecar_host?: string;
