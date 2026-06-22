@@ -206,6 +206,9 @@ def test_p15d_storage_confirm_physical_write_data_center_round_trip(monkeypatch,
         (logic_storage_item, written_by_target["logic"]),
     ):
         authoritative_hash = storage_item["content_hash"]
+        authoritative_created_at = storage_item["created_at"]
+        authoritative_stored_at = "authoritative_stored_at"
+        storage_item = {**storage_item, "stored_at": authoritative_stored_at}
         malicious_payload = {
             **storage_item["payload"],
             "hash": "payload_hash",
@@ -227,11 +230,17 @@ def test_p15d_storage_confirm_physical_write_data_center_round_trip(monkeypatch,
         assert dc_item["hash"] == authoritative_hash
         assert dc_item["hash"] == written_item["hash"]
         assert dc_item["content_hash"] == authoritative_hash
+        assert dc_item["created_at"] == authoritative_created_at
+        assert dc_item["created_at"] != "payload_created_at"
+        assert dc_item["stored_at"] == authoritative_stored_at
+        assert dc_item["stored_at"] != "payload_stored_at"
         assert dc_item["path"] == storage_item["relative_path"]
         assert dc_item["storage_location"] == storage_item.get("storage_location", storage_item["relative_path"])
         assert dc_item["target"] == storage_item["target"]
         assert dc_item["item_id"] == storage_item["item_id"]
         assert dc_item["payload"]["hash"] == "payload_hash"
+        assert dc_item["payload"]["created_at"] == "payload_created_at"
+        assert dc_item["payload"]["stored_at"] == "payload_stored_at"
         assert dc_item["payload"]["item_id"] == "payload_item_id"
         assert dc_item["payload"]["target"] == "payload_target"
 
