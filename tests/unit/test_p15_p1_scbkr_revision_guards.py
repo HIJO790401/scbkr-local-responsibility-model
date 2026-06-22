@@ -188,6 +188,43 @@ def test_downstream_invalidated_is_transient_confirm_response_only():
     assert "downstream_invalidated" not in persisted
 
 
+def test_get_task_does_not_echo_stale_downstream_invalidated_flag():
+    task = make_task(downstream_invalidated=True)
+
+    result = main.get_task(task["task_id"])
+
+    assert "downstream_invalidated" not in result
+    assert "downstream_invalidated" not in main.TASKS[task["task_id"]]
+
+
+def test_confirm_without_downstream_invalidation_does_not_echo_stale_flag_or_persist_it():
+    task = make_task(downstream_invalidated=True)
+
+    result = main.confirm_task(task["task_id"])
+
+    assert "downstream_invalidated" not in result
+    assert "downstream_invalidated" not in main.TASKS[task["task_id"]]
+    persisted = main.load_task(task["task_id"])
+    assert persisted is not None
+    assert "downstream_invalidated" not in persisted
+
+
+def test_generate_and_review_do_not_echo_stale_downstream_invalidated_flag():
+    task = make_task(downstream_invalidated=True)
+    main.confirm_task(task["task_id"])
+    main.TASKS[task["task_id"]]["downstream_invalidated"] = True
+    main.PERMISSIONS["model_generate"] = True
+    main.MODEL_SETTINGS.update({"mode": "sandbox", "provider": "sandbox_mock_model", "enabled": True, "model_name": "sandbox_mock_model"})
+
+    generated = main.generate(task["task_id"])
+    main.TASKS[task["task_id"]]["downstream_invalidated"] = True
+    reviewed = main.review(task["task_id"], {"review_decision": "fail", "review_message": "still bad"})
+
+    assert "downstream_invalidated" not in generated
+    assert "downstream_invalidated" not in reviewed
+    assert "downstream_invalidated" not in main.TASKS[task["task_id"]]
+
+
 def test_generate_and_review_do_not_echo_previous_downstream_invalidated_flag():
     task = make_task(status="waiting_review", generation_result={"content": "old"})
     main.confirm_task(task["task_id"], confirm_payload(task))
