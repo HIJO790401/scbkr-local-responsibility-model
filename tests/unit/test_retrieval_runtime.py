@@ -6,7 +6,7 @@ from core.storage.sqlite_runtime import save_retrieval_case
 
 
 def task(passed=True):
-    return {"task_id":"t1","status":"storage_committed" if passed else "review_failed","physical_write_performed":True,"review_passed":passed,"task_type":"code","raw_input":"修正 API bug","review_result":{"review_passed":passed,"status":"review_passed" if passed else "review_failed"},"generation_result":{"output":"fixed api bug"},"scbkr":{"R":{"acceptance_criteria":["tests pass"]}}}
+    return {"task_id":"t1","status":"storage_committed" if passed else "review_failed","physical_write_performed":True,"storage_confirmed":passed,"review_passed":passed,"task_type":"code","raw_input":"修正 API bug","review_result":{"review_passed":passed,"status":"review_passed" if passed else "review_failed"},"generation_result":{"output":"fixed api bug"},"scbkr":{"R":{"acceptance_criteria":["tests pass"]}}}
 
 def item(): return {"target":"corpus","relative_path":"corpus/x.json","content_hash":"abc"}
 
@@ -146,3 +146,33 @@ def test_sqlite_fallback_scores_all_rows_before_top_k_when_exact_match_is_old(tm
     assert "old-exact" in ids
     assert ids.index("old-exact") < ids.index("stale-chroma")
     assert "retrieval_query_completed" in [event["event_type"] for event in ledger.read_ledger_events()]
+
+
+
+def test_index_task_storage_cases_allows_completed_and_enforces_gates(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
+    import importlib
+    import core.retrieval.retrieval_runtime as runtime
+    runtime = importlib.reload(runtime)
+
+    base = task(True)
+    base.update({
+        "status": "completed",
+        "storage_items": [{"target": "corpus", "relative_path": "corpus/completed.json", "content_hash": "donehash"}],
+    })
+    payload_dir = tmp_path / "corpus"
+    payload_dir.mkdir()
+    (payload_dir / "completed.json").write_text('{"review_result":{"review_passed":true},"generation_result":{"output":"completed retrieval indexed case"}}', encoding="utf-8")
+
+    indexed = runtime.index_task_storage_cases(base)
+    assert indexed["indexed_cases"]
+
+    for field in ("review_passed", "storage_confirmed", "physical_write_performed"):
+        invalid = dict(base)
+        invalid[field] = False
+        with pytest.raises(ValueError):
+            runtime.index_task_storage_cases(invalid)
+
+    review_failed = dict(base, status="review_failed", review_passed=False)
+    with pytest.raises(ValueError):
+        runtime.index_task_storage_cases(review_failed)

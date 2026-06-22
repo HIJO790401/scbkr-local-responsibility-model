@@ -19,8 +19,8 @@ def build_retrieval_text(case: dict[str, Any]) -> str:
     return "\n".join(f"{k}: {_safe_text(case.get(k))}" for k in keys if case.get(k) not in (None, "", [], {}))
 
 def build_success_case_from_storage_item(task: dict[str, Any], storage_item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    if task.get("status") != "storage_committed" or task.get("review_passed") is not True or task.get("physical_write_performed") is not True:
-        raise ValueError("success_case requires storage_committed, review_passed task with physical writes")
+    if task.get("status") not in ("storage_committed", "completed") or task.get("review_passed") is not True or task.get("storage_confirmed") is not True or task.get("physical_write_performed") is not True:
+        raise ValueError("success_case requires storage_committed or completed task with review_passed, storage_confirmed, and physical writes")
     if storage_item.get("target") not in ("corpus", "logic", "exports"):
         raise ValueError("success_case only supports corpus/logic/exports")
     review = payload.get("review_result") or task.get("review_result") or {}
