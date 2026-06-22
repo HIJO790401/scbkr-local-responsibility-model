@@ -116,3 +116,31 @@ def test_windows_preview_workflow_uploads_complete_staged_artifact():
     assert "Stage preview artifact" in workflow
     assert "scripts/build_desktop_preview_windows.ps1" in workflow
     assert "path: dist/scbkr-windows-desktop-preview" in workflow
+
+
+def test_windows_packaging_scripts_use_powershell_51_compatible_windows_detection():
+    script_paths = (
+        Path("scripts/build_api_sidecar_windows.ps1"),
+        Path("scripts/build_desktop_preview_windows.ps1"),
+        Path("scripts/smoke_api_sidecar_windows.ps1"),
+    )
+
+    for script_path in script_paths:
+        text = script_path.read_text(encoding="utf-8")
+        assert "$IsWindows" not in text
+        assert "function Test-IsWindows" in text
+        assert 'if ($env:OS -eq "Windows_NT")' in text
+        assert "if ($env:SYSTEMROOT)" in text
+        assert "RuntimeInformation]::IsOSPlatform" in text
+        assert "OSPlatform]::Windows" in text
+        assert "if (-not (Test-IsWindows))" in text
+        assert "throw" in text
+
+
+def test_windows_preview_workflow_invokes_all_windows_packaging_scripts():
+    workflow = Path(".github/workflows/windows-desktop-preview.yml").read_text(encoding="utf-8")
+    api_script = Path("scripts/build_api_sidecar_windows.ps1").read_text(encoding="utf-8")
+
+    assert "powershell -ExecutionPolicy Bypass -File scripts/build_api_sidecar_windows.ps1" in workflow
+    assert "powershell -ExecutionPolicy Bypass -File scripts/build_desktop_preview_windows.ps1" in workflow
+    assert "powershell -ExecutionPolicy Bypass -File scripts\\smoke_api_sidecar_windows.ps1" in api_script

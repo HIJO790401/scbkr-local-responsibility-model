@@ -6,7 +6,23 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not $IsWindows) {
+function Test-IsWindows {
+  if ($env:OS -eq "Windows_NT") {
+    return $true
+  }
+  if ($env:SYSTEMROOT) {
+    return $true
+  }
+  try {
+    return [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+      [System.Runtime.InteropServices.OSPlatform]::Windows
+    )
+  } catch {
+    return $false
+  }
+}
+
+if (-not (Test-IsWindows)) {
   throw "P14-C sidecar smoke test requires Windows because it launches scbkr-api.exe."
 }
 if (-not (Test-Path $ExePath)) {
