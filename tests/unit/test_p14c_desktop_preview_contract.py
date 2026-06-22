@@ -101,6 +101,30 @@ def test_pyinstaller_sidecar_uses_explicit_app_import_and_hidden_imports():
     assert "collect_submodules" in spec_text
 
 
+def test_pyinstaller_sidecar_spec_resolves_real_entrypoint_from_repo_root():
+    spec_path = Path("scripts/scbkr_api_sidecar.spec")
+    spec_text = spec_path.read_text(encoding="utf-8")
+
+    assert '["apps/api/sidecar.py"]' not in spec_text
+    assert "['apps/api/sidecar.py']" not in spec_text
+    assert 'scripts/apps/api/sidecar.py' not in spec_text
+    assert 'scripts\\apps\\api\\sidecar.py' not in spec_text
+    assert "REPO_ROOT = SPEC_DIR.parent" in spec_text
+    assert "SIDECAR_ENTRY = REPO_ROOT" in spec_text
+    assert '"apps" / "api" / "sidecar.py"' in spec_text
+    assert "SCBKR sidecar entrypoint not found" in spec_text
+    assert "[str(SIDECAR_ENTRY)]" in spec_text
+    assert "pathex=[str(REPO_ROOT)]" in spec_text
+    assert not Path("scripts/apps/api/sidecar.py").exists()
+
+
+def test_build_api_sidecar_windows_invokes_pyinstaller_spec():
+    api_script = Path("scripts/build_api_sidecar_windows.ps1").read_text(encoding="utf-8")
+
+    assert "-m PyInstaller" in api_script
+    assert "scripts\\scbkr_api_sidecar.spec" in api_script
+
+
 def test_desktop_preview_script_copies_tauri_outputs_and_fails_if_missing():
     text = Path("scripts/build_desktop_preview_windows.ps1").read_text(encoding="utf-8")
     assert "bundle\\nsis" in text
