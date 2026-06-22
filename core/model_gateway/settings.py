@@ -7,7 +7,7 @@ MODEL_TEST_STATUSES = ("untested", "success", "failed")
 DEFAULT_MODEL_SETTINGS = {
     "provider": "lm_studio",
     "mode": "local",
-    "base_url": "http://localhost:1234/v1",
+    "base_url": "http://127.0.0.1:1234/v1",
     "api_key": "local",
     "model_name": "",
     "temperature": 0.2,

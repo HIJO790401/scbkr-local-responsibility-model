@@ -312,3 +312,71 @@ dd {
     text-align: left;
   }
 }
+
+.nav-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.nav-tabs button,
+.link-button {
+  border: 1px solid #9fc7ee;
+  border-radius: 999px;
+  background: #e8f3ff;
+  color: #1762aa;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 10px 14px;
+}
+
+.nav-tabs button.active,
+.link-button:hover {
+  background: #176fc1;
+  color: #fff;
+}
+
+input {
+  width: 100%;
+  border: 1px solid #b9d6f2;
+  border-radius: 16px;
+  background: #f8fbff;
+  color: #12345a;
+  font: inherit;
+  padding: 12px 14px;
+}
+
+input:disabled {
+  background: #eef4fb;
+  color: #6f879f;
+}
+
+.model-settings {
+  max-width: 880px;
+  margin: 0 auto 18px;
+}
+
+.muted {
+  color: #6f879f;
+  font-weight: 600;
+}
+
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+@media (max-width: 920px) {
+  .advanced-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .advanced-grid {
+    grid-template-columns: 1fr;
+  }
+}
