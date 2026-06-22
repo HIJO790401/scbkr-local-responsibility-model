@@ -45,6 +45,7 @@ from core.storage.sqlite_runtime import (
 )
 from core.storage.storage_plan import build_storage_commit_plan
 from core.storage.storage_request import build_storage_request
+from core.storage.storage_suggestion import deterministic_storage_suggestion, to_plan_target, to_ui_target, validate_ui_targets
 from core.workflow.generation_flow import build_generation_messages, assert_task_can_generate
 from core.workflow.generation_result import build_generation_result
 from core.workflow.review_flow import apply_review_decision
@@ -295,6 +296,34 @@ def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, s
         raise RuntimeError(f"model connection failed: {exc.reason}") from exc
     except TimeoutError as exc:
         raise RuntimeError("model connection timed out") from exc
+
+
+def _try_model_storage_suggestion(task: dict[str, Any]) -> dict[str, Any] | None:
+    if MODEL_SETTINGS.get("enabled") is not True or MODEL_SETTINGS.get("mode") == "sandbox":
+        return None
+    messages = [
+        {"role": "system", "content": "Return JSON only. Suggest storage targets for SCBKR review-to-storage. Keys: suggestions.vector/corpus/logic/memory each with recommended boolean, reason string, planned_summary string."},
+        {"role": "user", "content": json.dumps({"scbkr": task.get("scbkr"), "generation_result": task.get("generation_result"), "review_result": task.get("review_result")}, ensure_ascii=False)},
+    ]
+    response = _post_openai_compatible(MODEL_SETTINGS, messages)
+    parsed = parse_chat_completion_response(response)
+    data = json.loads(parsed)
+    suggestions = data.get("suggestions")
+    if not isinstance(suggestions, dict):
+        return None
+    for target in ("vector", "corpus", "logic", "memory"):
+        item = suggestions.get(target)
+        if not isinstance(item, dict) or not isinstance(item.get("recommended"), bool) or not isinstance(item.get("reason"), str) or not isinstance(item.get("planned_summary"), str):
+            return None
+    return {
+        "task_id": task.get("task_id"),
+        "review_passed": True,
+        "suggestions": suggestions,
+        "recommended_targets": [target for target, item in suggestions.items() if item.get("recommended")],
+        "model_assisted": True,
+        "fallback_used": False,
+        "next_required_action": "user_select_storage_targets",
+    }
 
 
 @app.get("/health")
@@ -624,15 +653,63 @@ def memory_rule_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post("/api/tasks/{task_id}/storage-request")
-def storage_request(task_id: str) -> dict[str, Any]:
+@app.post("/api/tasks/{task_id}/storage-suggestion")
+def storage_suggestion(task_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     task = _get_task(task_id)
+    payload = payload or {}
+    if task.get("review_passed") is not True or task.get("review_result", {}).get("review_passed") is not True:
+        raise HTTPException(status_code=400, detail="尚未通過驗收，不能產生入庫建議。")
+    if not task.get("generation_result"):
+        raise HTTPException(status_code=400, detail="尚未生成結果，不能產生入庫建議。")
+    status_before = task.get("status")
+    suggestion = None
+    if payload.get("use_model_suggestion") is True:
+        try:
+            suggestion = _try_model_storage_suggestion(task)
+        except Exception:
+            suggestion = None
+    suggestion = suggestion or deterministic_storage_suggestion(task, payload.get("user_preference"))
+    task["storage_suggestion"] = suggestion
+    save_task(task)
+    _append_task_event("storage_suggestion_generated", task, status_before=status_before, status_after=task.get("status"), payload={"recommended_targets": suggestion.get("recommended_targets", []), "fallback_used": suggestion.get("fallback_used", True)})
+    return suggestion
+
+
+@app.post("/api/tasks/{task_id}/storage-request")
+def storage_request(task_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    task = _get_task(task_id)
+    payload_was_none = payload is None
+    payload = payload or {}
     try:
         status_before = task.get("status")
-        task["storage_request"] = build_storage_request(task, task.get("review_result", {}))
-        task["status"] = "waiting_storage_confirm"
+        if task.get("review_passed") is not True or task.get("review_result", {}).get("review_passed") is not True:
+            raise ValueError("尚未通過驗收，不能產生入庫請求。請先按「通過驗收」。")
+        user_decision = payload.get("user_decision") or "custom"
+        raw_selected = payload.get("selected_targets")
+        selected_ui = validate_ui_targets(raw_selected) if raw_selected is not None else (["corpus", "logic"] if payload_was_none else [])
+        if not selected_ui and user_decision not in ("temporary_only", "do_not_store"):
+            raise ValueError("尚未選擇寫入目標。請先選擇至少一個寫入目標，或選擇「只暫存 / 不寫入」。")
+        task["storage_request"] = build_storage_request(task, task.get("review_result", {}), candidate_targets=["vector_db", "corpus", "logic", "memory"])
+        task["storage_request"].update({"selected_targets": selected_ui, "user_decision": user_decision, "signature": payload.get("signature")})
+        task["selected_targets"] = selected_ui
+        task["user_decision"] = user_decision
+        plan_targets = [to_plan_target(t) for t in selected_ui]
+        task["storage_plan"] = {
+            "task_id": task.get("task_id"),
+            "storage_plan_status": "waiting_user_second_confirm",
+            "storage_confirmed": False,
+            "selected_targets": selected_ui,
+            "storage_items": [{"target": t, "planned_summary": (task.get("storage_suggestion", {}).get("suggestions", {}).get(t, {}) or {}).get("planned_summary", "預計寫入已驗收資料。"), "physical_write_performed": False} for t in selected_ui],
+            "plan_targets": plan_targets,
+            "risk_notice": "二次確認後才會寫入本機資料；向量庫目前保留索引中繼資料，實體 JSON 僅寫入支援的本機庫。",
+            "permission_notice": "模型不能自動寫入，必須由使用者二次確認。",
+            "user_decision": user_decision,
+            "physical_write_performed": False,
+            "next_required_action": "user_second_confirm_storage",
+        }
+        task["status"] = "waiting_storage_confirm" if selected_ui else user_decision
         save_task(task)
-        _append_task_event("storage_request_created", task, status_before=status_before, status_after=task["status"], payload={"candidate_targets": task["storage_request"].get("candidate_targets", [])})
+        _append_task_event("storage_requested", task, status_before=status_before, status_after=task["status"], payload={"selected_targets": selected_ui, "user_decision": user_decision})
         return task
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -647,73 +724,66 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     requested_event: dict[str, Any] | None = None
     try:
         if task.get("review_passed") is not True or task.get("review_result", {}).get("review_passed") is not True:
-            raise ValueError("storage commit requires review_passed task")
+            raise ValueError("尚未通過驗收，不能入庫。請先按「通過驗收」。")
         if task.get("status") not in ("review_passed", "waiting_storage_confirm", "storage_requested"):
-            raise ValueError("task status must allow storage commit")
+            raise ValueError("目前任務狀態不能入庫，請確認已通過驗收並建立入庫請求。")
         for required_key in ("generation_result", "review_result", "scbkr"):
             if required_key not in task:
                 raise ValueError(f"{required_key} is required before storage commit")
         if not all_dimensions_confirmed(task["scbkr"]):
             raise ValueError("SCBKR must be fully confirmed before storage commit")
-        if "storage_request" not in task and "storage_plan" not in task:
-            raise ValueError("storage_request or storage_plan is required before storage commit")
-        if payload.get("storage_confirmed") is not True:
-            raise ValueError("storage_confirmed=true is required")
+        if "storage_request" not in task:
+            raise ValueError("尚未產生入庫計畫，不能二次確認寫入。請先按「產生入庫請求」。")
+        if "storage_plan" not in task:
+            raise ValueError("尚未建立入庫計畫。請先產生入庫請求。")
+        user_decision = task.get("user_decision") or task.get("storage_request", {}).get("user_decision")
+        selected_targets = validate_ui_targets([t for t in (payload.get("selected_targets") or task.get("selected_targets") or task.get("storage_plan", {}).get("selected_targets") or []) if t != "exports"])
+        if not selected_targets and user_decision in ("temporary_only", "do_not_store"):
+            task["storage_confirmed"] = False
+            task["physical_write_performed"] = False
+            task["status"] = user_decision
+            task["storage_result"] = {"status": user_decision, "selected_targets": [], "written_targets": [], "skipped_targets": ["vector", "corpus", "logic", "memory"], "physical_write_performed": False, "user_decision": user_decision}
+            save_task(task)
+            _append_task_event("storage_confirmed", task, status_before=status_before, status_after=task["status"], payload=task["storage_result"])
+            return task
+        if not selected_targets:
+            raise ValueError("尚未選擇寫入目標。請先選擇向量庫、語料庫、程式邏輯庫或記憶庫。")
+        if payload.get("storage_confirmed") is not True and payload.get("second_confirm") is not True:
+            raise ValueError("請勾選或按下「使用者二次確認寫入」後才能入庫。")
         if payload.get("confirmed_by") != "user":
             raise ValueError("confirmed_by=user is required")
         signature = str(payload.get("signature") or payload.get("storage_signature") or "").strip()
         if not signature:
             raise ValueError("signature is required")
 
-        selected_targets = payload.get("selected_targets") or ["corpus", "logic", "exports"]
-        plan_targets = [target for target in selected_targets if target in ("vector_db", "corpus", "logic", "memory")]
-        if not plan_targets:
-            plan_targets = ["corpus", "logic"]
-        requested_event = _append_task_event(
-            "storage_physical_write_requested",
-            task,
-            status_before=status_before,
-            status_after=status_before,
-            payload={"selected_targets": selected_targets, "confirmed_by": "user"},
-        )
-        task["storage_plan"] = build_storage_commit_plan(
-            task,
-            task.get("review_result", {}),
-            plan_targets,
-            storage_signature=signature if "memory" in plan_targets else None,
-            storage_notes=payload.get("storage_notes", "P13-B physical storage commit."),
-        )
-        task["storage_plan"]["selected_targets"] = list(dict.fromkeys([*selected_targets, "corpus", "logic", "exports"]))
+        plan_targets = [to_plan_target(target) for target in selected_targets]
+        legacy_exports_requested = "exports" in (payload.get("selected_targets") or [])
+        physical_targets = [target for target in plan_targets if target in ("corpus", "logic", "memory")]
+        if legacy_exports_requested and "exports" not in physical_targets:
+            physical_targets.append("exports")
+        requested_event = _append_task_event("storage_physical_write_requested", task, status_before=status_before, status_after=status_before, payload={"selected_targets": selected_targets, "confirmed_by": "user"})
+        task["storage_plan"] = build_storage_commit_plan(task, task.get("review_result", {}), plan_targets, storage_signature=signature if "memory" in plan_targets else None, storage_notes=payload.get("storage_notes", "P15-C user second-confirmed storage commit."))
+        task["storage_plan"]["selected_targets"] = selected_targets
         task["storage_plan"]["physical_write_performed"] = False
-        items = commit_storage_items(task, task["storage_plan"], source_event_id=requested_event["event_id"])
+        physical_plan = dict(task["storage_plan"])
+        physical_plan["selected_targets"] = physical_targets
+        items = commit_storage_items(task, physical_plan, source_event_id=requested_event["event_id"]) if physical_targets else []
         for item in items:
             save_storage_item(item)
-            _append_task_event(
-                "storage_item_written",
-                task,
-                status_before=status_before,
-                status_after="storage_committed",
-                payload={
-                    "target": item.get("target"),
-                    "content_hash": item.get("content_hash"),
-                    "relative_path": item.get("relative_path"),
-                    "physical_write_performed": True,
-                },
-            )
+            _append_task_event("storage_item_written", task, status_before=status_before, status_after="storage_committed", payload={"target": item.get("target"), "content_hash": item.get("content_hash"), "relative_path": item.get("relative_path"), "physical_write_performed": True})
+        written_targets = [to_ui_target(item.get("target")) for item in items]
+        skipped_targets = [target for target in selected_targets if target not in written_targets]
         task["storage_items"] = items
         task["storage_confirmed"] = True
         task["physical_write_performed"] = True
         task["status"] = "storage_committed"
         task["storage_plan"]["physical_write_performed"] = True
         task["storage_plan"]["next_required_action"] = "storage_committed"
+        task["storage_result"] = {"status": "storage_committed", "selected_targets": selected_targets, "written_targets": written_targets, "skipped_targets": skipped_targets, "storage_item_ids": [item.get("item_id") for item in items], "hashes": [item.get("content_hash") for item in items], "physical_write_performed": True}
         save_task(task)
-        _append_task_event(
-            "storage_physical_write_completed",
-            task,
-            status_before=status_before,
-            status_after=task["status"],
-            payload={"item_count": len(items), "physical_write_performed": True},
-        )
+        _append_task_event("database_written", task, status_before=status_before, status_after=task["status"], payload=task["storage_result"])
+        _append_task_event("storage_physical_write_completed", task, status_before=status_before, status_after=task["status"], payload={"item_count": len(items), "physical_write_performed": True})
+        _append_task_event("storage_confirmed", task, status_before=status_before, status_after=task["status"], payload=task["storage_result"])
         return task
     except PermissionError as exc:
         _append_task_event("storage_physical_write_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error_message": str(exc), "physical_write_performed": False})
@@ -730,9 +800,10 @@ def complete_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[s
     task = _get_task(task_id)
     status_before = task.get("status")
     try:
-        if task.get("storage_confirmed") is not True or task.get("physical_write_performed") is not True:
-            raise ValueError("storage_confirmed physical write is required before completion")
-        if task.get("status") not in ("storage_committed", "completed"):
+        explicit_no_storage = task.get("user_decision") in ("temporary_only", "do_not_store") and task.get("storage_result", {}).get("status") in ("temporary_only", "do_not_store")
+        if not explicit_no_storage and (task.get("storage_confirmed") is not True or task.get("physical_write_performed") is not True):
+            raise ValueError("尚未完成實體寫入，不能完成任務。")
+        if not explicit_no_storage and task.get("status") not in ("storage_committed", "completed"):
             raise ValueError("task must be storage_committed before completion")
         task["status"] = "completed"
         task["completed"] = True

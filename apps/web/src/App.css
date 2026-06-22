@@ -22,3 +22,9 @@ pre, code, .json-block, .raw-json { white-space: pre-wrap; overflow-wrap: anywhe
 .model-settings { max-width: 880px; margin: 0 auto 18px; }
 @media (max-width: 920px) { .top-status-bar, .layout-grid, .form-grid { grid-template-columns: 1fr; } .status-grid, .action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .app-shell { padding: 10px 9px 28px; } .top-status-bar, .panel, .hero-card { border-radius: 18px; padding: 16px; } .status-grid, .action-grid { grid-template-columns: 1fr; } .detail-list div, .database-list li { flex-direction: column; } dd, .database-list strong { text-align: left; } }
+.storage-panel { overflow: hidden; }
+.storage-options { align-items: stretch; }
+.storage-card { border: 1px solid #cfe2ff; background: #f8fbff; color: #17324d; border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 6px; min-width: 180px; max-width: 260px; text-align: left; cursor: pointer; }
+.storage-card.selected { border-color: #1762aa; background: #e8f3ff; box-shadow: 0 0 0 2px rgba(23,98,170,.12); }
+.storage-card small, .storage-card em { white-space: normal; font-weight: 600; color: #3d5570; }
+.storage-plan { border: 1px solid #d8e2ef; border-radius: 12px; padding: 12px; background: #fbfdff; margin-top: 12px; }
