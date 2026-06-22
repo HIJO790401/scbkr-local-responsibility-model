@@ -7,8 +7,9 @@
   "scripts": {
     "dev": "echo \"P14-B skeleton only: run apps/web and apps/api separately, then use Tauri dev in a Rust-enabled environment.\"",
     "check:skeleton": "node -e \"const fs=require('fs'); ['src-tauri/tauri.conf.json','src-tauri/Cargo.toml','src-tauri/src/main.rs','src/App.tsx'].forEach(p=>{if(!fs.existsSync(p)) throw new Error(p+' missing')}); console.log('desktop skeleton ok')\"",
-    "tauri:build:preview": "tauri build",
-    "check:preview": "npm run check:skeleton"
+    "tauri:build:preview": "npm run generate:icon && tauri build",
+    "check:preview": "npm run check:skeleton",
+    "generate:icon": "cd ../.. && python scripts/generate_tauri_preview_icon.py"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

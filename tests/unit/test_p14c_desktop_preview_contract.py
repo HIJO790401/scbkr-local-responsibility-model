@@ -15,9 +15,30 @@ def test_p14c_build_scripts_and_workflow_exist():
 
 
 def test_p14c_desktop_package_scripts_exist():
-    package = Path("apps/desktop/package.json").read_text(encoding="utf-8")
-    assert "tauri:build:preview" in package
-    assert "check:skeleton" in package
+    import json
+
+    package = json.loads(Path("apps/desktop/package.json").read_text(encoding="utf-8"))
+    scripts = package["scripts"]
+    assert "tauri:build:preview" in scripts
+    assert "check:skeleton" in scripts
+    assert "generate:icon" in scripts
+    assert "scripts/generate_tauri_preview_icon.py" in scripts["generate:icon"]
+    assert scripts["tauri:build:preview"].index("npm run generate:icon") < scripts["tauri:build:preview"].index("tauri build")
+
+
+def test_p14c_tauri_build_scripts_generate_icon_before_bundle_icon_builds():
+    import json
+
+    package = json.loads(Path("apps/desktop/package.json").read_text(encoding="utf-8"))
+    scripts = package["scripts"]
+    config = json.loads(Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+    assert config["bundle"]["icon"] == ["icons/icon.ico"]
+
+    for name, command in scripts.items():
+        if "tauri build" not in command:
+            continue
+        assert "generate:icon" in command, f"{name} must generate the preview icon before Tauri build"
+        assert command.index("generate:icon") < command.index("tauri build")
 
 
 def test_sidecar_environment_uses_loopback_and_data_dir_override(tmp_path, monkeypatch):
@@ -231,6 +252,8 @@ def test_p14c_docs_describe_build_time_generated_preview_icon():
     for text in (readme, runtime):
         assert "generated" in text
         assert "build time" in text or "build-time" in text
+        assert "npm --prefix apps/desktop run tauri:build:preview" in text
+        assert "generate:icon" in text
         assert "placeholder" in text
         assert "not a production brand asset" in text
         assert "code signing" in text
