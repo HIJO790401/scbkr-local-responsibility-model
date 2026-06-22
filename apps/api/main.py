@@ -41,7 +41,7 @@ from core.storage.sqlite_runtime import (
     save_memory_rule,
     save_scbkr_confirmation,
     save_storage_item,
-    save_task,
+    save_task as _persist_task,
 )
 from core.storage.storage_plan import build_storage_commit_plan
 from core.storage.storage_request import build_storage_request
@@ -260,12 +260,21 @@ def _friendly_model_error(settings: dict[str, Any], message: str) -> str:
 def _get_task(task_id: str) -> dict[str, Any]:
     task = TASKS.get(task_id)
     if task is not None:
+        task.pop("downstream_invalidated", None)
         return task
     persisted_task = load_task(task_id)
     if persisted_task is None:
         raise HTTPException(status_code=404, detail="task not found")
+    persisted_task.pop("downstream_invalidated", None)
     TASKS[task_id] = persisted_task
     return persisted_task
+
+
+def save_task(task: dict[str, Any]) -> dict[str, Any]:
+    task.pop("downstream_invalidated", None)
+    persisted = _persist_task(task)
+    TASKS[task["task_id"]] = task
+    return persisted
 
 
 def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, str]]) -> dict[str, Any]:
@@ -505,7 +514,7 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
     )
     if downstream_invalidated:
         return _task_response(task, downstream_invalidated=True)
-    return task
+    return _task_response(task)
 
 
 @app.post("/api/tasks/{task_id}/generate")
