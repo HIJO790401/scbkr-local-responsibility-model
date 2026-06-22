@@ -64,6 +64,14 @@ LOCAL_DESKTOP_CORS_ORIGINS = [
 ]
 LOCAL_DESKTOP_CORS_METHODS = ["OPTIONS", "GET", "POST", "PUT", "PATCH", "DELETE"]
 
+SCBKR_CONFIRMATION_REQUIRED_FIELDS = {
+    "S": ["task_name", "user_instruction", "task_subject", "input_content", "output_format", "interface_type", "platform_type"],
+    "C": ["flow_steps", "execution_order", "data_flow", "event_flow", "core_logic", "dependencies", "failure_impact", "test_conditions"],
+    "B": ["data_read_scope", "data_write_scope", "local_scope", "external_scope", "permission_switches", "stop_conditions", "error_handling", "storage_conditions"],
+    "K": ["references", "technical_docs", "style_settings", "framework_choice", "model_basis", "source_credibility"],
+    "R": ["expected_outputs", "acceptance_criteria", "ledger_requirements", "storage_options", "signature_status", "review_status", "replay_requirements"],
+}
+
 app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.14.0-p14c-preview")
 app.add_middleware(
     CORSMiddleware,
@@ -122,6 +130,70 @@ def _append_task_event(
     append_result = append_ledger_event(event)
     save_ledger_index(event, line_number=append_result["line_number"], jsonl_path=append_result["ledger_path"])
     return event
+
+
+def _is_empty_confirmation_value(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def validate_scbkr_draft_for_confirmation(candidate: Any) -> None:
+    """Reject incomplete SCBKR drafts before sealing confirmed snapshots."""
+    if not isinstance(candidate, dict):
+        raise HTTPException(status_code=400, detail="SCBKR draft must be an object")
+    problems: list[str] = []
+    for dimension, required_fields in SCBKR_CONFIRMATION_REQUIRED_FIELDS.items():
+        if dimension not in candidate:
+            problems.append(f"{dimension}: missing dimension")
+            continue
+        dimension_payload = candidate[dimension]
+        if not isinstance(dimension_payload, dict):
+            problems.append(f"{dimension}: dimension must be object")
+            continue
+        if not dimension_payload:
+            problems.append(f"{dimension}: empty dimension")
+            continue
+        for field in required_fields:
+            if field not in dimension_payload:
+                problems.append(f"{dimension}.{field}: missing field")
+            elif _is_empty_confirmation_value(dimension_payload[field]):
+                problems.append(f"{dimension}.{field}: empty field")
+    if problems:
+        raise HTTPException(status_code=400, detail="SCBKR draft is incomplete: " + "; ".join(problems))
+
+
+def _invalidate_downstream_after_scbkr_revision(task: dict[str, Any], status_before: str | None) -> bool:
+    downstream_keys = (
+        "generation_result",
+        "review_result",
+        "storage_request",
+        "storage_plan",
+        "storage_result",
+        "completed_at",
+        "final_result",
+        "retrieval_indexing_result",
+        "retrieval_indexing_pending_result",
+    )
+    removed_keys = [key for key in downstream_keys if key in task]
+    had_downstream = bool(removed_keys) or any(
+        task.get(key) for key in ("review_passed", "storage_confirmed", "physical_write_performed")
+    )
+    for key in removed_keys:
+        task.pop(key, None)
+    task["review_passed"] = False
+    task["storage_confirmed"] = False
+    task["physical_write_performed"] = False
+    if task.get("status") in ("waiting_review", "review_passed", "waiting_storage_confirm", "storage_requested", "storage_committed", "completed"):
+        task["status"] = "waiting_user_confirm"
+    if had_downstream:
+        _append_task_event(
+            "scbkr_revised_downstream_invalidated",
+            task,
+            status_before=status_before,
+            status_after=task.get("status"),
+            payload={"removed_keys": removed_keys, "downstream_invalidated": True},
+            message="SCBKR revised; downstream generation/review/storage artifacts invalidated.",
+        )
+    return had_downstream
 
 def _public_model_settings() -> dict[str, Any]:
     public = {**MODEL_SETTINGS, "api_key": mask_api_key(MODEL_SETTINGS.get("api_key", ""))}
@@ -381,12 +453,18 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
     if "scbkr" not in task:
         raise HTTPException(status_code=400, detail="SCBKR draft required before confirm")
     payload = payload or {}
-    if isinstance(payload.get("scbkr"), dict):
+    downstream_invalidated = False
+    if "scbkr" in payload:
+        if task.get("physical_write_performed") is True or task.get("status") in ("storage_committed", "completed"):
+            raise HTTPException(status_code=400, detail="已入庫或已完成的任務不可直接改寫 SCBKR，請建立新任務或走 rollback / clone flow。")
         candidate = payload["scbkr"]
-        if not all(key in candidate for key in ("S", "C", "B", "K", "R")):
-            raise HTTPException(status_code=400, detail="SCBKR draft must include S/C/B/K/R")
+        validate_scbkr_draft_for_confirmation(candidate)
+        status_before_revision = task.get("status")
+        downstream_invalidated = _invalidate_downstream_after_scbkr_revision(task, status_before_revision)
         candidate["confirmation_status"] = "draft"
         task["scbkr"] = candidate
+    else:
+        validate_scbkr_draft_for_confirmation(task["scbkr"])
     confirm_all_dimensions(
         task["scbkr"],
         confirmed_by=payload.get("confirmed_by", "user"),
@@ -404,8 +482,9 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
         task,
         status_before=status_before,
         status_after=task["status"],
-        payload={"confirmed_snapshot_hash": task["scbkr"].get("confirmed_snapshot_hash")},
+        payload={"confirmed_snapshot_hash": task["scbkr"].get("confirmed_snapshot_hash"), "downstream_invalidated": downstream_invalidated},
     )
+    task["downstream_invalidated"] = downstream_invalidated
     return task
 
 

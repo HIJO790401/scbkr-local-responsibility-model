@@ -24,7 +24,13 @@ const dimensionFields: Record<ScbkrDimensionKey, DimensionField[]> = {
 
 function normalizeApiBaseUrl(value: string): string { return value.replace(/\/+$/, ""); }
 function apiUrl(path: string): string { return `${API_BASE_URL}/${path.replace(/^\/+/, "")}`; }
-async function api<T>(path: string, init?: RequestInit): Promise<T> { const response = await fetch(apiUrl(path), { headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) }, ...init }); if (!response.ok) throw new Error(await response.text()); return response.json() as Promise<T>; }
+async function api<T>(path: string, init?: RequestInit): Promise<T> { const response = await fetch(apiUrl(path), { headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) }, ...init }); if (!response.ok) { const text = await response.text(); let detail = text; try { detail = JSON.parse(text).detail ?? text; } catch { detail = text; } throw new Error(String(detail)); } return response.json() as Promise<T>; }
+function friendlyActionError(label: string, error: unknown): string {
+  const raw = String(error);
+  if (raw.includes("SCBKR draft is incomplete") || raw.includes("SCBKR draft must") || raw.includes("missing field") || raw.includes("empty field")) return "確認單不完整，請補齊缺少欄位後再確認。";
+  if (raw.includes("已入庫或已完成") || raw.includes("rollback / clone")) return "此任務已入庫或完成，不能直接修改責任鏈。請建立新任務或使用回退流程。";
+  return `${label} 失敗：${raw}`;
+}
 function providerFromModel(model: ModelSettings | null): Provider { return (model?.provider as Provider) || (model?.mode === "sandbox" ? "sandbox_mock_model" : "lm_studio"); }
 function formFromModel(model: ModelSettings | null): ModelForm { const provider = providerFromModel(model); return { provider, mode: model?.mode ?? providerDefaults[provider].mode, base_url: model?.base_url ?? providerDefaults[provider].base_url, api_key: "", model_name: model?.model_name ?? providerDefaults[provider].model_name, temperature: model?.temperature ?? 0.2, max_tokens: model?.max_tokens ?? 4096, context_length: model?.context_length ?? 8192, timeout: model?.timeout ?? 120 }; }
 function modelHumanStatus(model: ModelSettings | null): string { if (!model) return "目前模型：未知｜狀態：尚未讀取"; if (model.mode === "sandbox") return "目前模式：沙盒模式｜狀態：可用｜外部模型：未呼叫｜API Key：不需要"; return `目前模式：${model.provider}｜Base URL：${model.base_url || "未設定"}｜模型名稱：${model.model_name || "未設定"}｜狀態：${model.enabled ? "connected" : "not connected"}`; }
@@ -47,7 +53,7 @@ export default function App() {
   const modelStatus = modelHumanStatus(model);
   const refresh = async () => { try { await api("/health"); setHealth("online"); const m = await api<ModelSettings>("/api/settings/model"); setModel(m); setForm(formFromModel(m)); setPermissions(await api<Permissions>("/api/settings/permissions")); setDesktopStatus(await api<DesktopStatus>("/api/desktop/status")); } catch (error) { setHealth("offline"); setMessage(`API 尚未連線：${String(error)}`); } };
   useEffect(() => { void refresh(); }, []);
-  const run = async (label: string, action: () => Promise<any>) => { try { const result = await action(); if (result?.task_id) setTask(result); if (result?.model_name) { setModel(result); setForm(formFromModel(result)); } if ("model_generate" in result) setPermissions(result as Permissions); setMessage(`${label} 完成`); return result; } catch (error) { setMessage(`${label} 失敗：${String(error)}`); } };
+  const run = async (label: string, action: () => Promise<any>) => { try { const result = await action(); if (result?.task_id) setTask(result); if (result?.model_name) { setModel(result); setForm(formFromModel(result)); } if ("model_generate" in result) setPermissions(result as Permissions); setMessage(result?.downstream_invalidated ? "確認單已更新。舊生成結果已作廢，請重新生成。" : `${label} 完成`); return result; } catch (error) { setMessage(friendlyActionError(label, error)); } };
   const modelPayload = () => {
     const payload: Record<string, unknown> = { ...form };
     if (!form.api_key && form.provider === "openai_compatible") delete payload.api_key;
