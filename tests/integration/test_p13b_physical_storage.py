@@ -98,8 +98,8 @@ def test_storage_confirm_with_signature_writes_corpus_logic_exports_and_indexes(
     assert (isolated_runtime / "corpus").is_dir()
     assert (isolated_runtime / "logic").is_dir()
     assert (isolated_runtime / "exports").is_dir()
-    assert not (isolated_runtime / "vector_db").exists()
-    assert {item["target"] for item in list_storage_items(task_id=task["task_id"])} == {"corpus", "logic", "exports"}
+    assert (isolated_runtime / "vector_db").is_dir()
+    assert {item["target"] for item in list_storage_items(task_id=task["task_id"])} == {"vector_db", "corpus", "logic", "exports"}
     event_types = [event["event_type"] for event in read_ledger_events(task_id=task["task_id"])]
     assert "storage_physical_write_completed" in event_types
     assert REPO_SQLITE_PATH.exists() is repo_sqlite_existed
@@ -156,3 +156,66 @@ def test_memory_rule_confirm_writes_memory_only_after_signature(monkeypatch, iso
     assert list_memory_rules(task_id=task["task_id"])
     event_types = [event["event_type"] for event in read_ledger_events(task_id=task["task_id"])]
     assert "memory_rule_physical_write_completed" in event_types
+
+
+def test_p15d_storage_confirm_physical_write_data_center_round_trip(monkeypatch, isolated_runtime):
+    task = create_review_passed_task(monkeypatch)
+    request = client.post(
+        f"/api/tasks/{task['task_id']}/storage-request",
+        json={"selected_targets": ["corpus", "logic"], "user_decision": "custom", "signature": "user"},
+    )
+    assert request.status_code == 200
+
+    response = client.post(
+        f"/api/tasks/{task['task_id']}/storage-confirm",
+        json={"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus", "logic"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    result = body["storage_result"]
+    assert body["storage_confirmed"] is True
+    assert body["physical_write_performed"] is True
+    assert set(result["written_targets"]) == {"corpus", "logic"}
+    assert result["skipped_targets"] == []
+    assert len(result["written_items"]) >= 2
+    for item in result["written_items"]:
+        assert item["item_id"]
+        assert item["hash"]
+        assert item["path"]
+        assert (isolated_runtime / item["path"]).exists()
+    assert list((isolated_runtime / "corpus").glob("*.json"))
+    assert list((isolated_runtime / "logic").glob("*.json"))
+
+    corpus = main.data_center_section("corpus")
+    logic = main.data_center_section("logic")
+    overview = main.data_center_overview()
+    storage = main.data_center_section("storage")
+    ledger = main.data_center_section("ledger")
+    assert corpus["count"] >= 1
+    assert logic["count"] >= 1
+    assert overview["corpus_count"] >= 1
+    assert overview["logic_count"] >= 1
+    assert storage["items"][0]["written_targets"]
+    assert any(event["event_type"] == "database_written" for event in ledger["items"])
+
+
+def test_p15d_vector_metadata_and_memory_write(monkeypatch, isolated_runtime):
+    task = create_review_passed_task(monkeypatch)
+    request = client.post(
+        f"/api/tasks/{task['task_id']}/storage-request",
+        json={"selected_targets": ["vector", "memory"], "user_decision": "custom", "signature": "user"},
+    )
+    assert request.status_code == 200
+    response = client.post(
+        f"/api/tasks/{task['task_id']}/storage-confirm",
+        json={"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["vector", "memory"]},
+    )
+    assert response.status_code == 200
+    result = response.json()["storage_result"]
+    assert set(result["written_targets"]) == {"vector", "memory"}
+    vector = main.data_center_section("vector")["items"][0]
+    assert vector["embedding_status"] == "pending"
+    assert vector["embedding"] is None
+    memory = main.data_center_section("memory")["items"][0]
+    assert memory["confirmed_by_user"] is True

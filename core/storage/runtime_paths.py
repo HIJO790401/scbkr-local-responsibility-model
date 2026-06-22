@@ -21,7 +21,7 @@ VECTOR_DB_DIR = DATA_DIR / "vector_db"
 
 def ensure_runtime_dirs() -> None:
     """Create P13-A/B runtime directories; vector_db is lazy-created by retrieval runtime only."""
-    for directory in (DATA_DIR, LEDGER_DIR, CORPUS_DIR, LOGIC_DIR, EXPORTS_DIR, MEMORY_DIR):
+    for directory in (DATA_DIR, LEDGER_DIR, CORPUS_DIR, LOGIC_DIR, EXPORTS_DIR, MEMORY_DIR, VECTOR_DB_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 
