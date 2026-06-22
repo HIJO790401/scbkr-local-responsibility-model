@@ -76,14 +76,14 @@ def mask_api_key(api_key):
 def can_enable_generate(settings, permissions):
     """Return whether future generation may be enabled by model settings and permissions."""
     validate_model_settings(settings)
+    if settings["mode"] == "sandbox":
+        return settings["provider"] == "sandbox_mock_model" and permissions.get("model_generate", False) is True
     if not settings["enabled"]:
         return False
-    if settings["mode"] != "sandbox" and not settings["model_name"].strip():
+    if not settings["model_name"].strip():
         return False
     if settings["last_test_status"] != "success":
         return False
     if settings["mode"] in ("external", "hybrid") and not permissions.get("external_api", False):
-        return False
-    if settings["mode"] == "sandbox" and not permissions.get("model_generate", False):
         return False
     return True

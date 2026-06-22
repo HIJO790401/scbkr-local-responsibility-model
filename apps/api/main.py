@@ -362,6 +362,8 @@ def generate(task_id: str) -> dict[str, Any]:
     status_before = task.get("status")
     _append_task_event("generation_requested", task, status_before=status_before, status_after=status_before)
     try:
+        if MODEL_SETTINGS.get("mode") == "sandbox" and PERMISSIONS.get("model_generate") is not True:
+            raise PermissionError("model_generate permission is required before sandbox generation")
         assert_permission_allowed(PERMISSIONS, "model_generate")
         if MODEL_SETTINGS["mode"] in ("external", "hybrid"):
             assert_permission_allowed(PERMISSIONS, "external_api_call")
