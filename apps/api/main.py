@@ -943,7 +943,25 @@ def _dc_item_from_task(task: dict[str, Any], kind: str) -> dict[str, Any]:
 
 def _dc_item_from_storage(item: dict[str, Any]) -> dict[str, Any]:
     payload = item.get("payload") or {}
-    return {"id": item.get("item_id"), "item_id": item.get("item_id"), "title": payload.get("title") or payload.get("name"), "summary": payload.get("summary") or payload.get("purpose"), "task_id": item.get("task_id"), "created_at": item.get("created_at"), "stored_at": payload.get("stored_at") or item.get("created_at"), "hash": item.get("content_hash") or payload.get("hash"), "target": item.get("target"), "path": item.get("relative_path"), "preview": _preview(payload.get("content") or payload), **payload}
+    relative_path = item.get("relative_path")
+    storage_location = item.get("storage_location") or relative_path
+    return {
+        "id": item.get("item_id"),
+        "item_id": item.get("item_id"),
+        "title": payload.get("title") or payload.get("name"),
+        "summary": payload.get("summary") or payload.get("purpose"),
+        "task_id": item.get("task_id"),
+        "created_at": item.get("created_at"),
+        "stored_at": payload.get("stored_at") or item.get("created_at"),
+        "hash": item.get("content_hash") or payload.get("hash"),
+        "content_hash": item.get("content_hash"),
+        "target": item.get("target"),
+        "path": relative_path,
+        "storage_location": storage_location,
+        "relative_path": relative_path,
+        "preview": _preview(payload.get("content") or payload),
+        "payload": payload,
+    }
 
 @app.get("/api/data-center/overview")
 def data_center_overview() -> dict[str, Any]:

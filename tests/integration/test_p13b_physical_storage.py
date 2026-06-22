@@ -19,7 +19,7 @@ from apps.api import main
 from apps.api.main import TASKS, app
 from core.ledger.jsonl_ledger import read_ledger_events
 from core.storage.runtime_paths import REPO_ROOT
-from core.storage.sqlite_runtime import list_memory_rules, list_storage_items
+from core.storage.sqlite_runtime import list_memory_rules, list_storage_items, save_storage_item
 
 client = TestClient(app)
 REPO_SQLITE_PATH = REPO_ROOT / "data" / "scbkr.sqlite3"
@@ -197,6 +197,44 @@ def test_p15d_storage_confirm_physical_write_data_center_round_trip(monkeypatch,
     assert overview["corpus_count"] >= 1
     assert overview["logic_count"] >= 1
     assert storage["items"][0]["written_targets"]
+
+    written_by_target = {item["target"]: item for item in result["written_items"]}
+    corpus_storage_item = next(item for item in list_storage_items(task_id=task["task_id"]) if item["target"] == "corpus")
+    logic_storage_item = next(item for item in list_storage_items(task_id=task["task_id"]) if item["target"] == "logic")
+    for storage_item, written_item in (
+        (corpus_storage_item, written_by_target["corpus"]),
+        (logic_storage_item, written_by_target["logic"]),
+    ):
+        authoritative_hash = storage_item["content_hash"]
+        malicious_payload = {
+            **storage_item["payload"],
+            "hash": "payload_hash",
+            "content_hash": "payload_content_hash",
+            "item_id": "payload_item_id",
+            "task_id": "payload_task_id",
+            "target": "payload_target",
+            "path": "payload/path.json",
+            "relative_path": "payload/relative.json",
+            "storage_location": "payload/storage.json",
+            "created_at": "payload_created_at",
+            "stored_at": "payload_stored_at",
+            "preview": "payload_preview",
+        }
+        save_storage_item({**storage_item, "payload": malicious_payload})
+
+        section = main.data_center_section(storage_item["target"])
+        dc_item = next(item for item in section["items"] if item["item_id"] == storage_item["item_id"])
+        assert dc_item["hash"] == authoritative_hash
+        assert dc_item["hash"] == written_item["hash"]
+        assert dc_item["content_hash"] == authoritative_hash
+        assert dc_item["path"] == storage_item["relative_path"]
+        assert dc_item["storage_location"] == storage_item.get("storage_location", storage_item["relative_path"])
+        assert dc_item["target"] == storage_item["target"]
+        assert dc_item["item_id"] == storage_item["item_id"]
+        assert dc_item["payload"]["hash"] == "payload_hash"
+        assert dc_item["payload"]["item_id"] == "payload_item_id"
+        assert dc_item["payload"]["target"] == "payload_target"
+
     assert any(event["event_type"] == "database_written" for event in ledger["items"])
 
 
@@ -215,7 +253,7 @@ def test_p15d_vector_metadata_and_memory_write(monkeypatch, isolated_runtime):
     result = response.json()["storage_result"]
     assert set(result["written_targets"]) == {"vector", "memory"}
     vector = main.data_center_section("vector")["items"][0]
-    assert vector["embedding_status"] == "pending"
-    assert vector["embedding"] is None
+    assert vector["payload"]["embedding_status"] == "pending"
+    assert vector["payload"]["embedding"] is None
     memory = main.data_center_section("memory")["items"][0]
-    assert memory["confirmed_by_user"] is True
+    assert memory["payload"]["confirmed_by_user"] is True
