@@ -4,9 +4,18 @@
 The explicit hidden imports keep PyInstaller from relying on uvicorn string app
 loading to discover the FastAPI app and responsibility-chain modules.
 """
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
+
+SPEC_DIR = Path(SPECPATH).resolve()
+REPO_ROOT = SPEC_DIR.parent
+SIDECAR_ENTRY = REPO_ROOT / "apps" / "api" / "sidecar.py"
+
+if not SIDECAR_ENTRY.exists():
+    raise FileNotFoundError(f"SCBKR sidecar entrypoint not found: {SIDECAR_ENTRY}")
 
 hiddenimports = [
     "apps.api.main",
@@ -40,8 +49,8 @@ for package in (
 
 
 a = Analysis(
-    ["apps/api/sidecar.py"],
-    pathex=[],
+    [str(SIDECAR_ENTRY)],
+    pathex=[str(REPO_ROOT)],
     binaries=[],
     datas=[],
     hiddenimports=hiddenimports,
