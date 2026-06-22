@@ -51,12 +51,25 @@ from core.workflow.review_flow import apply_review_decision
 from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
 from core.retrieval.vector_store import get_vector_store_status
 
+LOCAL_DESKTOP_API_BASE_URL = "http://127.0.0.1:8787"
+LOCAL_DESKTOP_CORS_ORIGINS = [
+    "http://127.0.0.1:5500",
+    "http://localhost:5500",
+    "http://127.0.0.1:8787",
+    "http://localhost:8787",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "null",
+]
+LOCAL_DESKTOP_CORS_METHODS = ["OPTIONS", "GET", "POST", "PUT", "PATCH", "DELETE"]
+
 app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.14.0-p14c-preview")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5500", "http://127.0.0.1:5500"],
+    allow_origins=LOCAL_DESKTOP_CORS_ORIGINS,
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=LOCAL_DESKTOP_CORS_METHODS,
     allow_headers=["*"],
 )
 
@@ -170,7 +183,7 @@ def health() -> dict[str, Any]:
 @app.get("/api/system/status")
 def system_status() -> dict[str, Any]:
     return {
-        "api_url": "http://localhost:8787",
+        "api_url": LOCAL_DESKTOP_API_BASE_URL,
         "web_url": "http://localhost:5500",
         "runtime": "P13-A/B/C SQLite + JSONL retrieval runtime",
         "physical_write_performed": False,
@@ -184,20 +197,25 @@ def system_status() -> dict[str, Any]:
 
 @app.get("/api/desktop/status")
 def desktop_status() -> dict[str, Any]:
+    sidecar_host = os.environ.get("SCBKR_API_HOST", "127.0.0.1")
+    sidecar_port = int(os.environ.get("SCBKR_API_PORT", "8787"))
+    preview_package_built = os.environ.get("SCBKR_DESKTOP_PREVIEW") == "1"
     return {
         "desktop_stage": "P14-C-preview",
         "desktop_shell": True,
         "installer_built": False,
-        "preview_package_built": False,
+        "preview_package_built": preview_package_built,
         "tauri_skeleton": True,
         "sidecar_supported": True,
-        "sidecar_running": os.environ.get("SCBKR_DESKTOP_PREVIEW") == "1",
+        "sidecar_running": True,
         "sandbox_available": True,
         "api_status": "running",
+        "api_server_reachable": True,
+        "api_url": f"http://{sidecar_host}:{sidecar_port}",
         "model_mode": MODEL_SETTINGS.get("mode"),
         "local_model_base_url": MODEL_SETTINGS.get("base_url"),
-        "sidecar_host": os.environ.get("SCBKR_API_HOST", "127.0.0.1"),
-        "sidecar_port": int(os.environ.get("SCBKR_API_PORT", "8787")),
+        "sidecar_host": sidecar_host,
+        "sidecar_port": sidecar_port,
         "data_dir": os.environ.get("SCBKR_DATA_DIR"),
         "external_call_required": MODEL_SETTINGS.get("mode") in ("external", "hybrid"),
         "preview": True,
