@@ -29,7 +29,7 @@ from core.review_rules.rule_confirmation import confirm_memory_rule_plan
 from core.review_rules.rule_draft import build_memory_rule_draft
 from core.scbkr.confirmation import all_dimensions_confirmed, confirm_all_dimensions
 from core.scbkr.generator import create_scbkr_draft
-from core.storage.physical_store import commit_memory_rule, commit_storage_items
+from core.storage.physical_store import commit_memory_rule, commit_storage_items, hash_payload
 from core.storage.sqlite_runtime import (
     get_task_ledger,
     init_sqlite_runtime,
@@ -207,6 +207,23 @@ def _memory_rule_physical_write_bound(task: dict[str, Any]) -> bool:
         return True
     return False
 
+
+
+def _storage_plan_hash(plan: dict[str, Any]) -> str:
+    return hash_payload(plan or {})
+
+
+def _storage_commit_key(task: dict[str, Any], selected_targets: list[str], storage_plan_hash: str) -> str:
+    snapshot_hash = (task.get("scbkr") or {}).get("confirmed_snapshot_hash") or hash_payload((task.get("scbkr") or {}).get("confirmed_snapshot") or task.get("scbkr") or {})
+    return hash_payload({"task_id": task.get("task_id"), "selected_targets": sorted(selected_targets), "storage_plan_hash": storage_plan_hash, "confirmed_snapshot_hash": snapshot_hash})
+
+
+def _already_committed_response(task: dict[str, Any]) -> dict[str, Any]:
+    result = dict(task.get("storage_result") or {})
+    result["already_committed"] = True
+    result["message"] = "本任務已完成入庫，不能重複寫入。請到資料中心查看已寫入資料。"
+    task["storage_result"] = result
+    return _task_response(task, already_committed=True, message=result["message"])
 
 def _task_response(task: dict[str, Any], **extra: Any) -> dict[str, Any]:
     response = dict(task)
@@ -724,6 +741,8 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     status_before = task.get("status")
     requested_event: dict[str, Any] | None = None
     try:
+        if task.get("storage_confirmed") is True and task.get("physical_write_performed") is True and (task.get("storage_result") or {}).get("written_items"):
+            return _already_committed_response(task)
         if task.get("review_passed") is not True or task.get("review_result", {}).get("review_passed") is not True:
             raise ValueError("尚未通過驗收，不能入庫。請先按「通過驗收」。")
         if task.get("status") not in ("review_passed", "waiting_storage_confirm", "storage_requested"):
@@ -762,10 +781,17 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         physical_targets = [target for target in plan_targets if target in ("vector_db", "corpus", "logic", "memory")]
         if legacy_exports_requested and "exports" not in physical_targets:
             physical_targets.append("exports")
-        requested_event = _append_task_event("storage_physical_write_requested", task, status_before=status_before, status_after=status_before, payload={"selected_targets": selected_targets, "confirmed_by": "user"})
-        task["storage_plan"] = build_storage_commit_plan(task, task.get("review_result", {}), plan_targets, storage_signature=signature if "memory" in plan_targets else None, storage_notes=payload.get("storage_notes", "P15-C user second-confirmed storage commit."))
-        task["storage_plan"]["selected_targets"] = selected_targets
-        task["storage_plan"]["physical_write_performed"] = False
+        proposed_plan = build_storage_commit_plan(task, task.get("review_result", {}), plan_targets, storage_signature=signature if "memory" in plan_targets else None, storage_notes=payload.get("storage_notes", "P15-C user second-confirmed storage commit."))
+        proposed_plan["selected_targets"] = selected_targets
+        proposed_plan["physical_write_performed"] = False
+        storage_plan_hash = _storage_plan_hash(proposed_plan)
+        storage_commit_key = _storage_commit_key(task, selected_targets, storage_plan_hash)
+        if task.get("storage_commit_key") == storage_commit_key and task.get("storage_result", {}).get("written_items"):
+            return _already_committed_response(task)
+        requested_event = _append_task_event("storage_physical_write_requested", task, status_before=status_before, status_after=status_before, payload={"selected_targets": selected_targets, "confirmed_by": "user", "storage_plan_hash": storage_plan_hash, "storage_commit_key": storage_commit_key})
+        task["storage_plan"] = proposed_plan
+        task["storage_plan"]["storage_plan_hash"] = storage_plan_hash
+        task["storage_plan"]["storage_commit_key"] = storage_commit_key
         physical_plan = dict(task["storage_plan"])
         physical_plan["selected_targets"] = physical_targets
         physical_plan["allow_vector_metadata"] = "vector_db" in physical_targets
@@ -782,9 +808,11 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         task["status"] = "storage_committed"
         task["storage_plan"]["physical_write_performed"] = True
         task["storage_plan"]["next_required_action"] = "storage_committed"
+        task["storage_plan_hash"] = storage_plan_hash
+        task["storage_commit_key"] = storage_commit_key
         skipped_reasons = {target: "未產生實體寫入項目，請檢查入庫條件。" for target in skipped_targets}
-        written_items = [{"item_id": item.get("item_id"), "target": to_ui_target(item.get("target")), "hash": item.get("content_hash"), "path": item.get("relative_path"), "storage_location": item.get("relative_path"), "stored_at": item.get("created_at")} for item in items]
-        task["storage_result"] = {"status": "storage_committed", "selected_targets": selected_targets, "written_targets": written_targets, "skipped_targets": skipped_targets, "skipped_reasons": skipped_reasons, "written_items": written_items, "storage_item_ids": [item.get("item_id") for item in items], "hashes": [item.get("content_hash") for item in items], "data_dir": str(current_data_dir()), "ledger_id": task.get("ledger_id"), "hash": items[0].get("content_hash") if items else None, "physical_write_performed": True}
+        written_items = [{"item_id": item.get("item_id"), "target": to_ui_target(item.get("target")), "hash": item.get("content_hash"), "path": item.get("relative_path"), "storage_location": item.get("relative_path"), "stored_at": item.get("stored_at") or item.get("created_at")} for item in items]
+        task["storage_result"] = {"status": "storage_committed", "selected_targets": selected_targets, "written_targets": written_targets, "skipped_targets": skipped_targets, "skipped_reasons": skipped_reasons, "written_items": written_items, "storage_item_ids": [item.get("item_id") for item in items], "hashes": [item.get("content_hash") for item in items], "data_dir": str(current_data_dir()), "ledger_id": task.get("ledger_id"), "hash": items[0].get("content_hash") if items else None, "physical_write_performed": True, "storage_plan_hash": storage_plan_hash, "storage_commit_key": storage_commit_key}
         save_task(task)
         _append_task_event("database_written", task, status_before=status_before, status_after=task["status"], payload=task["storage_result"])
         _append_task_event("storage_physical_write_completed", task, status_before=status_before, status_after=task["status"], payload={"item_count": len(items), "physical_write_performed": True})
@@ -961,19 +989,57 @@ def _dc_item_from_storage(item: dict[str, Any]) -> dict[str, Any]:
         "relative_path": relative_path,
         "preview": _preview(payload.get("content") or payload),
         "payload": payload,
+        "status": item.get("status", "active"),
+        "version": item.get("version", 1),
+        "parent_item_id": item.get("parent_item_id"),
+        "superseded_by": item.get("superseded_by"),
+        "user_event_date": item.get("user_event_date"),
+        "event_date_source": item.get("event_date_source", "unset"),
+        "event_date_confirmed": item.get("event_date_confirmed", False),
+        "updated_at": item.get("updated_at"),
+        "archived_at": item.get("archived_at"),
+        "revoked_at": item.get("revoked_at"),
     }
 
 @app.get("/api/data-center/overview")
-def data_center_overview() -> dict[str, Any]:
-    tasks = list_persisted_tasks(limit=1000)
-    storage = list_persisted_storage_items(limit=1000)
-    ledger = read_ledger_events()
-    return {"tasks_count": len(tasks), "confirmed_tasks_count": sum(1 for t in tasks if t.get("confirmed") is True), "generation_results_count": sum(1 for t in tasks if t.get("generation_result")), "review_records_count": sum(1 for t in tasks if t.get("review_result")), "storage_records_count": len(storage), "vector_count": sum(1 for i in storage if i.get("target") == "vector_db"), "corpus_count": sum(1 for i in storage if i.get("target") == "corpus"), "logic_count": sum(1 for i in storage if i.get("target") == "logic"), "memory_count": sum(1 for i in storage if i.get("target") == "memory"), "ledger_events_count": len(ledger)}
+def data_center_overview(task_id: str | None = None) -> dict[str, Any]:
+    tasks_all = list_persisted_tasks(limit=1000)
+    storage_all = list_persisted_storage_items(limit=1000)
+    ledger_all = read_ledger_events()
+    tasks = [t for t in tasks_all if not task_id or t.get("task_id") == task_id]
+    storage = [i for i in storage_all if not task_id or i.get("task_id") == task_id]
+    ledger = [e for e in ledger_all if not task_id or e.get("task_id") == task_id]
+    def counts(prefix: str, items: list[dict[str, Any]], events: list[dict[str, Any]]) -> dict[str, int]:
+        return {
+            f"{prefix}storage_records_count": len(items),
+            f"{prefix}vector_count": sum(1 for i in items if i.get("target") == "vector_db"),
+            f"{prefix}corpus_count": sum(1 for i in items if i.get("target") == "corpus"),
+            f"{prefix}logic_count": sum(1 for i in items if i.get("target") == "logic"),
+            f"{prefix}memory_count": sum(1 for i in items if i.get("target") == "memory"),
+            f"{prefix}ledger_events_count": len(events),
+        }
+    return {
+        "mode": "task" if task_id else "all",
+        "task_id": task_id,
+        "tasks_count": len(tasks),
+        "confirmed_tasks_count": sum(1 for t in tasks if t.get("confirmed") is True),
+        "generation_results_count": sum(1 for t in tasks if t.get("generation_result")),
+        "review_records_count": sum(1 for t in tasks if t.get("review_result")),
+        **counts("", storage, ledger),
+        **counts("total_", storage_all, ledger_all),
+        "total_tasks_count": len(tasks_all),
+        "total_confirmed_tasks_count": sum(1 for t in tasks_all if t.get("confirmed") is True),
+        "total_generation_results_count": sum(1 for t in tasks_all if t.get("generation_result")),
+        "total_review_records_count": sum(1 for t in tasks_all if t.get("review_result")),
+    }
 
 @app.get("/api/data-center/{section}")
-def data_center_section(section: str) -> dict[str, Any]:
-    tasks = list_persisted_tasks(limit=200)
-    storage = list_persisted_storage_items(limit=500)
+def data_center_section(section: str, task_id: str | None = None) -> dict[str, Any]:
+    tasks_all = list_persisted_tasks(limit=1000)
+    storage_all = list_persisted_storage_items(limit=1000)
+    tasks = [t for t in tasks_all if not task_id or t.get("task_id") == task_id]
+    storage = [i for i in storage_all if not task_id or i.get("task_id") == task_id]
+    ledger = read_ledger_events(task_id=task_id) if task_id else read_ledger_events()
     if section == "tasks": items = [_dc_item_from_task(t, "task") for t in tasks]
     elif section == "confirmations": items = [_dc_item_from_task(t, "scbkr") for t in tasks if t.get("confirmed")]
     elif section == "generations": items = [_dc_item_from_task(t, "generation_result") for t in tasks if t.get("generation_result")]
@@ -983,9 +1049,9 @@ def data_center_section(section: str) -> dict[str, Any]:
     elif section == "corpus": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "corpus"]
     elif section == "logic": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "logic"]
     elif section == "memory": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "memory"]
-    elif section == "ledger": items = read_ledger_events()[-200:]
+    elif section == "ledger": items = ledger[-200:]
     else: raise HTTPException(status_code=404, detail="data center section not found")
-    return {"section": section, "count": len(items), "items": items, "empty_message": "目前尚無資料。" if not items else ""}
+    return {"section": section, "mode": "task" if task_id else "all", "task_id": task_id, "count": len(items), "items": items, "empty_message": "目前尚無資料。" if not items else ""}
 
 @app.get("/api/tasks/{task_id}/storage-items")
 def get_task_storage_items(task_id: str) -> dict[str, Any]:
