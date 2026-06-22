@@ -260,3 +260,82 @@ def test_p14c_docs_describe_build_time_generated_preview_icon():
         assert "auto-update" in text
         assert "bundled model" in text
         assert "bundled API key" in text
+
+
+def test_p14c_final_preview_readme_and_metadata_contract():
+    text = Path("scripts/build_desktop_preview_windows.ps1").read_text(encoding="utf-8")
+    for phrase in (
+        "unsigned preview package",
+        "not a formal production installer",
+        "not a production release",
+        "No bundled model",
+        "No bundled API key",
+        "Sandbox Mode is the main P14-C Final test path",
+        "without LM Studio",
+        "without Ollama",
+        "Health online",
+        "Sandbox testing order",
+        "external_call_performed=false",
+        "model_provider=sandbox_mock_model",
+        "BUILD_METADATA.json",
+        "bundled_model = $false",
+        "bundled_api_key = $false",
+    ):
+        assert phrase in text
+    for step in (
+        "Open the App",
+        "Confirm Health online",
+        "Confirm Mode sandbox",
+        "Create a task",
+        "Generate SCBKR",
+        "Confirm the responsibility chain",
+        "Enable model_generate",
+        "Start generation",
+        "Pass review",
+        "Generate a storage request",
+        "Confirm the storage plan",
+        "Confirm SCBKR completion",
+    ):
+        assert step in text
+
+
+def test_p14c_final_preview_packaging_fails_missing_required_artifacts():
+    text = Path("scripts/build_desktop_preview_windows.ps1").read_text(encoding="utf-8")
+    assert "P14-C sidecar executable missing" in text
+    assert "P14-C preview artifact missing required file" in text
+    assert "README_PREVIEW.md" in text
+    assert "VERSION" in text
+    assert "BUILD_METADATA.json" in text
+    assert "P14-C preview artifact missing desktop executable or NSIS preview installer" in text
+
+
+def test_p14c_final_smoke_script_exists_and_covers_full_loop():
+    smoke = Path("scripts/smoke_p14c_preview_windows.ps1")
+    assert smoke.exists()
+    text = smoke.read_text(encoding="utf-8")
+    for phrase in (
+        "/health",
+        "/api/desktop/status",
+        "/api/settings/model",
+        "/api/model/test",
+        "/api/tasks/create",
+        "/scbkr",
+        "/confirm",
+        "model_generate",
+        "/generate",
+        "generation_result.sandbox",
+        "generation_result.external_call_performed",
+        "/review",
+        "/storage-request",
+        "/storage-confirm",
+        "/complete",
+        "data_dir",
+    ):
+        assert phrase in text
+
+
+def test_p14c_final_sidecar_strict_loopback_only():
+    sidecar = Path("apps/api/sidecar.py").read_text(encoding="utf-8")
+    assert 'os.environ.setdefault("SCBKR_API_HOST", "127.0.0.1")' in sidecar
+    assert 'if host != "127.0.0.1"' in sidecar
+    assert "SCBKR API sidecar port already in use" in sidecar

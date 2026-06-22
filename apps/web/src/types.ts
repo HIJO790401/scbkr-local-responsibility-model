@@ -57,5 +57,8 @@ export type DesktopStatus = {
   data_dir?: string | null;
   external_call_required: boolean;
   preview?: boolean;
+  preview_package?: string;
   production_packaging: boolean;
+  production_packaging_status?: string;
+  installer?: string;
 };

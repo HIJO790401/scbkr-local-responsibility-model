@@ -78,21 +78,74 @@ New-Item -ItemType Directory -Force -Path $DesktopDir | Out-Null
 foreach ($Output in $DesktopOutputs) {
   Copy-Item -Force $Output.FullName $DesktopDir
 }
-Copy-Item -Force "dist\windows-preview\sidecar\scbkr-api.exe" $PreviewDir
+$SidecarExe = "dist\windows-preview\sidecar\scbkr-api.exe"
+if (-not (Test-Path $SidecarExe)) {
+  throw "P14-C sidecar executable missing: $SidecarExe"
+}
+Copy-Item -Force $SidecarExe $PreviewDir
 Copy-Item -Force $StagedSidecar $PreviewDir
 Copy-Item -Recurse -Force "apps\web\dist" (Join-Path $PreviewDir "web-dist")
 @"
-SCBKR Windows Desktop Preview Package
+SCBKR P14-C Windows Desktop Preview
 
-Unsigned preview package. Not a production installer and not a formal production release.
-No model is bundled.
-No API key is bundled.
-Sandbox Mode can run without a model or API key.
-LM Studio local endpoint is optional and can be connected manually at http://127.0.0.1:1234/v1.
-User data is stored under the desktop app data directory via SCBKR_DATA_DIR.
-No code signing is performed.
-No auto-update is enabled.
+This is an unsigned preview package for testing only. It is not a formal production installer and it is not a production release.
+
+What is included / not included:
+- Includes the SCBKR desktop preview app or NSIS preview installer.
+- Includes the local scbkr-api.exe sidecar.
+- Does not include any bundled model. No bundled model is shipped in this artifact.
+- Does not include any bundled API key. No bundled API key is shipped in this artifact.
+- Does not include code signing.
+- Does not include auto-update.
+
+Windows Defender / SmartScreen may warn because this is an unsigned preview. That warning is expected for this preview package and does not mean this is the future formally signed release.
+
+Sandbox Mode is the main P14-C Final test path. It can test the full workflow without a model, without an API key, without LM Studio, without Ollama, and without any external model service. Local model connection is a later model-settings-page feature and is not the main goal of this P14-C Final preview.
+
+After opening the app, you should see Health online. The runtime should show P14-C Windows Desktop Preview. The API sidecar binds to 127.0.0.1:8787.
+
+Sandbox testing order:
+1. Open the App.
+2. Confirm Health online.
+3. Confirm Mode sandbox.
+4. Create a task.
+5. Generate SCBKR.
+6. Confirm the responsibility chain.
+7. Enable model_generate.
+8. Start generation.
+9. Pass review.
+10. Generate a storage request.
+11. Confirm the storage plan.
+12. Confirm SCBKR completion.
+
+Expected Sandbox output:
+- sandbox=true
+- external_call_performed=false
+- model_provider=sandbox_mock_model
+
+If the API is offline, confirm that the desktop preview package launched the scbkr-api.exe sidecar. Normal users should not need to run Python, Node, npm, uvicorn, PowerShell, LM Studio, Ollama, or provide an API key for Sandbox Mode.
 "@ | Set-Content -Encoding UTF8 (Join-Path $PreviewDir "README_PREVIEW.md")
 "0.14.0-p14c-preview" | Set-Content -Encoding UTF8 (Join-Path $PreviewDir "VERSION")
+@{
+  version = "0.14.0-p14c-preview"
+  desktop_stage = "P14-C-preview"
+  built_at_utc = (Get-Date).ToUniversalTime().ToString("o")
+  api_base_url = "http://127.0.0.1:8787"
+  sidecar = "scbkr-api.exe"
+  production_release = $false
+  code_signed = $false
+  auto_update = $false
+  bundled_model = $false
+  bundled_api_key = $false
+} | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $PreviewDir "BUILD_METADATA.json")
+
+foreach ($RequiredFile in @("README_PREVIEW.md", "VERSION", "BUILD_METADATA.json", "scbkr-api.exe")) {
+  if (-not (Test-Path (Join-Path $PreviewDir $RequiredFile))) {
+    throw "P14-C preview artifact missing required file: $RequiredFile"
+  }
+}
+if ((Get-ChildItem -Path $DesktopDir -Filter "*.exe" -File -ErrorAction SilentlyContinue).Count -eq 0) {
+  throw "P14-C preview artifact missing desktop executable or NSIS preview installer in desktop directory."
+}
 
 Write-Host "Preview package staged at $PreviewDir"

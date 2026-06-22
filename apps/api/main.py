@@ -219,7 +219,10 @@ def desktop_status() -> dict[str, Any]:
         "data_dir": os.environ.get("SCBKR_DATA_DIR"),
         "external_call_required": MODEL_SETTINGS.get("mode") in ("external", "hybrid"),
         "preview": True,
+        "preview_package": "built" if preview_package_built else "preview runtime",
         "production_packaging": False,
+        "production_packaging_status": "future stage pending",
+        "installer": "not a production installer",
     }
 
 
@@ -561,6 +564,30 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         task["physical_write_performed"] = False
         _append_task_event("storage_physical_write_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error_message": str(exc), "physical_write_performed": False})
         save_task(task)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/tasks/{task_id}/complete")
+def complete_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    task = _get_task(task_id)
+    status_before = task.get("status")
+    try:
+        if task.get("storage_confirmed") is not True or task.get("physical_write_performed") is not True:
+            raise ValueError("storage_confirmed physical write is required before completion")
+        if task.get("status") not in ("storage_committed", "completed"):
+            raise ValueError("task must be storage_committed before completion")
+        task["status"] = "completed"
+        task["completed"] = True
+        task["final_result"] = {
+            "task_id": task.get("task_id"),
+            "status": "completed",
+            "generation_result": task.get("generation_result"),
+            "storage_items": task.get("storage_items", []),
+        }
+        save_task(task)
+        _append_task_event("task_completed", task, status_before=status_before, status_after=task["status"], payload={"completed": True})
+        return task
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

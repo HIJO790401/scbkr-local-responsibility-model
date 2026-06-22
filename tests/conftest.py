@@ -87,6 +87,7 @@ except Exception:
                         "memory-rule-confirm": lambda: main.memory_rule_confirm(task_id, json or {}),
                         "storage-request": lambda: main.storage_request(task_id),
                         "storage-confirm": lambda: main.storage_confirm(task_id, json or {}),
+                        "complete": lambda: main.complete_task(task_id, json or {}),
                     }
                     if action in handlers:
                         return _Response(200, handlers[action]())
@@ -94,6 +95,8 @@ except Exception:
                     return _Response(200, main.test_model())
                 if path == "/api/settings/permissions":
                     return _Response(200, main.set_permissions(json or {}))
+                if path == "/api/settings/model":
+                    return _Response(200, main.set_model_settings(json or {}))
                 return _Response(404, {"detail": "not found"})
             except HTTPException as exc:
                 return _Response(exc.status_code, {"detail": exc.detail})

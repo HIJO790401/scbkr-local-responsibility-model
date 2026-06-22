@@ -59,7 +59,9 @@ jobs:
 
       - name: Stage preview artifact
         shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File scripts/build_desktop_preview_windows.ps1
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/build_desktop_preview_windows.ps1
+          powershell -ExecutionPolicy Bypass -File scripts/smoke_p14c_preview_windows.ps1
 
       - name: Upload Windows desktop preview artifact
         uses: actions/upload-artifact@v4
