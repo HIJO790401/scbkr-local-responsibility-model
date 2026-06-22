@@ -16,6 +16,10 @@ export type ModelSettings = {
   last_test_message: string;
   sandbox?: boolean;
   external_call_performed?: boolean;
+  temperature?: number;
+  max_tokens?: number;
+  context_length?: number;
+  timeout?: number;
 };
 
 export type Permissions = Record<string, boolean | string | null>;

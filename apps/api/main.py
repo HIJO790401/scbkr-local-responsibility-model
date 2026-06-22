@@ -131,17 +131,42 @@ def _public_model_settings() -> dict[str, Any]:
 
 
 def _apply_sandbox_defaults(settings: dict[str, Any]) -> dict[str, Any]:
-    if settings.get("mode") == "sandbox":
-        settings.update(
-            {
-                "provider": SANDBOX_PROVIDER,
-                "base_url": "",
-                "api_key": "",
-                "model_name": SANDBOX_PROVIDER,
-            }
-        )
+    return _apply_provider_defaults(settings, {})
+
+
+
+def _apply_provider_defaults(settings: dict[str, Any], payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = payload or {}
+    provider = settings.get("provider")
+    if payload.get("mode") == "sandbox" or provider == SANDBOX_PROVIDER:
+        settings.update({"mode": "sandbox", "provider": SANDBOX_PROVIDER, "base_url": "", "api_key": "", "model_name": SANDBOX_PROVIDER})
+        return settings
+    if provider == "lm_studio":
+        settings["mode"] = "local"
+        if not payload.get("base_url"):
+            settings["base_url"] = "http://127.0.0.1:1234/v1"
+        if not payload.get("api_key"):
+            settings["api_key"] = "local"
+    elif provider == "ollama":
+        settings["mode"] = "local"
+        if not payload.get("base_url"):
+            settings["base_url"] = "http://127.0.0.1:11434/v1"
+        if not payload.get("api_key"):
+            settings["api_key"] = "local"
+    elif provider == "openai_compatible":
+        if settings.get("mode") not in ("external", "hybrid"):
+            settings["mode"] = "external"
     return settings
 
+
+def _friendly_model_error(settings: dict[str, Any], message: str) -> str:
+    provider = settings.get("provider")
+    if "api_key" in message.lower() or "authorization" in message.lower():
+        return "API key 缺失或無效，請輸入正確 API key。"
+    if provider in ("lm_studio", "ollama"):
+        name = "LM Studio" if provider == "lm_studio" else "Ollama"
+        return f"無法連線到本地模型，請確認 {name} Server 是否已啟動、Base URL 與模型名稱是否正確。"
+    return "無法連線到 API 模型，請確認 API base URL、API key 與模型名稱。"
 
 def _get_task(task_id: str) -> dict[str, Any]:
     task = TASKS.get(task_id)
@@ -233,10 +258,10 @@ def get_model_settings() -> dict[str, Any]:
 
 @app.post("/api/settings/model")
 def set_model_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    next_settings = {**MODEL_SETTINGS, **payload, "last_test_status": "untested", "updated_at": _now()}
+    next_settings = {**MODEL_SETTINGS, **payload, "enabled": False, "last_test_status": "untested", "last_test_message": "", "updated_at": _now()}
     if "api_key" not in payload:
         next_settings["api_key"] = MODEL_SETTINGS.get("api_key", "")
-    _apply_sandbox_defaults(next_settings)
+    _apply_provider_defaults(next_settings, payload)
     validate_model_settings(next_settings)
     MODEL_SETTINGS.clear()
     MODEL_SETTINGS.update(next_settings)
@@ -258,7 +283,15 @@ def set_permissions(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/model/test")
-def test_model() -> dict[str, Any]:
+def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    if payload:
+        next_settings = {**MODEL_SETTINGS, **payload, "updated_at": _now()}
+        if "api_key" not in payload:
+            next_settings["api_key"] = MODEL_SETTINGS.get("api_key", "")
+        _apply_provider_defaults(next_settings, payload)
+        validate_model_settings(next_settings)
+        MODEL_SETTINGS.clear()
+        MODEL_SETTINGS.update(next_settings)
     try:
         if MODEL_SETTINGS.get("mode") == "sandbox":
             _apply_sandbox_defaults(MODEL_SETTINGS)
@@ -274,11 +307,11 @@ def test_model() -> dict[str, Any]:
             )
             status = {**make_test_status(True, parse_chat_completion_response(response)), "test_result_kind": "local_model_success" if MODEL_SETTINGS["mode"] == "local" else "external_model_success"}
     except PermissionError as exc:
-        status = make_test_status(False, f"external_api_call 權限或高風險確認未通過: {exc}")
+        status = make_test_status(False, f"API 模型需要先明確開啟 external_api 權限；目前未開啟。{exc}")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        status = {**make_test_status(False, str(exc)), "test_result_kind": "local_model_unreachable" if MODEL_SETTINGS.get("mode") == "local" else "external_model_unreachable"}
+        status = {**make_test_status(False, _friendly_model_error(MODEL_SETTINGS, str(exc))), "raw_error": str(exc), "test_result_kind": "local_model_unreachable" if MODEL_SETTINGS.get("mode") == "local" else "external_model_unreachable"}
     MODEL_SETTINGS.update(status)
     MODEL_SETTINGS["enabled"] = status["last_test_status"] == "success"
     result = _public_model_settings()
