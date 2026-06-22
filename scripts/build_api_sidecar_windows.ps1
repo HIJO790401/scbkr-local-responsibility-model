@@ -8,7 +8,23 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not $IsWindows) {
+function Test-IsWindows {
+  if ($env:OS -eq "Windows_NT") {
+    return $true
+  }
+  if ($env:SYSTEMROOT) {
+    return $true
+  }
+  try {
+    return [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+      [System.Runtime.InteropServices.OSPlatform]::Windows
+    )
+  } catch {
+    return $false
+  }
+}
+
+if (-not (Test-IsWindows)) {
   throw "P14-C API sidecar onefile build requires Windows. This script is a Windows preview packaging script."
 }
 
