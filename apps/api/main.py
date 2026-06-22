@@ -952,7 +952,7 @@ def _dc_item_from_storage(item: dict[str, Any]) -> dict[str, Any]:
         "summary": payload.get("summary") or payload.get("purpose"),
         "task_id": item.get("task_id"),
         "created_at": item.get("created_at"),
-        "stored_at": payload.get("stored_at") or item.get("created_at"),
+        "stored_at": item.get("stored_at") or item.get("created_at"),
         "hash": item.get("content_hash") or payload.get("hash"),
         "content_hash": item.get("content_hash"),
         "target": item.get("target"),
