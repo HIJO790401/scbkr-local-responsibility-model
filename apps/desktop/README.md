@@ -42,9 +42,13 @@ staged sidecar is missing, rather than producing a partial preview package.
 
 P14-C does not commit `apps/desktop/src-tauri/icons/icon.ico` as a binary file.
 The unsigned Windows preview placeholder icon is generated at build time by
-`scripts/generate_tauri_preview_icon.py` immediately before `tauri build`, and
-`scripts/build_desktop_preview_windows.ps1` fails fast if the generated ICO is
-missing, empty, or does not start with the ICO header `00 00 01 00`.
+`scripts/generate_tauri_preview_icon.py`. Direct Tauri preview builds also run
+the generator first: `npm --prefix apps/desktop run tauri:build:preview` invokes
+`npm run generate:icon` before `tauri build`, so a fresh checkout does not need a
+pre-existing `icon.ico`. The Windows preview packaging script still runs the
+generator independently and fails fast if the generated ICO is missing, empty,
+or does not start with the ICO header `00 00 01 00`.
 
-The generated icon is only a simple preview placeholder. It is not a production brand asset, does not use any copyrighted or trademarked logo, and does not add
-code signing, auto-update, a bundled model, or a bundled API key.
+The generated icon is only an unsigned preview placeholder. It is
+not a production brand asset, does not use any copyrighted or trademarked logo, and
+does not add code signing, auto-update, a bundled model, or a bundled API key.

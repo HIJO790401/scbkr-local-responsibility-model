@@ -94,10 +94,13 @@ packaging fails.
 
 The Windows desktop preview icon is generated at build-time during the preview build by
 `scripts/generate_tauri_preview_icon.py`; the repository does not directly commit
-`apps/desktop/src-tauri/icons/icon.ico` as a binary asset. The generated ICO is
-an unsigned placeholder used only to satisfy the Tauri Windows preview build and
-must start with the ICO header `00 00 01 00`.
+`apps/desktop/src-tauri/icons/icon.ico` as a binary asset. Direct Tauri preview
+builds also generate it first: `npm --prefix apps/desktop run tauri:build:preview`
+runs `npm run generate:icon` before `tauri build`, so fresh checkouts and filtered
+CI jobs do not rely on a committed `icon.ico`. The Windows preview packaging
+script also runs the generator independently and then fail-fast validates that
+the ICO exists, is non-empty, and starts with the ICO header `00 00 01 00`.
 
-This icon is not a production brand asset and does not introduce production
-release behavior. P14-C remains unsigned and still excludes code signing,
-auto-update, bundled models, and bundled API keys.
+This icon is an unsigned preview placeholder, not a production brand asset, and
+does not introduce production release behavior. P14-C remains unsigned and still
+excludes code signing, auto-update, bundled models, and bundled API keys.
