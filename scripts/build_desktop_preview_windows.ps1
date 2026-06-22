@@ -39,6 +39,25 @@ if (-not (Test-Path $StagedSidecar)) {
 npm --prefix apps/desktop install --package-lock=false
 npm --prefix apps/desktop run check:skeleton
 
+python scripts/generate_tauri_preview_icon.py
+
+$TauriIcon = "apps\desktop\src-tauri\icons\icon.ico"
+$TauriIconError = "P14-C Tauri Windows icon missing or invalid: apps\desktop\src-tauri\icons\icon.ico"
+if (-not (Test-Path $TauriIcon)) {
+  throw $TauriIconError
+}
+$TauriIconItem = Get-Item $TauriIcon
+if ($TauriIconItem.Length -le 0) {
+  throw $TauriIconError
+}
+$TauriIconHeader = [System.IO.File]::ReadAllBytes($TauriIcon)[0..3]
+$ExpectedTauriIconHeader = @(0, 0, 1, 0)
+for ($Index = 0; $Index -lt 4; $Index++) {
+  if ($TauriIconHeader[$Index] -ne $ExpectedTauriIconHeader[$Index]) {
+    throw $TauriIconError
+  }
+}
+
 Push-Location apps/desktop
 try {
   npm run tauri:build:preview

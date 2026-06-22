@@ -168,3 +168,72 @@ def test_windows_preview_workflow_invokes_all_windows_packaging_scripts():
     assert "powershell -ExecutionPolicy Bypass -File scripts/build_api_sidecar_windows.ps1" in workflow
     assert "powershell -ExecutionPolicy Bypass -File scripts/build_desktop_preview_windows.ps1" in workflow
     assert "powershell -ExecutionPolicy Bypass -File scripts\\smoke_api_sidecar_windows.ps1" in api_script
+
+
+def test_p14c_build_time_preview_icon_generator_contract(tmp_path):
+    import subprocess
+    import sys
+
+    generator = Path("scripts/generate_tauri_preview_icon.py")
+    icon = Path("apps/desktop/src-tauri/icons/icon.ico")
+
+    assert generator.exists()
+    generator.read_text(encoding="utf-8")
+    subprocess.run([sys.executable, str(generator)], check=True)
+
+    assert icon.exists()
+    assert icon.stat().st_size > 0
+    assert icon.read_bytes()[:4] == b"\x00\x00\x01\x00"
+
+
+def test_p14c_windows_desktop_script_generates_and_validates_tauri_icon_before_build():
+    text = Path("scripts/build_desktop_preview_windows.ps1").read_text(encoding="utf-8")
+    generator_call = "python scripts/generate_tauri_preview_icon.py"
+    tauri_build = "npm run tauri:build:preview"
+    assert generator_call in text
+    assert text.index(generator_call) < text.index(tauri_build)
+    assert "apps\\desktop\\src-tauri\\icons\\icon.ico" in text
+    assert "P14-C Tauri Windows icon missing or invalid: apps\\desktop\\src-tauri\\icons\\icon.ico" in text
+    assert "Test-Path $TauriIcon" in text
+    assert "$TauriIconItem.Length -le 0" in text
+    assert "[System.IO.File]::ReadAllBytes($TauriIcon)[0..3]" in text
+    assert "$ExpectedTauriIconHeader = @(0, 0, 1, 0)" in text
+
+
+def test_p14c_tauri_bundle_icon_and_packaging_contract():
+    import json
+
+    config = json.loads(Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+    bundle = config["bundle"]
+    assert bundle["icon"] == ["icons/icon.ico"]
+    assert bundle["externalBin"] == ["sidecar/scbkr-api"]
+    assert "nsis" in bundle["targets"]
+    assert bundle["createUpdaterArtifacts"] is False
+
+
+def test_p14c_preview_icon_binary_is_not_tracked_and_is_gitignored():
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "apps/desktop/src-tauri/icons/icon.ico"],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    ).stdout.strip()
+    assert tracked == ""
+    ignore_text = Path("apps/desktop/src-tauri/.gitignore").read_text(encoding="utf-8")
+    assert "/icons/icon.ico" in ignore_text
+
+
+def test_p14c_docs_describe_build_time_generated_preview_icon():
+    readme = Path("apps/desktop/README.md").read_text(encoding="utf-8")
+    runtime = Path("docs/desktop_runtime.md").read_text(encoding="utf-8")
+    for text in (readme, runtime):
+        assert "generated" in text
+        assert "build time" in text or "build-time" in text
+        assert "placeholder" in text
+        assert "not a production brand asset" in text
+        assert "code signing" in text
+        assert "auto-update" in text
+        assert "bundled model" in text
+        assert "bundled API key" in text

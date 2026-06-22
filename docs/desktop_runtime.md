@@ -89,3 +89,15 @@ sidecar before building Tauri, then copies the Tauri desktop executable or NSIS
 installer into `dist/scbkr-windows-desktop-preview/desktop/`. If Tauri reports a
 successful build but no desktop executable or NSIS installer exists, preview
 packaging fails.
+
+### P14-C Windows preview icon generation
+
+The Windows desktop preview icon is generated at build-time during the preview build by
+`scripts/generate_tauri_preview_icon.py`; the repository does not directly commit
+`apps/desktop/src-tauri/icons/icon.ico` as a binary asset. The generated ICO is
+an unsigned placeholder used only to satisfy the Tauri Windows preview build and
+must start with the ICO header `00 00 01 00`.
+
+This icon is not a production brand asset and does not introduce production
+release behavior. P14-C remains unsigned and still excludes code signing,
+auto-update, bundled models, and bundled API keys.
