@@ -39,6 +39,8 @@ export type TaskSummary = {
   review_result?: Record<string, any>;
   storage_request?: Record<string, any>;
   storage_plan?: Record<string, any>;
+  storage_suggestion?: Record<string, any>;
+  storage_result?: Record<string, any>;
   memory_rule_draft?: Record<string, any>;
 };
 
