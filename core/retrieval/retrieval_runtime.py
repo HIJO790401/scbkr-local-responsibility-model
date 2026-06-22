@@ -36,8 +36,8 @@ def _read_payload(relative_path):
 def index_task_storage_cases(task: dict[str, Any]) -> dict[str, Any]:
     _append('retrieval_case_index_requested', task=task, payload={'task_id': task.get('task_id')})
     try:
-        if task.get('status')!='storage_committed' or task.get('physical_write_performed') is not True or task.get('review_passed') is not True:
-            raise ValueError('storage_committed review_passed task with physical writes required')
+        if task.get('status') not in ('storage_committed', 'completed') or task.get('review_passed') is not True or task.get('storage_confirmed') is not True or task.get('physical_write_performed') is not True:
+            raise ValueError('storage_committed or completed review_passed storage_confirmed task with physical writes required')
         items=task.get('storage_items') or list_storage_items(task_id=task.get('task_id'), limit=50)
         cases=[]
         for item in items:

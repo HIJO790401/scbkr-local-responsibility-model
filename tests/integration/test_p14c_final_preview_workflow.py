@@ -101,3 +101,44 @@ def test_p14c_final_review_failed_and_unsigned_storage_gates(tmp_path, monkeypat
     with pytest.raises(Exception):
         main.storage_confirm(task2["task_id"], {"storage_confirmed": True, "confirmed_by": "user"})
     assert main._get_task(task2["task_id"])["physical_write_performed"] is False
+
+
+def test_p14c_completed_task_remains_retrieval_indexable_and_advisory(tmp_path, monkeypatch):
+    main, _ = load_runtime(tmp_path, monkeypatch)
+    task = make_confirmed_task(main)
+    main.set_permissions({"model_generate": True})
+    main.generate(task["task_id"])
+    main.review(task["task_id"], {"review_decision": "pass", "reviewer_signature": "review-sig"})
+    main.storage_request(task["task_id"])
+    committed = main.storage_confirm(task["task_id"], {"storage_confirmed": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus"]})
+    assert main.index_task_retrieval(committed["task_id"])["indexed_cases"]
+
+    completed = main.complete_task(task["task_id"], {"confirmed_by": "user"})
+    assert completed["status"] == "completed"
+    assert completed["review_passed"] is True
+    assert completed["storage_confirmed"] is True
+    assert completed["physical_write_performed"] is True
+
+    indexed = main.index_task_retrieval(task["task_id"])
+    assert indexed["indexed_cases"]
+    query = main.retrieval_query({"query_text": "P14-C final sandbox workflow", "top_k": 5, "case_type": "any"})
+    assert any(candidate["task_id"] == task["task_id"] for candidate in query["candidates"])
+    assert query["requires_user_confirmation"] is True
+    assert query["auto_confirmed"] is False
+    assert query["generation_allowed"] is False
+
+
+@pytest.mark.parametrize("field", ["review_passed", "storage_confirmed", "physical_write_performed"])
+def test_p14c_completed_task_retrieval_index_keeps_required_gates(tmp_path, monkeypatch, field):
+    main, _ = load_runtime(tmp_path, monkeypatch)
+    task = make_confirmed_task(main)
+    main.set_permissions({"model_generate": True})
+    main.generate(task["task_id"])
+    main.review(task["task_id"], {"review_decision": "pass", "reviewer_signature": "review-sig"})
+    main.storage_request(task["task_id"])
+    main.storage_confirm(task["task_id"], {"storage_confirmed": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus"]})
+    completed = main.complete_task(task["task_id"], {"confirmed_by": "user"})
+    completed[field] = False
+    main.save_task(completed)
+    with pytest.raises(Exception):
+        main.index_task_retrieval(task["task_id"])

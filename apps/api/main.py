@@ -648,8 +648,8 @@ def memory_rule_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]
 @app.post("/api/tasks/{task_id}/retrieval/index")
 def index_task_retrieval(task_id: str) -> dict[str, Any]:
     task = _get_task(task_id)
-    if task.get("status") != "storage_committed" or task.get("physical_write_performed") is not True or task.get("review_passed") is not True:
-        raise HTTPException(status_code=400, detail="storage_committed review_passed task with physical writes required")
+    if task.get("status") not in ("storage_committed", "completed") or task.get("review_passed") is not True or task.get("storage_confirmed") is not True or task.get("physical_write_performed") is not True:
+        raise HTTPException(status_code=400, detail="storage_committed or completed review_passed storage_confirmed task with physical writes required")
     try:
         return index_task_storage_cases(task)
     except ValueError as exc:
