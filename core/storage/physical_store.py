@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from core.storage.runtime_paths import CORPUS_DIR, EXPORTS_DIR, LOGIC_DIR, MEMORY_DIR, REPO_ROOT
+from core.storage.runtime_paths import CORPUS_DIR, EXPORTS_DIR, LOGIC_DIR, MEMORY_DIR, VECTOR_DB_DIR, REPO_ROOT
 from core.storage.storage_manifest import SUCCESS_STORAGE_TARGETS
 
 SENSITIVE_KEYS = {"api_key", "apikey", "authorization", "access_token", "refresh_token", "token", "secret"}
@@ -31,6 +31,8 @@ def _active_data_dir() -> Path:
 def _target_dir(target: str) -> Path:
     base = _active_data_dir()
     return {
+        "vector_db": base / "vector_db",
+        "vector": base / "vector_db",
         "corpus": base / "corpus",
         "logic": base / "logic",
         "exports": base / "exports",
@@ -105,6 +107,55 @@ def _sealed_scbkr(task: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _generation_text(task: dict[str, Any]) -> str:
+    result = task.get("generation_result") or {}
+    return str(result.get("content") or result.get("generated_text") or result.get("text") or "")
+
+
+def _title(task: dict[str, Any]) -> str:
+    return str(task.get("task_name") or task.get("scbkr", {}).get("S", {}).get("task_name") or task.get("raw_input") or "SCBKR storage item")[:80]
+
+
+def _summary(task: dict[str, Any]) -> str:
+    text = _generation_text(task) or str(task.get("raw_input") or "")
+    return text[:300]
+
+
+def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], ledger_id: str | None = None) -> dict[str, dict[str, Any]]:
+    """Build structured payloads for storage layer; never writes files or mutates task state."""
+    now = _now()
+    scbkr = task.get("scbkr", {})
+    generation = task.get("generation_result") or {}
+    gen_text = _generation_text(task)
+    snapshot_hash = scbkr.get("confirmed_snapshot_hash") or hash_payload(scbkr.get("confirmed_snapshot") or scbkr)
+    base = {
+        "task_id": task.get("task_id"),
+        "trace_id": task.get("trace_id"),
+        "ledger_id": ledger_id or task.get("ledger_id"),
+        "title": _title(task),
+        "summary": _summary(task),
+        "content": f"{gen_text}\n\nSCBKR: {json.dumps(_sealed_scbkr(task), ensure_ascii=False, sort_keys=True)}".strip(),
+        "source_task_id": task.get("task_id"),
+        "source_generation_id": generation.get("generation_id") or task.get("trace_id"),
+        "scbkr_snapshot_hash": snapshot_hash,
+        "confirmed_at": scbkr.get("confirmed_at") or task.get("confirmed_at"),
+        "reviewed_at": (task.get("review_result") or {}).get("reviewed_at") or task.get("accepted_at"),
+        "stored_at": now,
+        "created_at": now,
+    }
+    payloads: dict[str, dict[str, Any]] = {}
+    if "vector" in selected_targets or "vector_db" in selected_targets:
+        payloads["vector_db"] = {**base, "target": "vector", "case_id": f"vector:{task.get('task_id')}", "S": scbkr.get("S"), "C": scbkr.get("C"), "B": scbkr.get("B"), "K": scbkr.get("K"), "R": scbkr.get("R"), "embedding_status": "pending", "embedding": None, "status": "metadata_saved_embedding_pending"}
+    if "corpus" in selected_targets:
+        payloads["corpus"] = {**base, "target": "corpus", "source_id": f"corpus:{task.get('task_id')}", "type": "review_passed_generation", "tags": [str(task.get("task_type") or "general"), "corpus"], "source_origin": "user_confirmed_storage"}
+    if "logic" in selected_targets:
+        payloads["logic"] = {**base, "target": "logic", "logic_id": f"logic:{task.get('task_id')}", "name": _title(task), "purpose": _summary(task), "flow_steps": scbkr.get("C", {}).get("flow_steps", []), "boundary_rules": scbkr.get("B", {}).get("storage_conditions", []), "test_rules": scbkr.get("C", {}).get("test_conditions", []), "dependencies": scbkr.get("C", {}).get("dependencies", []), "status": "active"}
+    if "memory" in selected_targets:
+        payloads["memory"] = {**base, "target": "memory", "memory_id": f"memory:{task.get('task_id')}", "category": str(task.get("task_type") or "general"), "reason": "使用者二次確認後保存為本地記憶資料。", "source_task": task.get("task_id"), "confirmed_by_user": True, "status": "active"}
+    for target, payload in payloads.items():
+        payload["hash"] = hash_payload(payload)
+    return payloads
+
 def build_success_corpus_payload(task: dict[str, Any]) -> dict[str, Any]:
     if task.get("review_passed") is not True or task.get("review_result", {}).get("review_passed") is not True:
         raise ValueError("corpus physical write requires review_passed content")
@@ -153,18 +204,26 @@ def build_export_payload(task: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _payload_for_target(task: dict[str, Any], target: str) -> dict[str, Any]:
+def _payload_for_target(task: dict[str, Any], target: str, prepared: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    prepared = prepared or {}
+    if target in prepared:
+        return prepared[target]
+    if target == "vector_db":
+        return prepare_storage_payloads(task, ["vector"], task.get("ledger_id"))["vector_db"]
     if target == "corpus":
-        return build_success_corpus_payload(task)
+        return prepared.get("corpus") or build_success_corpus_payload(task)
     if target == "logic":
-        return build_logic_payload(task)
+        return prepared.get("logic") or build_logic_payload(task)
+    if target == "memory":
+        return prepared.get("memory") or prepare_storage_payloads(task, ["memory"], task.get("ledger_id"))["memory"]
     if target == "exports":
         return build_export_payload(task)
     raise ValueError(f"unsupported physical storage target: {target}")
 
 
 def build_storage_item(task: dict[str, Any], target: str, payload: dict[str, Any], source_event_id: str | None = None) -> dict[str, Any]:
-    if target not in SUCCESS_STORAGE_TARGETS:
+    supported_targets = set(SUCCESS_STORAGE_TARGETS) | {"vector_db", "memory"}
+    if target not in supported_targets:
         raise ValueError(f"unsupported physical storage target: {target}")
     content_hash = hash_payload(payload)
     task_id = task.get("task_id") or "unknown-task"
@@ -187,12 +246,16 @@ def commit_storage_items(task: dict[str, Any], storage_plan: dict[str, Any], sou
     if task.get("review_passed") is not True or task.get("review_result", {}).get("review_passed") is not True:
         raise ValueError("storage commit requires review_passed task")
     requested = set(storage_plan.get("selected_targets") or []) | {item.get("target") for item in storage_plan.get("storage_items", [])}
-    targets = [target for target in SUCCESS_STORAGE_TARGETS if target in requested or not requested]
-    if not targets:
-        targets = list(SUCCESS_STORAGE_TARGETS)
+    supported_targets = ["vector_db", "corpus", "logic", "memory", "exports"]
+    targets = [target for target in supported_targets if target in requested]
+    if storage_plan.get("allow_vector_metadata") is not True:
+        targets = [target for target in targets if target != "vector_db"]
+    if not targets and not requested:
+        targets = ["corpus", "logic"]
+    prepared = prepare_storage_payloads(task, ["vector" if t == "vector_db" else t for t in targets], task.get("ledger_id")) if storage_plan.get("p15d_structured_payloads") is True else {}
     items: list[dict[str, Any]] = []
     for target in targets:
-        payload = _payload_for_target(task, target)
+        payload = _payload_for_target(task, target, prepared)
         item = build_storage_item(task, target, payload, source_event_id=source_event_id)
         write_json_atomic(_active_data_dir() / item["relative_path"], payload)
         items.append(item)

@@ -51,6 +51,7 @@ from core.workflow.generation_result import build_generation_result
 from core.workflow.review_flow import apply_review_decision
 from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
 from core.retrieval.vector_store import get_vector_store_status
+from core.storage.runtime_paths import current_data_dir
 
 LOCAL_DESKTOP_API_BASE_URL = "http://127.0.0.1:8787"
 LOCAL_DESKTOP_CORS_ORIGINS = [
@@ -758,7 +759,7 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
         plan_targets = [to_plan_target(target) for target in selected_targets]
         legacy_exports_requested = "exports" in (payload.get("selected_targets") or [])
-        physical_targets = [target for target in plan_targets if target in ("corpus", "logic", "memory")]
+        physical_targets = [target for target in plan_targets if target in ("vector_db", "corpus", "logic", "memory")]
         if legacy_exports_requested and "exports" not in physical_targets:
             physical_targets.append("exports")
         requested_event = _append_task_event("storage_physical_write_requested", task, status_before=status_before, status_after=status_before, payload={"selected_targets": selected_targets, "confirmed_by": "user"})
@@ -767,6 +768,8 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         task["storage_plan"]["physical_write_performed"] = False
         physical_plan = dict(task["storage_plan"])
         physical_plan["selected_targets"] = physical_targets
+        physical_plan["allow_vector_metadata"] = "vector_db" in physical_targets
+        physical_plan["p15d_structured_payloads"] = True
         items = commit_storage_items(task, physical_plan, source_event_id=requested_event["event_id"]) if physical_targets else []
         for item in items:
             save_storage_item(item)
@@ -779,7 +782,9 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         task["status"] = "storage_committed"
         task["storage_plan"]["physical_write_performed"] = True
         task["storage_plan"]["next_required_action"] = "storage_committed"
-        task["storage_result"] = {"status": "storage_committed", "selected_targets": selected_targets, "written_targets": written_targets, "skipped_targets": skipped_targets, "storage_item_ids": [item.get("item_id") for item in items], "hashes": [item.get("content_hash") for item in items], "physical_write_performed": True}
+        skipped_reasons = {target: "未產生實體寫入項目，請檢查入庫條件。" for target in skipped_targets}
+        written_items = [{"item_id": item.get("item_id"), "target": to_ui_target(item.get("target")), "hash": item.get("content_hash"), "path": item.get("relative_path"), "storage_location": item.get("relative_path"), "stored_at": item.get("created_at")} for item in items]
+        task["storage_result"] = {"status": "storage_committed", "selected_targets": selected_targets, "written_targets": written_targets, "skipped_targets": skipped_targets, "skipped_reasons": skipped_reasons, "written_items": written_items, "storage_item_ids": [item.get("item_id") for item in items], "hashes": [item.get("content_hash") for item in items], "data_dir": str(current_data_dir()), "ledger_id": task.get("ledger_id"), "hash": items[0].get("content_hash") if items else None, "physical_write_performed": True}
         save_task(task)
         _append_task_event("database_written", task, status_before=status_before, status_after=task["status"], payload=task["storage_result"])
         _append_task_event("storage_physical_write_completed", task, status_before=status_before, status_after=task["status"], payload={"item_count": len(items), "physical_write_performed": True})
@@ -927,6 +932,42 @@ def list_tasks() -> dict[str, Any]:
 def get_task(task_id: str) -> dict[str, Any]:
     return _task_response(_get_task(task_id))
 
+
+
+def _preview(value: Any, limit: int = 180) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return text[:limit]
+
+def _dc_item_from_task(task: dict[str, Any], kind: str) -> dict[str, Any]:
+    return {"id": task.get("task_id"), "title": task.get("task_name"), "summary": _preview(task.get(kind) or task.get("raw_input") or ""), "task_id": task.get("task_id"), "created_at": task.get("created_at"), "stored_at": (task.get("storage_result") or {}).get("stored_at"), "hash": (task.get("scbkr") or {}).get("confirmed_snapshot_hash") or (task.get("storage_result") or {}).get("hash"), "target": kind, "preview": _preview(task.get(kind) or task)}
+
+def _dc_item_from_storage(item: dict[str, Any]) -> dict[str, Any]:
+    payload = item.get("payload") or {}
+    return {"id": item.get("item_id"), "item_id": item.get("item_id"), "title": payload.get("title") or payload.get("name"), "summary": payload.get("summary") or payload.get("purpose"), "task_id": item.get("task_id"), "created_at": item.get("created_at"), "stored_at": payload.get("stored_at") or item.get("created_at"), "hash": item.get("content_hash") or payload.get("hash"), "target": item.get("target"), "path": item.get("relative_path"), "preview": _preview(payload.get("content") or payload), **payload}
+
+@app.get("/api/data-center/overview")
+def data_center_overview() -> dict[str, Any]:
+    tasks = list_persisted_tasks(limit=1000)
+    storage = list_persisted_storage_items(limit=1000)
+    ledger = read_ledger_events()
+    return {"tasks_count": len(tasks), "confirmed_tasks_count": sum(1 for t in tasks if t.get("confirmed") is True), "generation_results_count": sum(1 for t in tasks if t.get("generation_result")), "review_records_count": sum(1 for t in tasks if t.get("review_result")), "storage_records_count": len(storage), "vector_count": sum(1 for i in storage if i.get("target") == "vector_db"), "corpus_count": sum(1 for i in storage if i.get("target") == "corpus"), "logic_count": sum(1 for i in storage if i.get("target") == "logic"), "memory_count": sum(1 for i in storage if i.get("target") == "memory"), "ledger_events_count": len(ledger)}
+
+@app.get("/api/data-center/{section}")
+def data_center_section(section: str) -> dict[str, Any]:
+    tasks = list_persisted_tasks(limit=200)
+    storage = list_persisted_storage_items(limit=500)
+    if section == "tasks": items = [_dc_item_from_task(t, "task") for t in tasks]
+    elif section == "confirmations": items = [_dc_item_from_task(t, "scbkr") for t in tasks if t.get("confirmed")]
+    elif section == "generations": items = [_dc_item_from_task(t, "generation_result") for t in tasks if t.get("generation_result")]
+    elif section == "reviews": items = [_dc_item_from_task(t, "review_result") for t in tasks if t.get("review_result")]
+    elif section == "storage": items = [{**_dc_item_from_task(t, "storage_result"), "storage_confirmed": t.get("storage_confirmed"), "physical_write_performed": t.get("physical_write_performed"), **(t.get("storage_result") or {})} for t in tasks if t.get("storage_result")]
+    elif section == "vector": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "vector_db"]
+    elif section == "corpus": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "corpus"]
+    elif section == "logic": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "logic"]
+    elif section == "memory": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "memory"]
+    elif section == "ledger": items = read_ledger_events()[-200:]
+    else: raise HTTPException(status_code=404, detail="data center section not found")
+    return {"section": section, "count": len(items), "items": items, "empty_message": "目前尚無資料。" if not items else ""}
 
 @app.get("/api/tasks/{task_id}/storage-items")
 def get_task_storage_items(task_id: str) -> dict[str, Any]:
