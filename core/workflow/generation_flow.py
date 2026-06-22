@@ -35,10 +35,29 @@ def assert_task_can_generate(task, scbkr, model_settings, permissions):
     return True
 
 
+def build_scbkr_draft_generation_messages(raw_input, task_type="general"):
+    """Build local/API prompt messages for SCBKR draft generation without executing the task."""
+    system_message = (
+        "你正在 SCBKR 草案生成階段。你的任務是根據使用者輸入，產生 S/C/B/K/R 五維確認單草案。"
+        "所有欄位都必須標註為待使用者確認。你不得直接執行任務。你不得輸出最終成果。"
+        "你不得自行將 confirmed 設為 true。你只負責填寫草案，等待使用者修改或確認。\n"
+        "You are in the SCBKR draft generation stage. Your task is to generate a draft S/C/B/K/R confirmation sheet from the user input. "
+        "All fields must be treated as waiting for user confirmation. Do not execute the task. Do not produce the final output. "
+        "Do not set confirmed to true. Only fill the draft and wait for user edit or confirmation."
+    )
+    return [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": json.dumps({"raw_input": raw_input, "task_type": task_type, "required_dimensions": ["S", "C", "B", "K", "R"], "status": "draft/waiting_user_confirm"}, ensure_ascii=False, sort_keys=True)},
+    ]
+
+
 def build_generation_messages(task, scbkr):
     """Build OpenAI-compatible messages from a confirmed task and SCBKR form."""
     system_message = (
-        "你是 SCBKR 任務執行單元。只能依照已確認的 SCBKR 五維責任鏈執行；"
+        "你現在處於 SCBKR 任務執行階段。S/C/B/K/R 已由使用者確認。"
+        "你不得重新建立確認單；不得把狀態改回 draft；不得要求使用者重新確認 S/C/B/K/R。"
+        "You are now in the SCBKR task execution stage. Do not recreate the confirmation sheet. "
+        "Do not change the status back to draft. Do not ask the user to reconfirm S/C/B/K/R. "
         "不得自行改變邊界；不得宣稱驗收通過；不得宣稱已入庫；"
         "不得寫 ledger、DB、四庫或記憶；輸出仍必須等待使用者驗收。"
     )

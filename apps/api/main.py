@@ -381,6 +381,12 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
     if "scbkr" not in task:
         raise HTTPException(status_code=400, detail="SCBKR draft required before confirm")
     payload = payload or {}
+    if isinstance(payload.get("scbkr"), dict):
+        candidate = payload["scbkr"]
+        if not all(key in candidate for key in ("S", "C", "B", "K", "R")):
+            raise HTTPException(status_code=400, detail="SCBKR draft must include S/C/B/K/R")
+        candidate["confirmation_status"] = "draft"
+        task["scbkr"] = candidate
     confirm_all_dimensions(
         task["scbkr"],
         confirmed_by=payload.get("confirmed_by", "user"),

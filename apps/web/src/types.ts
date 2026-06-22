@@ -28,6 +28,7 @@ export type TaskSummary = {
   task_id: string;
   task_name: string;
   task_type: TaskType;
+  raw_input?: string;
   status: string;
   confirmed: boolean;
   review_passed: boolean;
