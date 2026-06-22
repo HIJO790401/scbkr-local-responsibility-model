@@ -41,8 +41,8 @@ def main() -> int:
     env = configure_sidecar_environment()
     host = env["SCBKR_API_HOST"]
     port = int(env["SCBKR_API_PORT"])
-    if host not in ("127.0.0.1", "localhost"):
-        raise RuntimeError("SCBKR API sidecar must bind only to 127.0.0.1/localhost")
+    if host != "127.0.0.1":
+        raise RuntimeError("SCBKR API sidecar must bind only to 127.0.0.1")
     assert_port_available(host, port)
 
     import uvicorn
