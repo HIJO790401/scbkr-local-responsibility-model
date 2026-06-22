@@ -37,3 +37,14 @@ apps/desktop/src-tauri/sidecar/scbkr-api-x86_64-pc-windows-msvc.exe
 `dist/windows-preview/sidecar/scbkr-api.exe` and the Tauri staging copy above.
 `scripts/build_desktop_preview_windows.ps1` fails before `tauri build` if the
 staged sidecar is missing, rather than producing a partial preview package.
+
+## P14-C Windows preview icon generation
+
+P14-C does not commit `apps/desktop/src-tauri/icons/icon.ico` as a binary file.
+The unsigned Windows preview placeholder icon is generated at build time by
+`scripts/generate_tauri_preview_icon.py` immediately before `tauri build`, and
+`scripts/build_desktop_preview_windows.ps1` fails fast if the generated ICO is
+missing, empty, or does not start with the ICO header `00 00 01 00`.
+
+The generated icon is only a simple preview placeholder. It is not a production brand asset, does not use any copyrighted or trademarked logo, and does not add
+code signing, auto-update, a bundled model, or a bundled API key.

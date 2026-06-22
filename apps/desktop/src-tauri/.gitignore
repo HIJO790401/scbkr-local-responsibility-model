@@ -1,0 +1,2 @@
+# P14-C generates the unsigned preview ICO at build time; do not commit binary icons.
+/icons/icon.ico

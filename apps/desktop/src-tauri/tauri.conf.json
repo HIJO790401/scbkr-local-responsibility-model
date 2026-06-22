@@ -31,6 +31,9 @@
     "copyright": "Unsigned preview package; not a production installer.",
     "externalBin": [
       "sidecar/scbkr-api"
+    ],
+    "icon": [
+      "icons/icon.ico"
     ]
   }
 }
