@@ -132,3 +132,71 @@ def test_complete_edited_scbkr_confirms_and_preserves_sealed_gate():
     assert result["scbkr"].get("confirmed_snapshot_hash")
     assert main.all_dimensions_confirmed(result["scbkr"]) is True
     assert "generation_result" not in result
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"memory_rule_physical_write_performed": True},
+        {"memory_rule_stored": True},
+        {"status": "memory_rule_stored"},
+        {"memory_rule_confirmed": True, "memory_rule_result": {"stored": True}},
+        {"memory_rule_confirmed": True, "memory_rule_write_result": {"stored": True}},
+    ],
+)
+def test_memory_rule_physical_write_bound_tasks_cannot_directly_edit_scbkr(overrides):
+    task = make_task(**overrides)
+    original_scbkr = deepcopy(task["scbkr"])
+
+    with pytest.raises(HTTPException) as exc:
+        main.confirm_task(task["task_id"], confirm_payload(task))
+
+    assert exc.value.status_code == 400
+    assert "已寫入記憶庫規則" in str(exc.value.detail)
+    assert task["scbkr"] == original_scbkr
+    assert task.get("memory_rule_physical_write_performed") == overrides.get("memory_rule_physical_write_performed")
+    assert task.get("memory_rule_stored") == overrides.get("memory_rule_stored")
+
+
+def test_review_failed_without_memory_rule_physical_write_can_edit_and_reconfirm():
+    task = make_task(
+        status="review_failed",
+        generation_result={"content": "old"},
+        review_result={"status": "review_failed", "review_passed": False},
+        review_passed=False,
+        memory_rule_draft={"memory_rule_status": "draft"},
+    )
+
+    result = main.confirm_task(task["task_id"], confirm_payload(task))
+
+    assert result["confirmed"] is True
+    assert result["status"] == "confirmed"
+    assert result["scbkr"]["S"]["task_name"] == "更新後任務"
+
+
+def test_downstream_invalidated_is_transient_confirm_response_only():
+    task = make_task(status="waiting_review", generation_result={"content": "old"})
+
+    result = main.confirm_task(task["task_id"], confirm_payload(task))
+
+    assert result["downstream_invalidated"] is True
+    assert "downstream_invalidated" not in main.TASKS[task["task_id"]]
+    assert "downstream_invalidated" not in main.get_task(task["task_id"])
+
+    persisted = main.load_task(task["task_id"])
+    assert persisted is not None
+    assert "downstream_invalidated" not in persisted
+
+
+def test_generate_and_review_do_not_echo_previous_downstream_invalidated_flag():
+    task = make_task(status="waiting_review", generation_result={"content": "old"})
+    main.confirm_task(task["task_id"], confirm_payload(task))
+    main.PERMISSIONS["model_generate"] = True
+    main.MODEL_SETTINGS.update({"mode": "sandbox", "provider": "sandbox_mock_model", "enabled": True, "model_name": "sandbox_mock_model"})
+
+    generated = main.generate(task["task_id"])
+    reviewed = main.review(task["task_id"], {"review_decision": "fail", "review_message": "still bad"})
+
+    assert "downstream_invalidated" not in generated
+    assert "downstream_invalidated" not in reviewed
+    assert "downstream_invalidated" not in main.TASKS[task["task_id"]]

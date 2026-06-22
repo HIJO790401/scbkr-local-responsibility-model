@@ -28,6 +28,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> { const resp
 function friendlyActionError(label: string, error: unknown): string {
   const raw = String(error);
   if (raw.includes("SCBKR draft is incomplete") || raw.includes("SCBKR draft must") || raw.includes("missing field") || raw.includes("empty field")) return "確認單不完整，請補齊缺少欄位後再確認。";
+  if (raw.includes("已寫入記憶庫規則")) return "已寫入記憶庫規則的任務不可直接改寫 SCBKR，請建立新任務或走 rollback / clone flow。";
   if (raw.includes("已入庫或已完成") || raw.includes("rollback / clone")) return "此任務已入庫或完成，不能直接修改責任鏈。請建立新任務或使用回退流程。";
   return `${label} 失敗：${raw}`;
 }
@@ -53,7 +54,7 @@ export default function App() {
   const modelStatus = modelHumanStatus(model);
   const refresh = async () => { try { await api("/health"); setHealth("online"); const m = await api<ModelSettings>("/api/settings/model"); setModel(m); setForm(formFromModel(m)); setPermissions(await api<Permissions>("/api/settings/permissions")); setDesktopStatus(await api<DesktopStatus>("/api/desktop/status")); } catch (error) { setHealth("offline"); setMessage(`API 尚未連線：${String(error)}`); } };
   useEffect(() => { void refresh(); }, []);
-  const run = async (label: string, action: () => Promise<any>) => { try { const result = await action(); if (result?.task_id) setTask(result); if (result?.model_name) { setModel(result); setForm(formFromModel(result)); } if ("model_generate" in result) setPermissions(result as Permissions); setMessage(result?.downstream_invalidated ? "確認單已更新。舊生成結果已作廢，請重新生成。" : `${label} 完成`); return result; } catch (error) { setMessage(friendlyActionError(label, error)); } };
+  const run = async (label: string, action: () => Promise<any>) => { try { const result = await action(); if (result?.task_id) setTask(result); if (result?.model_name) { setModel(result); setForm(formFromModel(result)); } if ("model_generate" in result) setPermissions(result as Permissions); setMessage(`${label} 完成`); return result; } catch (error) { setMessage(friendlyActionError(label, error)); } };
   const modelPayload = () => {
     const payload: Record<string, unknown> = { ...form };
     if (!form.api_key && form.provider === "openai_compatible") delete payload.api_key;
@@ -65,7 +66,10 @@ export default function App() {
   const switchSandbox = () => run("切回沙盒模式", () => api("/api/settings/model", { method: "POST", body: JSON.stringify(providerDefaults.sandbox_mock_model) }));
   const createChatTask = async () => { const created = await run("建立 SCBKR 任務", () => api<TaskSummary>("/api/tasks/create", { method: "POST", body: JSON.stringify({ raw_input: taskText, task_type: taskType }) })); if (created?.task_id) { const drafted = await run("產生 SCBKR 草案", () => api<TaskSummary>(`/api/tasks/${created.task_id}/scbkr`, { method: "POST" })); if (drafted) setTask(drafted); setPage("workbench"); setMessage("已將聊天內容轉為 SCBKR 任務草案，請在工作台確認責任鏈後再執行。"); } };
   const updateField = (dim: ScbkrDimensionKey, field: string, value: string) => { if (!task?.scbkr) return; const old = task.scbkr[dim]?.[field]; setTask({ ...task, confirmed: false, status: "waiting_user_confirm", scbkr: { ...task.scbkr, confirmation_status: "draft", [dim]: { ...task.scbkr[dim], [field]: parseField(value, old), confirmation_status: "draft" } } }); };
-  const confirm = () => run("確認責任鏈", () => api(`/api/tasks/${task?.task_id}/confirm`, { method: "POST", body: JSON.stringify({ scbkr: task?.scbkr, confirmed_by: "user", confirmation_statement: "我確認本任務 S/C/B/K/R 五維責任鏈。", signature: "user" }) }));
+  const confirm = async () => {
+    const result = await run("確認責任鏈", () => api(`/api/tasks/${task?.task_id}/confirm`, { method: "POST", body: JSON.stringify({ scbkr: task?.scbkr, confirmed_by: "user", confirmation_statement: "我確認本任務 S/C/B/K/R 五維責任鏈。", signature: "user" }) }));
+    if (result?.downstream_invalidated) setMessage("確認單已更新。舊生成結果已作廢，請重新生成。");
+  };
   const generate = () => { if (model?.mode === "sandbox" && permissions?.model_generate !== true) { setMessage("沙盒生成前請先開啟 model_generate 權限。"); return; } if (!task?.confirmed) { setMessage("confirmed=false：請先確認責任鏈，模型不可執行。"); return; } if (model?.mode !== "sandbox" && model?.enabled !== true) { setMessage("模型尚未 connected，請到 Model Settings 測試連線。"); setPage("model-settings"); return; } void run("模型生成", () => api(`/api/tasks/${task.task_id}/generate`, { method: "POST" })); };
   const statusZh = task?.confirmed ? "已確認責任鏈" : task ? "等待責任鏈確認" : "尚未建立任務";
 
