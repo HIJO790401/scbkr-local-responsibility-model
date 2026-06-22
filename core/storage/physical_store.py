@@ -123,7 +123,7 @@ def _summary(task: dict[str, Any]) -> str:
 
 def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], ledger_id: str | None = None) -> dict[str, dict[str, Any]]:
     """Build structured payloads for storage layer; never writes files or mutates task state."""
-    now = _now()
+    now = task.get("created_at") or f"system_storage:{task.get('task_id') or 'unknown-task'}"
     scbkr = task.get("scbkr", {})
     generation = task.get("generation_result") or {}
     gen_text = _generation_text(task)
@@ -221,11 +221,30 @@ def _payload_for_target(task: dict[str, Any], target: str, prepared: dict[str, d
     raise ValueError(f"unsupported physical storage target: {target}")
 
 
+def _governance_metadata(now: str) -> dict[str, Any]:
+    return {
+        "status": "active",
+        "version": 1,
+        "parent_item_id": None,
+        "superseded_by": None,
+        "user_event_date": None,
+        "event_date_source": "unset",
+        "event_date_confirmed": False,
+        "created_at": now,
+        "stored_at": now,
+        "updated_at": None,
+        "archived_at": None,
+        "revoked_at": None,
+    }
+
+
 def build_storage_item(task: dict[str, Any], target: str, payload: dict[str, Any], source_event_id: str | None = None) -> dict[str, Any]:
     supported_targets = set(SUCCESS_STORAGE_TARGETS) | {"vector_db", "memory"}
     if target not in supported_targets:
         raise ValueError(f"unsupported physical storage target: {target}")
-    content_hash = hash_payload(payload)
+    now = str(payload.get("created_at") or payload.get("stored_at") or task.get("created_at") or f"system_storage:{task.get('task_id') or 'unknown-task'}")
+    governed_payload = {**payload, **_governance_metadata(now)}
+    content_hash = hash_payload(governed_payload)
     task_id = task.get("task_id") or "unknown-task"
     filename = f"{task_id}-{content_hash[:12]}.json"
     path = _target_dir(target) / filename
@@ -237,8 +256,8 @@ def build_storage_item(task: dict[str, Any], target: str, payload: dict[str, Any
         "content_hash": content_hash,
         "source_event_id": source_event_id,
         "physical_write_performed": True,
-        "created_at": _now(),
-        "payload": payload,
+        **_governance_metadata(now),
+        "payload": governed_payload,
     }
 
 
@@ -257,7 +276,7 @@ def commit_storage_items(task: dict[str, Any], storage_plan: dict[str, Any], sou
     for target in targets:
         payload = _payload_for_target(task, target, prepared)
         item = build_storage_item(task, target, payload, source_event_id=source_event_id)
-        write_json_atomic(_active_data_dir() / item["relative_path"], payload)
+        write_json_atomic(_active_data_dir() / item["relative_path"], item["payload"])
         items.append(item)
     return items
 
