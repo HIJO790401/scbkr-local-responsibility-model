@@ -15,7 +15,7 @@ def setup_function():
         {
             "mode": "external",
             "model_name": "test-model",
-            "base_url": "http://127.0.0.1:9/v1",
+            "base_url": "https://example.test/v1",
             "api_key": "secret-key",
             "timeout": 1,
             "enabled": False,

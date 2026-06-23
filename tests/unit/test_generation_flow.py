@@ -108,7 +108,7 @@ def test_external_mode_without_external_api_permission_is_rejected():
         assert_task_can_generate(
             make_task(),
             make_scbkr(),
-            make_model_settings(mode="external"),
+            make_model_settings(mode="external", base_url="https://example.test/v1"),
             {"external_api": False},
         )
 

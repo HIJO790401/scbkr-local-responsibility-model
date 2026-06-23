@@ -144,22 +144,19 @@ def is_loopback_model_url(base_url: str | None) -> bool:
     return hostname in {"localhost", "127.0.0.1", "::1"}
 
 
-def _model_draft_requires_external_api_permission(settings: dict[str, Any]) -> bool:
-    if settings.get("mode") == "sandbox":
-        return False
-    if is_loopback_model_url(settings.get("base_url")):
-        return False
-    return settings.get("mode") in ("external", "hybrid") or settings.get("provider") == "openai_compatible"
+EXTERNAL_API_LOOPBACK_ERROR = "目前模型網址不是本機 loopback，會把內容送出本機。請開啟 external_api 權限，或改用 127.0.0.1 / localhost 的本機模型網址。"
 
 
 def _model_call_requires_external_api_permission(settings: dict[str, Any]) -> bool:
     if settings.get("mode") == "sandbox":
         return False
-    if settings.get("provider") in ("lm_studio", "ollama") and is_loopback_model_url(settings.get("base_url")):
-        return False
     if is_loopback_model_url(settings.get("base_url")):
         return False
-    return settings.get("mode") in ("external", "hybrid") or settings.get("provider") == "openai_compatible"
+    return True
+
+
+def _model_draft_requires_external_api_permission(settings: dict[str, Any]) -> bool:
+    return _model_call_requires_external_api_permission(settings)
 
 
 def _assert_model_gateway_call_allowed(settings: dict[str, Any]) -> None:
@@ -214,10 +211,9 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
     skipped_reason = None
     if MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("mode") != "sandbox":
         try:
-            if _model_draft_requires_external_api_permission(MODEL_SETTINGS) and not (MODEL_SETTINGS.get("provider") in ("lm_studio", "ollama") and is_loopback_model_url(MODEL_SETTINGS.get("base_url"))):
-                if PERMISSIONS.get("external_api") is not True:
-                    skipped_reason = "external_api_permission_disabled"
-                    raise PermissionError(skipped_reason)
+            if _model_draft_requires_external_api_permission(MODEL_SETTINGS) and PERMISSIONS.get("external_api") is not True:
+                skipped_reason = "external_api_permission_disabled"
+                raise PermissionError(skipped_reason)
             response = _post_openai_compatible(MODEL_SETTINGS, build_scbkr_draft_generation_messages(raw_input, task_type, retrieval_context))
             draft = json.loads(parse_chat_completion_response(response))
             draft = _validate_model_authored_scbkr_draft(draft)
@@ -647,7 +643,7 @@ def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         elif not MODEL_SETTINGS.get("model_name", "").strip():
             status = {**make_test_status(False, "model_name 未填，不可通過測試"), "test_result_kind": "external_api_not_configured"}
         else:
-            if MODEL_SETTINGS["mode"] in ("external", "hybrid"):
+            if _model_call_requires_external_api_permission(MODEL_SETTINGS):
                 assert_permission_allowed(PERMISSIONS, "external_api_call")
             response = _post_openai_compatible(
                 MODEL_SETTINGS,
@@ -655,7 +651,8 @@ def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
             )
             status = {**make_test_status(True, parse_chat_completion_response(response)), "test_result_kind": "local_model_success" if MODEL_SETTINGS["mode"] == "local" else "external_model_success"}
     except PermissionError as exc:
-        status = make_test_status(False, f"API 模型需要先明確開啟 external_api 權限；目前未開啟。{exc}")
+        message = EXTERNAL_API_LOOPBACK_ERROR if PERMISSIONS.get("external_api") is not True else f"API 模型需要先明確開啟 external_api 權限；目前未開啟。{exc}"
+        status = make_test_status(False, message)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -690,7 +687,7 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
             source = "model_gateway"
         except PermissionError as exc:
             if _model_call_requires_external_api_permission(MODEL_SETTINGS):
-                raise HTTPException(status_code=403, detail="目前未允許外部 API 呼叫，聊天內容不會送出。請開啟 external_api 權限或改用本地模型 / Sandbox。") from exc
+                raise HTTPException(status_code=403, detail=EXTERNAL_API_LOOPBACK_ERROR) from exc
             raise HTTPException(status_code=403, detail="目前未允許模型生成，聊天內容不會送出。請開啟 model_generate 權限或改用 Sandbox。") from exc
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"模型呼叫失敗：{_friendly_model_error(MODEL_SETTINGS, str(exc))}") from exc
@@ -932,7 +929,7 @@ def generate(task_id: str) -> dict[str, Any]:
         if MODEL_SETTINGS.get("mode") == "sandbox" and PERMISSIONS.get("model_generate") is not True:
             raise PermissionError("model_generate permission is required before sandbox generation")
         assert_permission_allowed(PERMISSIONS, "model_generate")
-        if MODEL_SETTINGS["mode"] in ("external", "hybrid"):
+        if _model_call_requires_external_api_permission(MODEL_SETTINGS):
             assert_permission_allowed(PERMISSIONS, "external_api_call")
         assert_task_can_generate(task, task.get("scbkr", {}), MODEL_SETTINGS, PERMISSIONS)
 

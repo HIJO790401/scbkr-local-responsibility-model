@@ -31,6 +31,7 @@ def test_fake_model_valid_draft_is_written_to_task_and_workbench(monkeypatch):
     fake["S"]["output_format"] = "FAKE_MODEL_OUTPUT_標題_短文案_CTA"
     monkeypatch.setitem(main.MODEL_SETTINGS, "enabled", True)
     monkeypatch.setitem(main.MODEL_SETTINGS, "mode", "local")
+    monkeypatch.setitem(main.MODEL_SETTINGS, "base_url", "http://127.0.0.1:1234/v1")
     monkeypatch.setattr(main, "_post_openai_compatible", lambda settings, messages: {"choices": [{"message": {"content": json.dumps(fake, ensure_ascii=False)}}]})
     response = client.post("/api/tasks/create", json={"raw_input": "我要寫一個紫蘇梅冰沙開幕宣傳文案", "task_type": "general", "create_scbkr_draft": True})
     assert response.status_code == 200

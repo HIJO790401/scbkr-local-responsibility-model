@@ -52,7 +52,7 @@ def test_remote_chat_blocks_model_and_text_when_external_api_disabled(monkeypatc
     response = TestClient(main.app).post("/api/chat/general", json={"message": "do not leak me"})
 
     assert response.status_code == 403
-    assert "目前未允許外部 API 呼叫，聊天內容不會送出" in response.json()["detail"]
+    assert main.EXTERNAL_API_LOOPBACK_ERROR in response.json()["detail"]
     assert calls == []
 
 
@@ -83,3 +83,65 @@ def test_remote_chat_rechecks_permission_after_success_then_disabled(monkeypatch
     assert response.status_code == 403
     assert len(calls) == 1
     assert all("second secret" not in str(call) for call in calls)
+
+
+def test_only_loopback_urls_skip_external_api_permission():
+    for base_url in ("http://127.0.0.1:1234/v1", "http://localhost:1234/v1", "http://[::1]:1234/v1", "https://127.0.0.1/v1", "https://localhost/v1", "https://[::1]/v1"):
+        reset_runtime(mode="local", provider="openai_compatible", base_url=base_url)
+        assert main._model_call_requires_external_api_permission(main.MODEL_SETTINGS) is False
+        assert main._model_draft_requires_external_api_permission(main.MODEL_SETTINGS) is False
+
+
+def test_lm_studio_lan_local_mode_requires_external_api_and_does_not_call(monkeypatch):
+    reset_runtime(mode="local", provider="lm_studio", base_url="http://192.168.1.10:1234/v1")
+    main.PERMISSIONS["external_api"] = False
+    calls = []
+    install_fake_model(monkeypatch, calls)
+
+    response = TestClient(main.app).post("/api/chat/general", json={"message": "lan secret"})
+
+    assert response.status_code == 403
+    assert main.EXTERNAL_API_LOOPBACK_ERROR in response.json()["detail"]
+    assert calls == []
+
+
+def test_ollama_lan_local_mode_requires_external_api_and_does_not_call(monkeypatch):
+    reset_runtime(mode="local", provider="ollama", base_url="http://192.168.1.10:11434/v1")
+    main.PERMISSIONS["external_api"] = False
+    calls = []
+    install_fake_model(monkeypatch, calls)
+
+    response = TestClient(main.app).post("/api/chat/general", json={"message": "ollama lan secret"})
+
+    assert response.status_code == 403
+    assert calls == []
+
+
+def test_openai_compatible_non_loopback_requires_external_api_and_external_true_allows(monkeypatch):
+    reset_runtime(mode="local", provider="openai_compatible", base_url="https://api.example.com/v1")
+    main.PERMISSIONS["external_api"] = False
+    calls = []
+    install_fake_model(monkeypatch, calls)
+
+    response = TestClient(main.app).post("/api/chat/general", json={"message": "api secret"})
+    assert response.status_code == 403
+    assert calls == []
+
+    main.PERMISSIONS["external_api"] = True
+    response = TestClient(main.app).post("/api/chat/general", json={"message": "api allowed"})
+    assert response.status_code == 200
+    assert calls[0]["messages"][-1]["content"] == "api allowed"
+
+
+def test_model_test_non_loopback_requires_external_api_and_does_not_call(monkeypatch):
+    reset_runtime(mode="local", provider="lm_studio", base_url="http://192.168.1.10:1234/v1")
+    main.PERMISSIONS["external_api"] = False
+    calls = []
+    install_fake_model(monkeypatch, calls)
+
+    response = TestClient(main.app).post("/api/model/test")
+
+    assert response.status_code == 200
+    assert response.json()["last_test_status"] == "failed"
+    assert main.EXTERNAL_API_LOOPBACK_ERROR in response.json()["last_test_message"]
+    assert calls == []
