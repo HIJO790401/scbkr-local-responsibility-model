@@ -1,7 +1,7 @@
 from pathlib import Path
 
-APP = Path("apps/web/src/App.tsx").read_text()
-CSS = Path("apps/web/src/App.css").read_text()
+APP = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
+CSS = Path("apps/web/src/App.css").read_text(encoding="utf-8")
 
 
 def test_desktop_split_chat_left_workbench_right_static_contract():
