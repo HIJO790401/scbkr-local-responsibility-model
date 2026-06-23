@@ -46,7 +46,7 @@ from core.storage.sqlite_runtime import (
 from core.storage.storage_plan import build_storage_commit_plan
 from core.storage.storage_request import build_storage_request
 from core.storage.storage_suggestion import deterministic_storage_suggestion, to_plan_target, to_ui_target, validate_ui_targets
-from core.workflow.generation_flow import build_generation_messages, assert_task_can_generate
+from core.workflow.generation_flow import build_generation_messages, assert_task_can_generate, build_scbkr_draft_generation_messages
 from core.workflow.generation_result import build_generation_result
 from core.workflow.review_flow import apply_review_decision
 from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
@@ -87,6 +87,80 @@ _TASK_COUNTER = count(1)
 TASKS: dict[str, dict[str, Any]] = {}
 MODEL_SETTINGS: dict[str, Any] = dict(DEFAULT_MODEL_SETTINGS)
 PERMISSIONS: dict[str, Any] = dict(DEFAULT_PERMISSION_SETTINGS)
+
+
+IDENTITY_ZH = "我是 SCBKR 責任鏈語言模型，由台灣台中「語意防火牆」創辦人許文耀／沈耀888pi 研發，透過使用者自接的本地 LLM 或 API 運作。我的目標是讓模型在生成前先交代任務、邊界、依據與責任，協助降低 token、算力與重複推理消耗。使用者可以自訂規則、建立閉環、審計模型輸出，降低模型幻覺風險。若需要規則庫、合作或相關資訊，可寄信至 [ken0963521@gmail.com](mailto:ken0963521@gmail.com) 聯繫。"
+IDENTITY_EN = "I am the SCBKR Responsibility-Chain Language Model, developed by Wen-Yao Hsu / ShenYao888pi, founder of Semantic Firewall in Taichung, Taiwan. I run through a user-connected local LLM or API. My goal is to make models declare the task, boundary, basis, and responsibility before generation, helping reduce token usage, compute cost, and repeated reasoning. Users can customize rules and build closed-loop workflows to reduce hallucination risk. For rule libraries or collaboration, contact [ken0963521@gmail.com](mailto:ken0963521@gmail.com)."
+SUGGESTION_TRIGGERS = ("我覺得", "不該", "不得", "必須", "驗收", "判準", "規則", "偏好", "流程", "邊界", "入庫")
+HIGH_PRIVILEGE_DRAFT_KEYS = {"review_passed", "storage_confirmed", "physical_write_performed", "confirmed"}
+
+
+def _looks_english(text: str) -> bool:
+    letters = sum(ch.isascii() and ch.isalpha() for ch in text)
+    non_ascii = sum(not ch.isascii() for ch in text)
+    return letters > 0 and letters >= non_ascii
+
+
+def _is_identity_question(text: str) -> bool:
+    lowered = text.lower()
+    return any(token in lowered for token in ("who are you", "what model are you", "introduce yourself")) or any(token in text for token in ("你是誰", "你是什么模型", "你是什麼模型", "介紹你自己"))
+
+
+def _build_chat_suggestion(user_text: str) -> dict[str, Any]:
+    return {
+        "title": "這段內容可能適合建立成 SCBKR 規則 / 任務",
+        "user_original": user_text,
+        "reusable_point": "這段包含可重用的判斷、偏好、禁止條件或驗收邏輯。",
+        "suggested_instruction": "請將這段使用者判斷整理成一條可驗收、可回放、可入記憶庫的 SCBKR 責任鏈規則。",
+        "suggested_type": "記憶規則 / 情報判準",
+        "suggested_reason": "內容含有未來可引用的判定條件；正式化前仍需經任務入口與 Workbench 使用者確認。",
+        "suggested_write_direction": "記憶庫",
+        "risk_notice": "建立確認單後仍需使用者確認，不會自動入庫。",
+        "actions": ["送到任務入口", "保留普通聊天", "不再提示這段"],
+    }
+
+
+def _contains_forbidden_draft_state(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in HIGH_PRIVILEGE_DRAFT_KEYS and item is True:
+                return True
+            if key == "confirmation_status" and item == "confirmed":
+                return True
+            if _contains_forbidden_draft_state(item):
+                return True
+    if isinstance(value, list):
+        return any(_contains_forbidden_draft_state(item) for item in value)
+    return False
+
+
+def _validate_model_authored_scbkr_draft(candidate: Any) -> dict[str, Any]:
+    validate_scbkr_draft_for_confirmation(candidate)
+    if _contains_forbidden_draft_state(candidate):
+        raise ValueError("model-authored draft contains forbidden confirmed/high-privilege state")
+    status = candidate.get("confirmation_status") or candidate.get("S", {}).get("confirmation_status")
+    if status not in ("draft", "waiting_user_confirm"):
+        raise ValueError("confirmation_status must be draft or waiting_user_confirm")
+    return candidate
+
+
+def _model_authored_scbkr_draft(raw_input: str, task_type: str) -> tuple[dict[str, Any], bool]:
+    fallback = False
+    draft = None
+    if MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("mode") != "sandbox":
+        try:
+            response = _post_openai_compatible(MODEL_SETTINGS, build_scbkr_draft_generation_messages(raw_input, task_type))
+            draft = json.loads(parse_chat_completion_response(response))
+            draft = _validate_model_authored_scbkr_draft(draft)
+        except Exception:
+            draft = None
+    if draft is None:
+        draft = create_scbkr_draft(raw_input, task_type)
+        fallback = True
+    draft["confirmation_status"] = "draft"
+    draft["model_authored"] = True
+    draft["fallback_used"] = fallback
+    return draft, fallback
 
 
 def _now() -> str:
@@ -476,6 +550,38 @@ def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     return result
 
 
+@app.post("/api/chat/general")
+def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
+    user_text = str(payload.get("message", "")).strip()
+    if not user_text:
+        raise HTTPException(status_code=400, detail="message is required")
+    if _is_identity_question(user_text):
+        reply = IDENTITY_EN if _looks_english(user_text) else IDENTITY_ZH
+    else:
+        reply = "收到。這是一般聊天回覆；不會自動建立 task、不會跳 Workbench、不會寫入 Data Center。"
+    suggestion = _build_chat_suggestion(user_text) if any(trigger in user_text for trigger in SUGGESTION_TRIGGERS) else None
+    return {"mode": "general_chat", "reply": reply, "suggestion": suggestion, "task_created": False, "data_center_written": False, "auto_workbench": False}
+
+
+@app.post("/api/chat/suggestions/accept")
+def accept_chat_suggestion(payload: dict[str, Any]) -> dict[str, Any]:
+    suggestion = payload.get("suggestion") or _build_chat_suggestion(str(payload.get("user_original", "")).strip())
+    return {
+        "prefill": {
+            "user_original": suggestion.get("user_original", ""),
+            "suggested_instruction": suggestion.get("suggested_instruction", ""),
+            "suggested_type": suggestion.get("suggested_type", "記憶規則 / 情報判準"),
+            "suggested_reason": suggestion.get("suggested_reason", ""),
+            "suggested_write_direction": suggestion.get("suggested_write_direction", "記憶庫"),
+            "task_type": "general",
+            "draft_only_notice": "只整理不入庫：按下建立確認單後仍需 Workbench 使用者確認。",
+        },
+        "task_created": False,
+        "data_center_written": False,
+        "next_page": "chat",
+    }
+
+
 @app.post("/api/tasks/create")
 def create_task(payload: dict[str, Any]) -> dict[str, Any]:
     raw_input = str(payload.get("raw_input", "")).strip()
@@ -496,6 +602,18 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
         "physical_write_performed": False,
         "runtime": "P13-A/B/C SQLite + JSONL retrieval runtime",
     }
+    if payload.get("create_scbkr_draft") is True:
+        task["data_center_context"] = {"advisory": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": 0}
+        task["scbkr"], fallback_used = _model_authored_scbkr_draft(raw_input, task["task_type"])
+        task["status"] = "waiting_user_confirm"
+        task["confirmed"] = False
+        TASKS[task_id] = task
+        save_task(task)
+        save_scbkr_confirmation(task_id, task["scbkr"])
+        _append_task_event("task_created", task, status_after="waiting_scbkr", payload={"task_type": task["task_type"]})
+        _append_task_event("scbkr_draft_model_generated", task, status_before="waiting_scbkr", status_after=task["status"], payload={"fallback_used": fallback_used, "data_center_context_advisory": True})
+        _append_task_event("scbkr_draft_created", task, status_before="waiting_scbkr", status_after=task["status"], payload={"compatibility_event": True, "confirmation_status": task["scbkr"].get("confirmation_status")})
+        return task
     TASKS[task_id] = task
     save_task(task)
     _append_task_event("task_created", task, status_after=task["status"], payload={"task_type": task["task_type"]})
@@ -506,18 +624,96 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
 def create_scbkr(task_id: str) -> dict[str, Any]:
     task = _get_task(task_id)
     status_before = task.get("status")
-    task["scbkr"] = create_scbkr_draft(task["raw_input"], task["task_type"])
+    task["scbkr"], fallback_used = _model_authored_scbkr_draft(task["raw_input"], task["task_type"])
+    task["data_center_context"] = {"advisory": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": 0}
     task["status"] = "waiting_user_confirm"
     save_task(task)
     save_scbkr_confirmation(task_id, task["scbkr"])
+    _append_task_event(
+        "scbkr_draft_model_generated",
+        task,
+        status_before=status_before,
+        status_after=task["status"],
+        payload={"confirmation_status": task["scbkr"].get("confirmation_status"), "fallback_used": fallback_used, "data_center_context_advisory": True},
+    )
     _append_task_event(
         "scbkr_draft_created",
         task,
         status_before=status_before,
         status_after=task["status"],
-        payload={"confirmation_status": task["scbkr"].get("confirmation_status")},
+        payload={"compatibility_event": True, "confirmation_status": task["scbkr"].get("confirmation_status")},
     )
     return task
+
+
+@app.patch("/api/tasks/{task_id}/scbkr")
+def edit_scbkr(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    task = _get_task(task_id)
+    if "scbkr" not in task:
+        raise HTTPException(status_code=400, detail="SCBKR draft required before edit")
+    status_before = task.get("status")
+    candidate = payload.get("scbkr")
+    if candidate is not None:
+        validate_scbkr_draft_for_confirmation(candidate)
+        task["scbkr"] = candidate
+    task["confirmed"] = False
+    task["status"] = "waiting_user_confirm"
+    task["scbkr"]["confirmation_status"] = "draft"
+    _invalidate_downstream_after_scbkr_revision(task, status_before)
+    save_task(task)
+    save_scbkr_confirmation(task_id, task["scbkr"])
+    _append_task_event("scbkr_user_edited", task, status_before=status_before, status_after=task["status"], payload={"layer": payload.get("layer", "manual")})
+    return _task_response(task)
+
+
+@app.post("/api/tasks/{task_id}/scbkr/patch-draft")
+def scbkr_patch_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    task = _get_task(task_id)
+    layer = str(payload.get("layer") or "B").upper()
+    instruction = str(payload.get("instruction", "")).strip()
+    if layer not in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
+        raise HTTPException(status_code=400, detail="layer must be S/C/B/K/R")
+    before = task.get("scbkr", {}).get(layer, {})
+    after = dict(before)
+    after["pending_questions"] = [f"使用者要求修改：{instruction or '請依使用者指令調整此層。'}"]
+    if layer == "B" and ("日期" in instruction or "date" in instruction.lower()):
+        after["stop_conditions"] = list(after.get("stop_conditions") or []) + ["模型不得自行確認事件日期；日期必須由使用者填寫或確認。"]
+        after["sensitive_operation_confirm"] = True
+    patch = {"layer": layer, "before_summary": str(before)[:240], "after_draft": after, "reason": instruction or "使用者要求模型提出此層修改草案。", "auto_confirmed": False}
+    return {"task_id": task_id, "patch": patch, "confirmed": False, "status": task.get("status")}
+
+
+@app.post("/api/tasks/{task_id}/scbkr/apply-patch")
+def apply_scbkr_patch(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    task = _get_task(task_id)
+    patch = payload.get("patch") or {}
+    layer = str(patch.get("layer") or "").upper()
+    if layer not in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
+        raise HTTPException(status_code=400, detail="patch.layer must be S/C/B/K/R")
+    task.setdefault("scbkr", {})[layer] = patch.get("after_draft") or task.get("scbkr", {}).get(layer, {})
+    return edit_scbkr(task_id, {"scbkr": task["scbkr"], "layer": layer})
+
+
+@app.post("/api/tasks/{task_id}/dates")
+def update_task_dates(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    task = _get_task(task_id)
+    dates = dict(task.get("date_governance") or {})
+    dates.update({
+        "system_created_at": task.get("created_at") or task.get("task_id"),
+        "system_written_at": _now(),
+        "event_date": payload.get("event_date", dates.get("event_date")),
+        "model_inferred_date": payload.get("model_inferred_date", dates.get("model_inferred_date")),
+        "date_source": payload.get("date_source", "user" if payload.get("event_date") else dates.get("date_source", "unset")),
+        "confirmation_status": "confirmed_by_user" if payload.get("user_confirmed") is True else "waiting_user_confirm",
+        "modified_at": _now(),
+        "confirmed_at": _now() if payload.get("user_confirmed") is True else dates.get("confirmed_at"),
+    })
+    if payload.get("clear_model_inferred") is True:
+        dates["model_inferred_date"] = None
+    task["date_governance"] = dates
+    save_task(task)
+    _append_task_event("task_date_user_updated", task, status_before=task.get("status"), status_after=task.get("status"), payload={"confirmation_status": dates["confirmation_status"]})
+    return _task_response(task)
 
 
 @app.post("/api/tasks/{task_id}/confirm")

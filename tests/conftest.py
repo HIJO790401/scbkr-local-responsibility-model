@@ -73,6 +73,10 @@ except Exception:
 
             try:
                 parts = path.strip("/").split("/")
+                if path == "/api/chat/general":
+                    return _Response(200, main.general_chat(json or {}))
+                if path == "/api/chat/suggestions/accept":
+                    return _Response(200, main.accept_chat_suggestion(json or {}))
                 if path == "/api/tasks/create":
                     return _Response(200, main.create_task(json or {}))
                 if len(parts) >= 3 and parts[:2] == ["api", "tasks"]:
@@ -89,6 +93,12 @@ except Exception:
                         "storage-confirm": lambda: main.storage_confirm(task_id, json or {}),
                         "complete": lambda: main.complete_task(task_id, json or {}),
                     }
+                    if action == "scbkr" and len(parts) > 4 and parts[4] == "patch-draft":
+                        return _Response(200, main.scbkr_patch_draft(task_id, json or {}))
+                    if action == "scbkr" and len(parts) > 4 and parts[4] == "apply-patch":
+                        return _Response(200, main.apply_scbkr_patch(task_id, json or {}))
+                    if action == "dates":
+                        return _Response(200, main.update_task_dates(task_id, json or {}))
                     if action in handlers:
                         return _Response(200, handlers[action]())
                 if path == "/api/model/test":

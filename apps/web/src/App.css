@@ -28,3 +28,5 @@ pre, code, .json-block, .raw-json { white-space: pre-wrap; overflow-wrap: anywhe
 .storage-card.selected { border-color: #1762aa; background: #e8f3ff; box-shadow: 0 0 0 2px rgba(23,98,170,.12); }
 .storage-card small, .storage-card em { white-space: normal; font-weight: 600; color: #3d5570; }
 .storage-plan { border: 1px solid #d8e2ef; border-radius: 12px; padding: 12px; background: #fbfdff; margin-top: 12px; }
+
+.suggestion-card { border: 1px solid #8fc2ef; border-radius: 18px; background: #f7fbff; padding: 16px; margin-top: 14px; }
