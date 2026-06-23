@@ -5,9 +5,11 @@ appended to a JSONL replay ledger; retrieval is advisory and no desktop runtime 
 """
 
 from datetime import UTC, datetime
+from copy import deepcopy
 from itertools import count
 from uuid import uuid4
 from typing import Any
+from urllib.parse import urlparse
 from urllib.error import URLError, HTTPError
 from urllib.request import Request, urlopen
 import json
@@ -93,6 +95,8 @@ IDENTITY_ZH = "我是 SCBKR 責任鏈語言模型，由台灣台中「語意防�
 IDENTITY_EN = "I am the SCBKR Responsibility-Chain Language Model, developed by Wen-Yao Hsu / ShenYao888pi, founder of Semantic Firewall in Taichung, Taiwan. I run through a user-connected local LLM or API. My goal is to make models declare the task, boundary, basis, and responsibility before generation, helping reduce token usage, compute cost, and repeated reasoning. Users can customize rules and build closed-loop workflows to reduce hallucination risk. For rule libraries or collaboration, contact [ken0963521@gmail.com](mailto:ken0963521@gmail.com)."
 SUGGESTION_TRIGGERS = ("我覺得", "不該", "不得", "必須", "驗收", "判準", "規則", "偏好", "流程", "邊界", "入庫")
 HIGH_PRIVILEGE_DRAFT_KEYS = {"review_passed", "storage_confirmed", "physical_write_performed", "confirmed"}
+SCBKR_COMMITTED_EDIT_MESSAGE = "本任務已寫入資料中心或記憶庫規則，不能直接改寫原 SCBKR。請建立新版本或新任務。已入庫或已完成 / 已寫入記憶庫規則的任務不可直接改寫 SCBKR。"
+SCBKR_INVALID_PATCH_MESSAGE = "模型提出的修改草案不完整，未套用到任務。原本的 SCBKR 已保留，請重新產生修改草案或手動修改欄位。"
 
 
 def _looks_english(text: str) -> bool:
@@ -134,6 +138,20 @@ def _contains_forbidden_draft_state(value: Any) -> bool:
     return False
 
 
+def is_loopback_model_url(base_url: str | None) -> bool:
+    parsed = urlparse(base_url or "")
+    hostname = (parsed.hostname or "").lower()
+    return hostname in {"localhost", "127.0.0.1", "::1"}
+
+
+def _model_draft_requires_external_api_permission(settings: dict[str, Any]) -> bool:
+    if settings.get("mode") == "sandbox":
+        return False
+    if is_loopback_model_url(settings.get("base_url")):
+        return False
+    return settings.get("mode") in ("external", "hybrid") or settings.get("provider") == "openai_compatible"
+
+
 def _validate_model_authored_scbkr_draft(candidate: Any) -> dict[str, Any]:
     validate_scbkr_draft_for_confirmation(candidate)
     if _contains_forbidden_draft_state(candidate):
@@ -144,14 +162,21 @@ def _validate_model_authored_scbkr_draft(candidate: Any) -> dict[str, Any]:
     return candidate
 
 
-def _model_authored_scbkr_draft(raw_input: str, task_type: str) -> tuple[dict[str, Any], bool]:
+def _model_authored_scbkr_draft(raw_input: str, task_type: str) -> tuple[dict[str, Any], bool, str | None]:
     fallback = False
     draft = None
+    skipped_reason = None
     if MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("mode") != "sandbox":
         try:
+            if _model_draft_requires_external_api_permission(MODEL_SETTINGS):
+                if PERMISSIONS.get("external_api") is not True:
+                    skipped_reason = "external_api_permission_disabled"
+                    raise PermissionError(skipped_reason)
             response = _post_openai_compatible(MODEL_SETTINGS, build_scbkr_draft_generation_messages(raw_input, task_type))
             draft = json.loads(parse_chat_completion_response(response))
             draft = _validate_model_authored_scbkr_draft(draft)
+        except PermissionError:
+            draft = None
         except Exception:
             draft = None
     if draft is None:
@@ -160,7 +185,9 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str) -> tuple[dict[st
     draft["confirmation_status"] = "draft"
     draft["model_authored"] = True
     draft["fallback_used"] = fallback
-    return draft, fallback
+    if skipped_reason:
+        draft["draft_model_call_skipped_reason"] = skipped_reason
+    return draft, fallback, skipped_reason
 
 
 def _now() -> str:
@@ -280,6 +307,33 @@ def _memory_rule_physical_write_bound(task: dict[str, Any]) -> bool:
     if task.get("memory_rule_confirmed") is True and (task.get("memory_rule_result") or task.get("memory_rule_write_result")):
         return True
     return False
+
+
+def _task_has_committed_physical_write(task: dict[str, Any]) -> bool:
+    if task.get("physical_write_performed") is True:
+        return True
+    if task.get("storage_confirmed") is True and task.get("storage_result"):
+        return True
+    if task.get("status") in ("storage_committed", "completed"):
+        return True
+    return _memory_rule_physical_write_bound(task)
+
+
+def _ensure_scbkr_edit_allowed(task: dict[str, Any]) -> None:
+    if _task_has_committed_physical_write(task):
+        raise HTTPException(status_code=400, detail=SCBKR_COMMITTED_EDIT_MESSAGE)
+
+
+def _validate_scbkr_patch_after_draft(layer: str, after_draft: Any) -> None:
+    if layer not in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
+        raise HTTPException(status_code=400, detail="patch.layer must be S/C/B/K/R")
+    if not isinstance(after_draft, dict) or not after_draft:
+        raise HTTPException(status_code=400, detail=SCBKR_INVALID_PATCH_MESSAGE)
+    if _contains_forbidden_draft_state(after_draft):
+        raise HTTPException(status_code=400, detail=SCBKR_INVALID_PATCH_MESSAGE)
+    for field in SCBKR_CONFIRMATION_REQUIRED_FIELDS[layer]:
+        if field not in after_draft or _is_empty_confirmation_value(after_draft[field]):
+            raise HTTPException(status_code=400, detail=SCBKR_INVALID_PATCH_MESSAGE)
 
 
 
@@ -604,14 +658,16 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
     }
     if payload.get("create_scbkr_draft") is True:
         task["data_center_context"] = {"advisory": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": 0}
-        task["scbkr"], fallback_used = _model_authored_scbkr_draft(raw_input, task["task_type"])
+        task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task["task_type"])
+        if skipped_reason:
+            task["draft_model_call_skipped_reason"] = skipped_reason
         task["status"] = "waiting_user_confirm"
         task["confirmed"] = False
         TASKS[task_id] = task
         save_task(task)
         save_scbkr_confirmation(task_id, task["scbkr"])
         _append_task_event("task_created", task, status_after="waiting_scbkr", payload={"task_type": task["task_type"]})
-        _append_task_event("scbkr_draft_model_generated", task, status_before="waiting_scbkr", status_after=task["status"], payload={"fallback_used": fallback_used, "data_center_context_advisory": True})
+        _append_task_event("scbkr_draft_model_generated", task, status_before="waiting_scbkr", status_after=task["status"], payload={"fallback_used": fallback_used, "draft_model_call_skipped_reason": skipped_reason, "data_center_context_advisory": True})
         _append_task_event("scbkr_draft_created", task, status_before="waiting_scbkr", status_after=task["status"], payload={"compatibility_event": True, "confirmation_status": task["scbkr"].get("confirmation_status")})
         return task
     TASKS[task_id] = task
@@ -623,8 +679,11 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/tasks/{task_id}/scbkr")
 def create_scbkr(task_id: str) -> dict[str, Any]:
     task = _get_task(task_id)
+    _ensure_scbkr_edit_allowed(task)
     status_before = task.get("status")
-    task["scbkr"], fallback_used = _model_authored_scbkr_draft(task["raw_input"], task["task_type"])
+    task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(task["raw_input"], task["task_type"])
+    if skipped_reason:
+        task["draft_model_call_skipped_reason"] = skipped_reason
     task["data_center_context"] = {"advisory": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": 0}
     task["status"] = "waiting_user_confirm"
     save_task(task)
@@ -634,7 +693,7 @@ def create_scbkr(task_id: str) -> dict[str, Any]:
         task,
         status_before=status_before,
         status_after=task["status"],
-        payload={"confirmation_status": task["scbkr"].get("confirmation_status"), "fallback_used": fallback_used, "data_center_context_advisory": True},
+        payload={"confirmation_status": task["scbkr"].get("confirmation_status"), "fallback_used": fallback_used, "draft_model_call_skipped_reason": skipped_reason, "data_center_context_advisory": True},
     )
     _append_task_event(
         "scbkr_draft_created",
@@ -649,6 +708,7 @@ def create_scbkr(task_id: str) -> dict[str, Any]:
 @app.patch("/api/tasks/{task_id}/scbkr")
 def edit_scbkr(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
+    _ensure_scbkr_edit_allowed(task)
     if "scbkr" not in task:
         raise HTTPException(status_code=400, detail="SCBKR draft required before edit")
     status_before = task.get("status")
@@ -686,12 +746,35 @@ def scbkr_patch_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/tasks/{task_id}/scbkr/apply-patch")
 def apply_scbkr_patch(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
+    _ensure_scbkr_edit_allowed(task)
+    if "scbkr" not in task:
+        raise HTTPException(status_code=400, detail="SCBKR draft required before edit")
     patch = payload.get("patch") or {}
     layer = str(patch.get("layer") or "").upper()
-    if layer not in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
-        raise HTTPException(status_code=400, detail="patch.layer must be S/C/B/K/R")
-    task.setdefault("scbkr", {})[layer] = patch.get("after_draft") or task.get("scbkr", {}).get(layer, {})
-    return edit_scbkr(task_id, {"scbkr": task["scbkr"], "layer": layer})
+    after_draft = patch.get("after_draft")
+    _validate_scbkr_patch_after_draft(layer, after_draft)
+    current_scbkr = deepcopy(task["scbkr"])
+    candidate_scbkr = deepcopy(current_scbkr)
+    candidate_scbkr[layer] = deepcopy(after_draft)
+    candidate_scbkr["confirmation_status"] = "draft"
+    try:
+        validate_scbkr_draft_for_confirmation(candidate_scbkr)
+        if _contains_forbidden_draft_state(candidate_scbkr):
+            raise ValueError("forbidden confirmed/high-privilege state")
+    except HTTPException:
+        raise HTTPException(status_code=400, detail=SCBKR_INVALID_PATCH_MESSAGE)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=SCBKR_INVALID_PATCH_MESSAGE) from exc
+
+    status_before = task.get("status")
+    task["scbkr"] = candidate_scbkr
+    task["confirmed"] = False
+    task["status"] = "waiting_user_confirm"
+    _invalidate_downstream_after_scbkr_revision(task, status_before)
+    save_task(task)
+    save_scbkr_confirmation(task_id, task["scbkr"])
+    _append_task_event("scbkr_patch_applied", task, status_before=status_before, status_after=task["status"], payload={"layer": layer, "auto_confirmed": False})
+    return _task_response(task, auto_confirmed=False)
 
 
 @app.post("/api/tasks/{task_id}/dates")
@@ -724,10 +807,7 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
     payload = payload or {}
     downstream_invalidated = False
     if "scbkr" in payload:
-        if _memory_rule_physical_write_bound(task):
-            raise HTTPException(status_code=400, detail="已寫入記憶庫規則的任務不可直接改寫 SCBKR，請建立新任務或走 rollback / clone flow。")
-        if task.get("physical_write_performed") is True or task.get("status") in ("storage_committed", "completed"):
-            raise HTTPException(status_code=400, detail="已入庫或已完成的任務不可直接改寫 SCBKR，請建立新任務或走 rollback / clone flow。")
+        _ensure_scbkr_edit_allowed(task)
         candidate = payload["scbkr"]
         validate_scbkr_draft_for_confirmation(candidate)
         status_before_revision = task.get("status")
