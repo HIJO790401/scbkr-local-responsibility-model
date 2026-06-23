@@ -35,7 +35,7 @@ def assert_task_can_generate(task, scbkr, model_settings, permissions):
     return True
 
 
-def build_scbkr_draft_generation_messages(raw_input, task_type="general"):
+def build_scbkr_draft_generation_messages(raw_input, task_type="general", retrieval_context=None):
     """Build local/API prompt messages for SCBKR draft generation without executing the task."""
     system_message = (
         "你正在 SCBKR 草案生成階段。你的任務是根據使用者輸入，產生 S/C/B/K/R 五維確認單草案。"
@@ -47,7 +47,7 @@ def build_scbkr_draft_generation_messages(raw_input, task_type="general"):
     )
     return [
         {"role": "system", "content": system_message},
-        {"role": "user", "content": json.dumps({"raw_input": raw_input, "task_type": task_type, "required_dimensions": ["S", "C", "B", "K", "R"], "status": "draft/waiting_user_confirm"}, ensure_ascii=False, sort_keys=True)},
+        {"role": "user", "content": json.dumps({"raw_input": raw_input, "task_type": task_type, "required_dimensions": ["S", "C", "B", "K", "R"], "status": "draft/waiting_user_confirm", "four_store_retrieval_context": retrieval_context or {"hits": [], "must_cite_confirmed_rules": []}}, ensure_ascii=False, sort_keys=True)},
     ]
 
 

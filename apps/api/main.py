@@ -162,7 +162,37 @@ def _validate_model_authored_scbkr_draft(candidate: Any) -> dict[str, Any]:
     return candidate
 
 
-def _model_authored_scbkr_draft(raw_input: str, task_type: str) -> tuple[dict[str, Any], bool, str | None]:
+def _model_connected() -> bool:
+    return MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("last_test_status") == "success"
+
+
+def _build_four_store_context(raw_input: str, task_id: str | None = None) -> dict[str, Any]:
+    """Read confirmed Data Center/four-store evidence before model drafting."""
+    hits: list[dict[str, Any]] = []
+    conflicts: list[dict[str, Any]] = []
+    try:
+        retrieval = query_retrieval_cases(raw_input, task_id=task_id, top_k=5)
+    except Exception as exc:
+        retrieval = {"backend": "unavailable", "candidates": [], "error": str(exc)}
+    for candidate in retrieval.get("candidates", []) or []:
+        case_type = str(candidate.get("case_type") or candidate.get("target") or "vector")
+        source_store = "memory" if "memory" in case_type else "vector"
+        text_value = str(candidate.get("retrieval_text", ""))
+        hit = {"source_store": source_store, "rule": text_value[:800], "case_id": candidate.get("case_id"), "status": "沿用", "rule_confirmed": True, "score": candidate.get("score")}
+        hits.append(hit)
+        if any(token in text_value for token in ("不得", "禁止", "不准", "must not")):
+            hit["must_cite"] = True
+    for item in list_persisted_storage_items(limit=20):
+        target = item.get("target")
+        if target in ("corpus", "logic", "memory"):
+            hits.append({"source_store": target, "rule": str((item.get("payload") or item).get("summary") or item.get("relative_path") or item.get("hash"))[:800], "status": "待確認" if not item.get("task_id") else "沿用", "rule_confirmed": bool(item.get("task_id")), "storage_item_id": item.get("item_id")})
+    for rule in list_persisted_memory_rules(limit=20):
+        text_value = str(rule.get("rule_text") or rule.get("memory_rule") or rule.get("payload") or rule)
+        hits.append({"source_store": "memory", "rule": text_value[:800], "status": "沿用", "rule_confirmed": True, "must_cite": any(t in text_value for t in ("不得", "禁止", "不准", "must not")), "memory_rule_id": rule.get("rule_id")})
+    return {"retrieval_first": True, "query": raw_input, "retrieval_result": retrieval, "hits": hits, "conflicts": conflicts, "no_confirmed_rules": not any(h.get("rule_confirmed") for h in hits), "must_cite_confirmed_rules": [h for h in hits if h.get("rule_confirmed") and h.get("must_cite")]}
+
+
+def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_context: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool, str | None]:
     fallback = False
     draft = None
     skipped_reason = None
@@ -172,13 +202,16 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str) -> tuple[dict[st
                 if PERMISSIONS.get("external_api") is not True:
                     skipped_reason = "external_api_permission_disabled"
                     raise PermissionError(skipped_reason)
-            response = _post_openai_compatible(MODEL_SETTINGS, build_scbkr_draft_generation_messages(raw_input, task_type))
+            response = _post_openai_compatible(MODEL_SETTINGS, build_scbkr_draft_generation_messages(raw_input, task_type, retrieval_context))
             draft = json.loads(parse_chat_completion_response(response))
             draft = _validate_model_authored_scbkr_draft(draft)
         except PermissionError:
             draft = None
-        except Exception:
+        except Exception as exc:
+            skipped_reason = f"model_unavailable_or_invalid_json: {exc}"
             draft = None
+    else:
+        skipped_reason = "model_not_connected"
     if draft is None:
         draft = create_scbkr_draft(raw_input, task_type)
         fallback = True
@@ -186,9 +219,12 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str) -> tuple[dict[st
             skipped_reason = "model_unavailable_or_invalid_json"
     draft["confirmation_status"] = "draft"
     draft["model_authored"] = True
+    draft["draft_source"] = "fallback" if fallback else "model"
     draft["fallback_used"] = fallback
+    draft["data_center_context"] = retrieval_context or {"hits": [], "no_confirmed_rules": True}
+    draft["referenced_sources"] = (retrieval_context or {}).get("hits", [])
     if fallback:
-        draft["fallback_reason"] = skipped_reason
+        draft["fallback_reason"] = skipped_reason or "model_unavailable_or_invalid_json"
     if skipped_reason:
         draft["draft_model_call_skipped_reason"] = skipped_reason
     return draft, fallback, skipped_reason
@@ -528,6 +564,14 @@ def desktop_status() -> dict[str, Any]:
     }
 
 
+@app.post("/api/backend/test")
+def test_backend(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    url = str((payload or {}).get("backend_api_url") or LOCAL_DESKTOP_API_BASE_URL).rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="backend_api_url must start with http:// or https://")
+    return {"ok": True, "status": "online", "backend_api_url": url, "runtime": "desktop sidecar" if is_loopback_model_url(url) else "mobile remote"}
+
+
 @app.get("/api/settings/model")
 def get_model_settings() -> dict[str, Any]:
     return _public_model_settings()
@@ -615,10 +659,22 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="message is required")
     if _is_identity_question(user_text):
         reply = IDENTITY_EN if _looks_english(user_text) else IDENTITY_ZH
+        source = "identity"
+    elif not _model_connected():
+        reply = "模型尚未連線。請先到連線設定儲存並測試模型連線；未 connected 時不會假裝模型回覆。"
+        source = "not_connected"
+    elif MODEL_SETTINGS.get("mode") == "sandbox":
+        reply = "Sandbox 已連線：" + user_text
+        source = "sandbox"
     else:
-        reply = "收到。這是一般聊天回覆；不會自動建立 task、不會跳 Workbench、不會寫入 Data Center。"
+        try:
+            response = _post_openai_compatible(MODEL_SETTINGS, [{"role": "system", "content": "你是 SCBKR 一般聊天入口。不要建立 task，不要寫入 Data Center。"}, {"role": "user", "content": user_text}])
+            reply = parse_chat_completion_response(response)
+            source = "model_gateway"
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"模型呼叫失敗：{_friendly_model_error(MODEL_SETTINGS, str(exc))}") from exc
     suggestion = _build_chat_suggestion(user_text) if any(trigger in user_text for trigger in SUGGESTION_TRIGGERS) else None
-    return {"mode": "general_chat", "reply": reply, "suggestion": suggestion, "task_created": False, "data_center_written": False, "auto_workbench": False}
+    return {"mode": "general_chat", "reply": reply, "reply_source": source, "model_connected": _model_connected(), "suggestion": suggestion, "task_created": False, "data_center_written": False, "auto_workbench": False}
 
 
 @app.post("/api/chat/suggestions/accept")
@@ -661,8 +717,9 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
         "runtime": "P13-A/B/C SQLite + JSONL retrieval runtime",
     }
     if payload.get("create_scbkr_draft") is True:
-        task["data_center_context"] = {"advisory": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": 0}
-        task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task["task_type"])
+        task["data_center_context"] = _build_four_store_context(raw_input, task_id)
+        task["data_center_context"].update({"advisory": True, "retrieval_required": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": len(task["data_center_context"].get("hits", []))})
+        task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task["task_type"], task["data_center_context"])
         if skipped_reason:
             task["draft_model_call_skipped_reason"] = skipped_reason
         task["status"] = "waiting_user_confirm"
@@ -685,10 +742,11 @@ def create_scbkr(task_id: str) -> dict[str, Any]:
     task = _get_task(task_id)
     _ensure_scbkr_edit_allowed(task)
     status_before = task.get("status")
-    task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(task["raw_input"], task["task_type"])
+    task["data_center_context"] = _build_four_store_context(task["raw_input"], task_id)
+    task["data_center_context"].update({"advisory": True, "retrieval_required": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": len(task["data_center_context"].get("hits", []))})
+    task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(task["raw_input"], task["task_type"], task["data_center_context"])
     if skipped_reason:
         task["draft_model_call_skipped_reason"] = skipped_reason
-    task["data_center_context"] = {"advisory": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": 0}
     task["status"] = "waiting_user_confirm"
     save_task(task)
     save_scbkr_confirmation(task_id, task["scbkr"])
