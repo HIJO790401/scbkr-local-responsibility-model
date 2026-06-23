@@ -1,5 +1,7 @@
 """Pure model gateway settings validation and safety helpers."""
 
+from urllib.parse import urlparse
+
 MODEL_PROVIDERS = ("lm_studio", "ollama", "openai_compatible", "custom", "sandbox_mock_model")
 MODEL_MODES = ("local", "external", "hybrid", "sandbox")
 MODEL_TEST_STATUSES = ("untested", "success", "failed")
@@ -73,6 +75,20 @@ def mask_api_key(api_key):
     return f"{api_key[:2]}****{api_key[-2:]}"
 
 
+def is_loopback_model_url(base_url):
+    parsed = urlparse(base_url or "")
+    hostname = (parsed.hostname or "").lower()
+    return hostname in {"localhost", "127.0.0.1", "::1"}
+
+
+def model_call_requires_external_api_permission(settings):
+    if settings.get("mode") == "sandbox":
+        return False
+    if is_loopback_model_url(settings.get("base_url")):
+        return False
+    return True
+
+
 def can_enable_generate(settings, permissions):
     """Return whether future generation may be enabled by model settings and permissions."""
     validate_model_settings(settings)
@@ -84,6 +100,6 @@ def can_enable_generate(settings, permissions):
         return False
     if settings["last_test_status"] != "success":
         return False
-    if settings["mode"] in ("external", "hybrid") and not permissions.get("external_api", False):
+    if model_call_requires_external_api_permission(settings) and not permissions.get("external_api", False):
         return False
     return True

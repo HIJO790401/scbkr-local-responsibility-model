@@ -85,11 +85,12 @@ def test_can_enable_generate_locks_disabled_model_name_and_test_status():
     assert can_enable_generate(enabled_settings(last_test_status="untested"), permissions) is False
 
 
-def test_can_enable_generate_requires_external_api_permission_for_external_or_hybrid():
-    assert can_enable_generate(enabled_settings(mode="external"), {"external_api": False}) is False
-    assert can_enable_generate(enabled_settings(mode="hybrid"), {"external_api": False}) is False
-    assert can_enable_generate(enabled_settings(mode="external"), {"external_api": True}) is True
-    assert can_enable_generate(enabled_settings(mode="local"), {"external_api": False}) is True
+def test_can_enable_generate_requires_external_api_permission_for_non_loopback_urls():
+    assert can_enable_generate(enabled_settings(mode="external", base_url="https://example.test/v1"), {"external_api": False}) is False
+    assert can_enable_generate(enabled_settings(mode="hybrid", base_url="https://example.test/v1"), {"external_api": False}) is False
+    assert can_enable_generate(enabled_settings(mode="local", provider="lm_studio", base_url="http://192.168.1.10:1234/v1"), {"external_api": False}) is False
+    assert can_enable_generate(enabled_settings(mode="external", base_url="https://example.test/v1"), {"external_api": True}) is True
+    assert can_enable_generate(enabled_settings(mode="local", base_url="http://127.0.0.1:1234/v1"), {"external_api": False}) is True
 
 
 def test_build_chat_completion_payload_only_builds_payload():
