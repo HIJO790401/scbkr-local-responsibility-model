@@ -152,6 +152,22 @@ def _model_draft_requires_external_api_permission(settings: dict[str, Any]) -> b
     return settings.get("mode") in ("external", "hybrid") or settings.get("provider") == "openai_compatible"
 
 
+def _model_call_requires_external_api_permission(settings: dict[str, Any]) -> bool:
+    if settings.get("mode") == "sandbox":
+        return False
+    if settings.get("provider") in ("lm_studio", "ollama") and is_loopback_model_url(settings.get("base_url")):
+        return False
+    if is_loopback_model_url(settings.get("base_url")):
+        return False
+    return settings.get("mode") in ("external", "hybrid") or settings.get("provider") == "openai_compatible"
+
+
+def _assert_model_gateway_call_allowed(settings: dict[str, Any]) -> None:
+    assert_permission_allowed(PERMISSIONS, "model_generate")
+    if _model_call_requires_external_api_permission(settings):
+        assert_permission_allowed(PERMISSIONS, "external_api_call")
+
+
 def _validate_model_authored_scbkr_draft(candidate: Any) -> dict[str, Any]:
     validate_scbkr_draft_for_confirmation(candidate)
     if _contains_forbidden_draft_state(candidate):
@@ -668,9 +684,14 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
         source = "sandbox"
     else:
         try:
+            _assert_model_gateway_call_allowed(MODEL_SETTINGS)
             response = _post_openai_compatible(MODEL_SETTINGS, [{"role": "system", "content": "你是 SCBKR 一般聊天入口。不要建立 task，不要寫入 Data Center。"}, {"role": "user", "content": user_text}])
             reply = parse_chat_completion_response(response)
             source = "model_gateway"
+        except PermissionError as exc:
+            if _model_call_requires_external_api_permission(MODEL_SETTINGS):
+                raise HTTPException(status_code=403, detail="目前未允許外部 API 呼叫，聊天內容不會送出。請開啟 external_api 權限或改用本地模型 / Sandbox。") from exc
+            raise HTTPException(status_code=403, detail="目前未允許模型生成，聊天內容不會送出。請開啟 model_generate 權限或改用 Sandbox。") from exc
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"模型呼叫失敗：{_friendly_model_error(MODEL_SETTINGS, str(exc))}") from exc
     suggestion = _build_chat_suggestion(user_text) if any(trigger in user_text for trigger in SUGGESTION_TRIGGERS) else None
