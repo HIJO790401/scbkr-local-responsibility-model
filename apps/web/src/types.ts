@@ -42,6 +42,7 @@ export type TaskSummary = {
   storage_suggestion?: Record<string, any>;
   storage_result?: Record<string, any>;
   memory_rule_draft?: Record<string, any>;
+  draft_model_call_skipped_reason?: string;
 };
 
 

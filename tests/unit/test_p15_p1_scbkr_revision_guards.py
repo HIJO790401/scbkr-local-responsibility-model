@@ -50,7 +50,7 @@ def test_edited_scbkr_invalidates_generation_review_and_storage_artifacts():
         storage_request={"old": True},
         storage_plan={"old": True},
         storage_result={"old": True},
-        storage_confirmed=True,
+        storage_confirmed=False,
         completed_at="2026-01-01T00:00:00+00:00",
         final_result={"old": True},
     )
