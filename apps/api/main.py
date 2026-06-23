@@ -168,7 +168,7 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str) -> tuple[dict[st
     skipped_reason = None
     if MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("mode") != "sandbox":
         try:
-            if _model_draft_requires_external_api_permission(MODEL_SETTINGS):
+            if _model_draft_requires_external_api_permission(MODEL_SETTINGS) and not (MODEL_SETTINGS.get("provider") in ("lm_studio", "ollama") and is_loopback_model_url(MODEL_SETTINGS.get("base_url"))):
                 if PERMISSIONS.get("external_api") is not True:
                     skipped_reason = "external_api_permission_disabled"
                     raise PermissionError(skipped_reason)
@@ -182,9 +182,13 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str) -> tuple[dict[st
     if draft is None:
         draft = create_scbkr_draft(raw_input, task_type)
         fallback = True
+        if skipped_reason is None:
+            skipped_reason = "model_unavailable_or_invalid_json"
     draft["confirmation_status"] = "draft"
     draft["model_authored"] = True
     draft["fallback_used"] = fallback
+    if fallback:
+        draft["fallback_reason"] = skipped_reason
     if skipped_reason:
         draft["draft_model_call_skipped_reason"] = skipped_reason
     return draft, fallback, skipped_reason
@@ -852,14 +856,36 @@ def generate(task_id: str) -> dict[str, Any]:
         if MODEL_SETTINGS["mode"] in ("external", "hybrid"):
             assert_permission_allowed(PERMISSIONS, "external_api_call")
         assert_task_can_generate(task, task.get("scbkr", {}), MODEL_SETTINGS, PERMISSIONS)
-        if MODEL_SETTINGS.get("mode") == "sandbox":
-            sandbox_output = generate_with_sandbox_model(task, task["scbkr"])
-            task["generation_result"] = build_generation_result(task, task["scbkr"], sandbox_output["generated_text"])
-            task["generation_result"].update(sandbox_output)
-            task["generation_result"].update({"source": "sandbox_mock_model", "next_required_action": "user_review_required"})
-        else:
+
+        def violates_contract(text: str) -> bool:
+            forbidden = ("SCBKR 草案", "五維確認單", "confirmation_status", "等待使用者確認", "重新確認 S/C/B/K/R", "S/C/B/K/R JSON")
+            stripped = text.strip()
+            return any(token in stripped for token in forbidden) or (stripped.startswith("{") and all(k in stripped for k in ('"S"', '"C"', '"B"', '"K"', '"R"')))
+
+        def call_generation_model() -> dict[str, Any]:
+            if MODEL_SETTINGS.get("mode") == "sandbox":
+                sandbox_output = generate_with_sandbox_model(task, task["scbkr"])
+                result = build_generation_result(task, task["scbkr"], sandbox_output.get("generated_text") or sandbox_output.get("content") or "")
+                result.update(sandbox_output)
+                result.update({"source": "sandbox_mock_model", "next_required_action": "user_review_required"})
+                return result
             response = _post_openai_compatible(MODEL_SETTINGS, build_generation_messages(task, task["scbkr"]))
-            task["generation_result"] = build_generation_result(task, task["scbkr"], parse_chat_completion_response(response))
+            return build_generation_result(task, task["scbkr"], parse_chat_completion_response(response))
+
+        first_result = call_generation_model()
+        first_text = str(first_result.get("content") or first_result.get("generated_text") or "")
+        if violates_contract(first_text):
+            _append_task_event("generation_contract_violation_retry", task, status_before=status_before, status_after=status_before, payload={"attempt": 1})
+            second_result = call_generation_model()
+            second_text = str(second_result.get("content") or second_result.get("generated_text") or "")
+            if violates_contract(second_text):
+                task["generation_result"] = {"status": "generation_contract_violation", "content": "模型輸出偏離正式任務結果，仍在輸出確認單。已停止本次生成，請重新生成或調整模型設定。"}
+                save_task(task)
+                _append_task_event("generation_contract_violation_stopped", task, status_before=status_before, status_after=task.get("status"), payload={"attempt": 2})
+                return _task_response(task)
+            task["generation_result"] = second_result
+        else:
+            task["generation_result"] = first_result
         task["status"] = "waiting_review"
         save_task(task)
         _append_task_event(
@@ -875,7 +901,8 @@ def generate(task_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         _append_task_event("generation_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error": str(exc)})
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        detail = "目前責任鏈尚未確認，請先確認責任鏈後再生成。" if "task.status must be confirmed before generation" in str(exc) else str(exc)
+        raise HTTPException(status_code=400, detail=detail) from exc
 
 
 @app.post("/api/tasks/{task_id}/review")
