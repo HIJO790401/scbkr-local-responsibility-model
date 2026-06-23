@@ -137,7 +137,7 @@ def test_scbkr_schema_accepts_draft_and_confirmed_dimensions():
     from pathlib import Path
 
     jsonschema = pytest.importorskip("jsonschema")
-    schema = json.loads(Path("schemas/scbkr.schema.json").read_text())
+    schema = json.loads(Path("schemas/scbkr.schema.json").read_text(encoding="utf-8"))
 
     draft = make_scbkr()
     jsonschema.Draft202012Validator(schema).validate(draft)
