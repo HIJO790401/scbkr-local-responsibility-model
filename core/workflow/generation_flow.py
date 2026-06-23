@@ -54,8 +54,9 @@ def build_scbkr_draft_generation_messages(raw_input, task_type="general"):
 def build_generation_messages(task, scbkr):
     """Build OpenAI-compatible messages from a confirmed task and SCBKR form."""
     system_message = (
-        "你現在處於 SCBKR 任務執行階段。S/C/B/K/R 已由使用者確認。"
-        "你不得重新建立確認單；不得把狀態改回 draft；不得要求使用者重新確認 S/C/B/K/R。"
+        "你現在處於 confirmed execution 真生成階段。S/C/B/K/R 已由使用者確認。"
+        "你現在不是建立確認單，不是解釋 SCBKR，只能根據 confirmed SCBKR 生成正式任務結果。"
+        "你不得重新建立確認單；不得輸出 SCBKR JSON；不得輸出確認單草案；不得把狀態改回 draft；不得要求使用者重新確認 S/C/B/K/R。"
         "You are now in the SCBKR task execution stage. Do not recreate the confirmation sheet. "
         "Do not change the status back to draft. Do not ask the user to reconfirm S/C/B/K/R. "
         "不得自行改變邊界；不得宣稱驗收通過；不得宣稱已入庫；"

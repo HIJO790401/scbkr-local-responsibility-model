@@ -12,11 +12,11 @@ from core.scbkr.confirmation import build_model_visible_scbkr_payload
 
 SANDBOX_PROVIDER = "sandbox_mock_model"
 SANDBOX_NOTICE = "Sandbox Mode: workflow test only. No external model or API was called."
-SANDBOX_GENERATED_TEXT = (
-    "This is a sandbox-generated response for testing the SCBKR responsibility-chain workflow. "
-    "No external model or API was called.\n"
-    "這是 SCBKR 沙盒模式產生的測試輸出，沒有呼叫外部模型或 API。"
-)
+def _formal_result_text(task: dict[str, Any], scbkr: dict[str, Any]) -> str:
+    raw = str(task.get("raw_input") or scbkr.get("S", {}).get("user_instruction") or "").strip()
+    if "心靈雞湯" in raw or "chicken soup" in raw.lower():
+        return "心靈雞湯文案初稿：\n你不需要一次抵達終點，只要今天比昨天更靠近自己一點。把焦慮交給行動，把懷疑留給時間；每一步微小前進，都正在替未來的你鋪路。"
+    return f"正式任務結果初稿：\n已根據使用者確認的責任鏈生成內容。任務內容：{raw}"
 
 
 def generate_with_sandbox_model(task: dict[str, Any], scbkr: dict[str, Any]) -> dict[str, Any]:
@@ -26,8 +26,8 @@ def generate_with_sandbox_model(task: dict[str, Any], scbkr: dict[str, Any]) -> 
         "task_id": task.get("task_id"),
         "task_type": task.get("task_type"),
         "sandbox_notice": SANDBOX_NOTICE,
-        "generated_text": SANDBOX_GENERATED_TEXT,
-        "content": SANDBOX_GENERATED_TEXT,
+        "generated_text": _formal_result_text(task, scbkr),
+        "content": _formal_result_text(task, scbkr),
         "scbkr_summary": {
             "S": sealed_scbkr_payload.get("S"),
             "C": sealed_scbkr_payload.get("C"),
