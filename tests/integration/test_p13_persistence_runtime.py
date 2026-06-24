@@ -114,7 +114,7 @@ def test_scbkr_and_confirm_persist_confirmation_and_ledger_event(isolated_runtim
         ).fetchone()
     assert row[0] == "draft"
 
-    confirm_response = client.post(f"/api/tasks/{task['task_id']}/confirm")
+    confirm_response = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"signature": "user"})
     assert confirm_response.status_code == 200
     confirmed = load_task(task["task_id"])
     assert confirmed["confirmed"] is True

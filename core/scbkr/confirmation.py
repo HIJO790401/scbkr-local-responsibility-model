@@ -23,6 +23,7 @@ CONFIRMATION_METADATA_KEYS = (
     "snapshot_hash",
     "confirmed_snapshot",
     "confirmed_snapshot_hash",
+    "signature_status",
 )
 
 

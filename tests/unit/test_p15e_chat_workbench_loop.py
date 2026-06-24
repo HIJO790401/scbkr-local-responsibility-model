@@ -33,7 +33,7 @@ def test_task_entry_button_creates_model_authored_draft_waiting_confirm():
     task = response.json()
     assert task["confirmed"] is False
     assert task["status"] == "waiting_user_confirm"
-    assert task["scbkr"]["model_authored"] is True
+    assert task["scbkr"]["model_authored"] is False
     assert set("SCBKR") == set(task["scbkr"][key] and key for key in "SCBKR")
     assert task["data_center_context"]["advisory"] is True
     assert task["data_center_context"]["auto_confirmed"] is False

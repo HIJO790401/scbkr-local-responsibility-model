@@ -200,7 +200,7 @@ def test_get_task_does_not_echo_stale_downstream_invalidated_flag():
 def test_confirm_without_downstream_invalidation_does_not_echo_stale_flag_or_persist_it():
     task = make_task(downstream_invalidated=True)
 
-    result = main.confirm_task(task["task_id"])
+    result = main.confirm_task(task["task_id"], {"signature": "user"})
 
     assert "downstream_invalidated" not in result
     assert "downstream_invalidated" not in main.TASKS[task["task_id"]]
@@ -211,7 +211,7 @@ def test_confirm_without_downstream_invalidation_does_not_echo_stale_flag_or_per
 
 def test_generate_and_review_do_not_echo_stale_downstream_invalidated_flag():
     task = make_task(downstream_invalidated=True)
-    main.confirm_task(task["task_id"])
+    main.confirm_task(task["task_id"], {"signature": "user"})
     main.TASKS[task["task_id"]]["downstream_invalidated"] = True
     main.PERMISSIONS["model_generate"] = True
     main.MODEL_SETTINGS.update({"mode": "sandbox", "provider": "sandbox_mock_model", "enabled": True, "model_name": "sandbox_mock_model"})
