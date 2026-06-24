@@ -1,555 +1,872 @@
-SCBKR 本地責任鏈模型｜自接入 MVP App
+# SCBKR 本地責任鏈模型｜Local Responsibility Chain Model
 
-SCBKR Local Responsibility Chain Model｜Self-Connected MVP App
-
----
-
-一、產品定位
-
-SCBKR 本地責任鏈模型是一套本地 AI 工作流控制層。
+**SCBKR Local Responsibility Chain Model** 是一套本地 AI 責任鏈控制系統。
 
 它不是一般聊天機器人。
 它不是單純 RAG。
-它不是大模型公司。
-它不是直接替使用者決定答案的工具。
+它不是模型公司。
+它不是讓模型替使用者直接決定答案的工具。
 
-SCBKR 的核心不是讓模型「立刻回答」，而是讓模型在回答之前，先交代任務、邊界、依據、驗收與責任鏈。
+SCBKR 的核心是：
 
-使用者可以在自己的電腦上，自行接入：
+> 讓模型在生成之前，先進入任務責任鏈；
+> 讓使用者在規則成立之前，保留最終簽名權；
+> 讓可用的判準進入四庫，成為後續任務可索引、可回放、可驗收的依據。
 
-- LM Studio
-- Ollama
-- OpenAI-compatible API
-- 其他自訂模型 endpoint
+SCBKR 不靠無限堆疊聊天上下文維持記憶。
+SCBKR 靠的是：
 
-並透過 SCBKR 五維確認流程，建立一套可確認、可驗收、可回放、可入庫、可持續累積的本地 AI 工作台。
+* SCBKR 五維確認單
+* 使用者簽名
+* 驗收 gate
+* 二次確認入庫
+* Data Center
+* 四庫索引
+* ledger / hash / replay
+* owner-signed evidence reuse
 
-核心理念：
+換句話說：
 
-«模型不是先回答，而是先交代。
-模型不是先生成，而是先確認。
-不要讓模型替你決定對錯。
-建立你自己的責任鏈模型。»
-
----
-
-二、SCBKR 解決什麼問題
-
-一般 AI 工具常見問題是：
-
-- 使用者一輸入，模型立刻生成。
-- 任務目的不清楚，模型仍然硬答。
-- 權限、資料來源、風格、驗收條件沒有先確認。
-- 模型生成錯誤後，使用者只能反覆重問。
-- 每次任務都從零開始，無法累積有效判準。
-- 大量成本浪費在無效 token、重複生成、錯誤修正與無責任輸出上。
-
-SCBKR 改變這個流程。
-
-SCBKR 不讓模型直接衝出去回答，而是先建立一份 SCBKR 五維確認單：
-
-- S｜介面 / 主體：確認任務名稱、主體、輸入內容、輸出形式與操作介面。
-- C｜後端 / 因果：確認流程、順序、資料流、依賴、測試條件與失敗影響。
-- B｜邊界 / 行為：確認可讀取、可寫入、可呼叫、可停止、可入庫的範圍。
-- K｜依據 / 風格：確認參考資料、風格、模型依據、來源可信度與歷史案例。
-- R｜回放 / 簽名：確認驗收條件、回放紀錄、入庫選項、簽名狀態與審計資料。
-
-只有使用者確認後，模型才可以生成。
+> 模型可以參與，但模型不能越權。
+> 模型可以生成草案，但規則必須由使用者簽名才成立。
+> 模型可以引用資料，但只能引用已簽名、已驗收、未撤銷的資料。
 
 ---
 
-三、核心流程
+## 一、產品定位
 
-SCBKR 的固定流程是：
+SCBKR 是一套 **本地 AI 工作流責任鏈控制層**。
 
-使用者輸入任務
-→ 系統建立 task
-→ 系統查詢 Data Center / 四庫
-→ 模型根據使用者輸入與已確認規則產生 SCBKR 五維草案
-→ 使用者修改或確認
-→ confirmed 後模型才可正式生成
-→ 模型依照已確認責任鏈輸出結果
+使用者可以在自己的電腦上接入：
+
+* LM Studio
+* Ollama
+* OpenAI-compatible API
+* 其他自訂模型 endpoint
+* Sandbox 模式
+
+SCBKR 不直接把使用者輸入丟給模型自由回答，而是將任務轉成可確認、可修改、可簽名、可驗收、可入庫、可回放的責任鏈流程。
+
+核心定位：
+
+```text
+Chat 是自然語言入口。
+Workbench 是責任鏈確認台。
+S/C/B/K/R 是任務責任語法。
+Data Center 是可回放資料中心。
+四庫是可索引規則層。
+模型是草案與編譯助手。
+使用者是最終簽名者。
+```
+
+---
+
+## 二、SCBKR 解決什麼問題
+
+一般 AI 產品常見問題：
+
+* 使用者一輸入，模型立刻生成。
+* 任務目的不清楚，模型仍然硬答。
+* 權限、資料來源、風格、驗收條件沒有先確認。
+* 模型生成錯誤後，使用者只能反覆重問。
+* 每次任務都從零開始，無法累積有效判準。
+* 聊天上下文越來越長，最後只能換視窗或重新整理背景。
+* 記憶黑箱，不知道模型引用了什麼。
+* 錯誤答案容易污染未來任務。
+
+SCBKR 的解法：
+
+```text
+使用者輸入
+→ 系統判斷 intent
+→ 建立確認單
+→ 模型產生 Task Understanding
+→ 系統編譯 S/C/B/K/R
+→ 使用者修改
+→ 使用者簽名
+→ 模型生成
 → 使用者驗收
-→ 驗收通過後才可產生入庫建議
-→ 使用者選擇寫入哪些庫
-→ 使用者二次確認
-→ 寫入本地 Data Center / 四庫
-→ ledger / hash / replay 保留完整軌跡
-→ 下次任務可再次引用已確認規則
+→ 入庫建議
+→ 二次確認寫入
+→ 四庫索引
+→ Data Center 回放
+→ 後續任務引用已簽名規則
+```
 
-SCBKR 的目標不是讓模型自由猜，而是：
-
-«有已確認規則，就必須引用。
-有相似案例，就必須標示沿用或調整。
-有衝突，就必須交給使用者確認。
-沒有命中資料時，模型才可以產生待確認草案。»
+SCBKR 的重點不是讓模型更自由，而是讓模型在明確的責任鏈中工作。
 
 ---
 
-四、四庫與 Data Center
+## 三、SCBKR 五維責任鏈
+
+每個正式任務都會被轉成 SCBKR 五維確認單。
+
+### S｜Subject / 任務主體
+
+定義：
+
+* 任務名稱
+* 使用者原始指令
+* 任務主體
+* 輸出形式
+* 操作介面
+
+S 不是普通標題。
+S 是任務是否成立的主體入口。
+
+---
+
+### C｜Causality / 流程因果
+
+定義：
+
+* 流程步驟
+* 執行順序
+* 資料流
+* 依賴條件
+* 測試條件
+* 核心因果鏈
+
+C 不是普通步驟清單。
+C 要說明任務為什麼可以被執行、如何執行、錯在哪裡會中斷。
+
+---
+
+### B｜Boundary / 邊界行為
+
+定義：
+
+* 可讀範圍
+* 可寫範圍
+* 可呼叫服務
+* 停止條件
+* 入庫限制
+* 禁止行為
+
+B 是模型行動邊界。
+
+模型不得自行確認。
+模型不得自行簽名。
+模型不得自行驗收。
+模型不得自行入庫。
+模型不得自行修改或刪除 Data Center。
+
+---
+
+### K｜Knowledge / 依據風格
+
+定義：
+
+* 使用者原始輸入
+* 已採用引用
+* 類似語法
+* 類似邏輯
+* 候選但未採用
+* 衝突 / 待確認
+* 來源可信度
+* 風格設定
+
+K 不是把所有搜尋結果都塞給模型。
+
+SCBKR 會區分：
+
+```text
+direct_match        可作為正式依據
+same_domain         可作為同領域依據
+similar_logic       可作為邏輯參考
+style_reference     可作為風格參考
+similar_grammar     只能參考語法，不得作為正式依據
+candidate_only      候選但不採用
+irrelevant          不相關
+conflict            衝突，需使用者確認
+```
+
+---
+
+### R｜Replay / 回放驗收
+
+定義：
+
+* 預期輸出
+* 驗收條件
+* 回放要求
+* 入庫選項
+* 使用者簽名狀態
+* 審計資料
+
+R 是閉環層。
+
+沒有使用者簽名，SCBKR 不成立。
+沒有驗收通過，不能入庫。
+沒有二次確認，不能 physical write。
+
+---
+
+## 四、模型角色
+
+SCBKR 不是禁止模型，而是鎖定模型權限。
+
+模型可以：
+
+* 理解使用者任務
+* 產生 Task Understanding
+* 協助生成 SCBKR 草案
+* 協助修改 S/C/B/K/R
+* 協助生成正式結果
+* 協助整理入庫建議
+* 協助查詢 Data Center
+* 協助建立更改 / 刪除確認單
+* 協助引用已簽名四庫資料
+
+模型不能：
+
+* 自行確認責任鏈
+* 自行簽名
+* 自行驗收
+* 自行入庫
+* 自行修改 Data Center
+* 自行刪除 Data Center
+* 把候選資料當作已引用
+* 把未簽名資料當成規則
+* 把類似語法當成正式依據
+* 繞過使用者確認
+
+模型在 SCBKR 裡的角色是：
+
+```text
+describe_compile_only
+```
+
+也就是：
+
+> 模型只能描述、理解、拆解、編譯草案。
+> 規則是否成立，由使用者簽名決定。
+
+---
+
+## 五、Chat 與 Workbench
+
+SCBKR 的 Chat 不是單純聊天框。
+
+Chat 是自然語言入口。
+
+使用者可以在 Chat 輸入：
+
+* 我要生成一個商業文案確認單
+* 幫我做責任鏈
+* 幫我建確認單
+* 幫我把這段規則寫進工作台
+* 幫我查某天的資料中心紀錄
+* 幫我修改某條記憶庫規則
+* 幫我封存某筆資料
+
+系統會先判斷 intent。
+
+如果只是一般聊天，走 Chat。
+如果適合生成確認單，顯示建議卡。
+如果使用者明確要求生成確認單，進入 Workbench。
+
+Workbench 負責：
+
+* 顯示任務摘要
+* 顯示草案來源
+* 顯示 S/C/B/K/R 五卡
+* 顯示引用證據
+* 支援模型修改工作台
+* 支援使用者簽名
+* 支援生成
+* 支援驗收
+* 支援入庫建議
+* 支援二次確認寫入
+
+Chat 不負責直接成立規則。
+Workbench 才是責任鏈確認台。
+
+---
+
+## 六、四庫與 Data Center
 
 SCBKR 的 Data Center 不是展示頁，而是模型未來工作的規則來源層。
 
-四庫包含：
-
-1. 向量庫｜Vector Store
-
-用於相似任務檢索、責任鏈案例索引、降低重複推理。
+### 1. 向量庫｜Vector Store
 
 用途：
 
-- 找相似任務
-- 引用已驗收案例
-- 降低重複 token
-- 提供未來任務的參考路徑
+* 相似任務檢索
+* 已驗收任務索引
+* 降低重複推理
+* 提供未來任務的候選引用
 
-2. 語料庫｜Corpus Store
-
-用於保存使用者確認過的原始資料、文件、內容依據。
+### 2. 語料庫｜Corpus Store
 
 用途：
 
-- 保存外部文件
-- 保存原始文本
-- 保存任務依據
-- 避免模型憑空編造來源
+* 保存使用者確認過的原始資料
+* 保存外部文件
+* 保存對話樣本
+* 避免模型憑空編造來源
 
-3. 程式邏輯庫｜Logic Store
-
-用於保存可重用流程、API 邏輯、UI 狀態機、測試條件與規則模板。
+### 3. 程式邏輯庫｜Logic Store
 
 用途：
 
-- 保存流程設計
-- 保存產品邏輯
-- 保存工程規則
-- 保存可重用工作流
+* 保存流程規則
+* 保存判斷條件
+* 保存停止條件
+* 保存行動邊界
+* 保存產品邏輯
+* 保存可重用工作流
 
-4. 記憶庫｜Memory Store
-
-用於保存使用者確認過的長期偏好、禁止規則、判斷標準與個人化規則。
+### 4. 記憶庫｜Memory Store
 
 用途：
 
-- 保存長期偏好
-- 保存禁止行為
-- 保存使用者判準
-- 防止模型反覆犯同樣錯誤
+* 保存使用者長期判準
+* 保存禁止規則
+* 保存偏好
+* 保存已簽名主體判斷
+* 防止模型反覆犯同樣錯誤
 
 ---
 
-五、SCBKR 如何降低成本
+## 七、四庫引用規則
 
-SCBKR 的成本優化不是靠壓低模型能力，而是靠減少無效生成。
+後續任務引用四庫時，不是單純關鍵字比對。
 
-一般 AI 成本浪費來自：
+資料要被採用，必須符合：
 
-- 任務沒講清楚就生成。
-- 模型答錯後反覆重問。
-- 每次都重新解釋背景。
-- 沒有驗收標準，導致結果不可用。
-- 同類任務無法複用已確認流程。
-- 大模型被拿去處理本來可以先被規則分流的小任務。
+```text
+signature_status = owner_signed
+review_passed = true
+status 不得為 revoked / archived / superseded
+relation 必須是 direct_match / same_domain / similar_logic / style_reference
+不得只靠泛詞命中
+```
 
-SCBKR 透過責任鏈降低浪費：
+例如：
 
-1. 減少無效 token
+* 只有「文案」相同，不可採用。
+* 只有「規則」相同，不可採用。
+* UI 工作台規則不可被餐飲文案任務採用。
+* 未簽名資料不可採用。
+* 驗收未通過資料不可採用。
+* revoked / archived / superseded 資料不可採用。
+* similar_grammar 只能作為語法參考，不得作為正式依據。
 
-模型生成前，先確認任務目的、輸出形式、邊界、依據、驗收條件。
-這可以降低模型猜錯方向後大量輸出廢內容的機率。
+引用必須顯示 evidence：
 
-2. 減少重複生成
-
-已確認過的任務結構可以保存為責任鏈案例。
-未來相似任務可以參考既有 S / C / B / K / R，不必每次從零開始。
-
-3. 降低電費與運算浪費
-
-本地 LLM 或外部 API 都有成本。
-每一次無效生成，都代表額外 token、額外推理時間、額外電力與額外等待時間。
-SCBKR 讓模型在更明確的條件下執行，減少盲目試錯。
-
-4. 小模型也能參與工作流
-
-SCBKR 把任務確認、權限、驗收、回放放在模型外層。
-部分工作不必全部丟給大模型。
-使用者可以先用較小的本地模型跑流程，再依任務需求切換更強模型。
-
-5. 錯誤不污染記憶
-
-驗收失敗不會自動進入記憶庫。
-失敗只會形成 failure report draft。
-只有使用者明確判定錯因、寫出規則、並簽名確認後，才會形成 memory rule confirmed plan。
-這避免系統把錯誤答案當成長期知識。
+* 來源庫
+* relation
+* adoption_scope
+* relation_reason
+* task_id
+* storage_item_id
+* signature_status
+* hash / content_hash
+* review_passed
+* rule_confirmed
+* adopted true / false
 
 ---
 
-六、權限與安全邊界
+## 八、為什麼 SCBKR 不依賴無限聊天上下文
 
-SCBKR 的核心安全原則是：
+一般 AI 產品容易遇到：
 
-«工具未啟用，不得宣稱已執行。
+* 對話太長
+* 上下文爆掉
+* 模型忘記前面規則
+* 必須換視窗
+* 使用者反覆貼背景
+* token 成本持續上升
+
+SCBKR 的設計不是把所有聊天內容一直塞給模型。
+
+SCBKR 將有價值的內容轉成：
+
+```text
+已簽名確認單
+已驗收結果
+已入庫規則
+可回放 Data Center 紀錄
+可索引四庫資料
+```
+
+下一次任務不需要吃完整聊天歷史，只需要：
+
+* 當前使用者輸入
+* 當前 task 狀態
+* SCBKR Grammar Pack
+* 採用的四庫 evidence
+* 必要的 Workbench 草案資料
+
+這樣可以降低：
+
+* 無效 token
+* 重複推理
+* 背景重貼
+* 長上下文漂移
+* 錯誤記憶污染
+
+---
+
+## 九、權限與安全邊界
+
+SCBKR 的核心安全原則：
+
+```text
+工具未啟用，不得宣稱已執行。
 模型未測通，不得宣稱可用。
-使用者未確認，不得生成。
+使用者未簽名，不得 confirmed。
+責任鏈未確認，不得生成。
 驗收未通過，不得入庫。
+未二次確認，不得 physical write。
 失敗輸出不得污染記憶。
-非本機模型網址不得假裝成本地模型。»
+非本機模型網址不得假裝成本地模型。
+```
 
 目前權限鎖包含：
 
-- "model_generate"
-- "external_api"
-- "dangerous_operation_confirmed"
-- "storage_write"
-- "ledger_write"
-- "sqlite_runtime"
-- "chromadb_runtime"
-- "embedding_create"
-- "memory_write"
+* model_generate
+* external_api
+* dangerous_operation_confirmed
+* storage_write
+* ledger_write
+* sqlite_runtime
+* chromadb_runtime
+* embedding_create
+* memory_write
 
-外部 API / hybrid 模式必須同時通過：
+外部 API / hybrid 模式必須通過：
 
+```text
 external_api = true
 dangerous_operation_confirmed = true
+```
 
 否則不得呼叫外部 API。
 
-模型網址安全規則：
+本機模型 URL：
 
-- "127.0.0.1"
-- "localhost"
-- "[::1]"
+* 127.0.0.1
+* localhost
+* [::1]
 
-以上 loopback URL 可視為本機模型。
+非 loopback URL，例如：
 
-任何非 loopback URL，例如：
+* 192.168.x.x
+* 區網另一台電腦
+* 公網 API
+* 遠端 OpenAI-compatible endpoint
 
-- "192.168.x.x"
-- 區網另一台電腦
-- 公網 API
-- 遠端 OpenAI-compatible endpoint
-
-即使 provider 顯示為 LM Studio / Ollama / local mode，也必須視為外部模型呼叫，必須經過 "external_api=true" 授權。
+即使 provider 顯示為 LM Studio / Ollama / local mode，也必須視為外部模型呼叫，必須經過 external_api 授權。
 
 ---
 
-七、目前版本階段
+## 十、核心流程
+
+完整流程：
+
+```text
+使用者輸入
+→ Chat intent routing
+→ 建立 SCBKR 確認單
+→ 查詢 Data Center / 四庫
+→ Evidence Relation Gate
+→ 模型產生 Task Understanding
+→ Understanding Compiler 編譯 S/C/B/K/R
+→ Workbench 顯示草案
+→ 使用者修改 / 要求模型修改
+→ 使用者輸入簽名
+→ confirmed = true
+→ signature_status = owner_signed
+→ 開始生成
+→ 使用者驗收
+→ review_passed = true
+→ 產生入庫建議
+→ 使用者選擇四庫
+→ 使用者二次確認寫入
+→ physical write
+→ ledger / hash / replay
+→ 後續任務引用 owner-signed evidence
+```
+
+---
+
+## 十一、目前版本階段
 
 目前版本定位：
 
-SCBKR 本地責任鏈模型｜自接入 MVP App
-SCBKR Local Responsibility Chain Model｜Self-Connected MVP App
+```text
+SCBKR 本地責任鏈模型｜Release Candidate 收束中
+SCBKR Local Responsibility Chain Model｜Release Candidate Alignment
+```
 
-目前階段：
+目前技術階段：
 
-P15-G 已完成，準備進入 P15-H 最終 UI 對齊。
+```text
+P15-P 核心閉環已完成
+P15-Q Release Candidate 收束尚未執行
+```
 
-已完成重點：
+P15-P 已完成重點：
 
-- FastAPI 本地後端
-- React + Vite + TypeScript 前端
-- Windows Desktop Preview workflow
-- Sandbox Mode
-- 任務建立
-- SCBKR 五維確認單
-- P12 sealed SCBKR generation boundary
-- confirmed gate
-- review gate
-- storage_confirm gate
-- SQLite task persistence
-- JSONL ledger replay
-- physical storage layer
-- Data Center read-back
-- activeBackendUrl routing
-- Connection Center
-- Model Settings
-- LM Studio / Ollama / OpenAI-compatible API 接入
-- 模型連線測試
-- Chat real model gateway
-- Workbench model-authored SCBKR draft
-- fallback 草案明確標示
-- four-store retrieval context
-- external_api guard
-- 非 loopback model URL 安全阻擋
-- API key masking
-- same Wi-Fi / remote backend URL 操作基礎
+* Chat intent routing
+* Chat-to-Workbench 確認單建立
+* SCBKR Grammar Pack
+* Task Understanding
+* Understanding Compiler
+* model_assisted_structured / scbkr_base_logic / draft_failed 草案來源
+* 主流程移除 fallback 草案語意
+* Evidence Relation Classifier
+* Owner Signature Gate
+* 使用者簽名確認
+* 模型不能簽名
+* 修改後重簽機制
+* confirmed gate
+* generation gate
+* review gate
+* storage_confirm gate
+* second_confirm gate
+* 四庫寫入 payload metadata
+* Data Center 分類讀取
+* owner_signed evidence 後續引用
+* external_api guard
+* activeBackendUrl routing
+* Model Settings
+* API key masking
+* LM Studio / Ollama / OpenAI-compatible API 接入
+* Windows desktop preview build 基礎
+* sidecar API build 基礎
 
-目前剛完成：
+目前已知待處理：
 
-P15-G P1 Model URL External Permission Guard
+### P15-Q Release Candidate 收束
 
-此階段已確認：
+P15-Q 尚未下達指令，預計下一輪處理。
 
-- 只有 sandbox / loopback model URL 可免 external_api。
-- LM Studio / Ollama 若使用 LAN IP 或遠端 URL，必須 external_api=true。
-- Chat / SCBKR draft / confirmed generation / model test 共用同一安全 guard。
-- external_api=false 時，不會外傳 user_text / raw task。
-- Windows Desktop Preview workflow 已成功。
+P15-Q 目標：
 
-下一階段：
-
-P15-H UI Reference Lock｜最終產品介面對齊
-
-P15-H 目標：
-
-- 桌面版對齊：左 Chat / 右 Workbench / 左側導覽 / 上方狀態列。
-- 手機版對齊：Chat 全螢幕 / Drawer / Workbench 任務視圖。
-- Connection Center 可見可用。
-- Workbench 顯示模型草案來源、四庫引用、S/C/B/K/R 摘要卡。
-- Data Center / 四庫 / Audit 入口完整。
-- 不再把 Chat、Workbench、日期、patch、入庫全部塞成一頁長表單。
-
----
-
-八、目前可跑功能
-
-目前 MVP 可跑功能：
-
-- 本地 FastAPI API
-- React Web UI
-- Windows Desktop Preview
-- Sandbox 測試模式
-- 後端 API 連線測試
-- 模型 Provider 設定
-- LM Studio / Ollama / OpenAI-compatible API 設定
-- API Key 遮罩與清除
-- 模型連線測試
-- 一般 Chat 入口
-- Chat-to-Workbench 建議卡
-- 任務建立
-- SCBKR 五維草案生成
-- 使用者修改 / 確認
-- confirmed 後才可 generate
-- 模型正式生成
-- 驗收 pass / fail / rollback
-- 入庫建議
-- 使用者二次確認入庫
-- Data Center 讀回
-- ledger / hash / audit
-- 四庫引用 context
-- 手機同 Wi-Fi 連線使用基礎
+* 修正 Windows smoke script 對 P15-P gate 的相容性
+* storage-confirm smoke payload 補上 second_confirm=true
+* 保留 P15-P 使用者簽名與二次確認 gate
+* 移除 storage 階段假簽名字串
+* 修改 / 重生 / 退回後清空前端簽名
+* repo metadata 從 preview / skeleton 收束為 Release Candidate
+* desktop package name 移除 skeleton
+* tauri.conf 移除 preview / not production installer 語意
+* main.rs 移除 SCBKR_DESKTOP_PREVIEW 語意
+* README 更新為正式產品定位
+* 新增 / 對齊 release build script
+* 新增 / 對齊 release smoke script
+* Windows installer build 驗收
+* 完整流程實機驗收
 
 ---
 
-九、MVP 邊界
+## 十二、目前可跑能力
 
-目前已支援：
+目前系統已支援：
 
-- SQLite task persistence
-- JSONL ledger append
-- 本地 physical JSON storage
-- corpus / logic / memory / vector metadata 寫入
-- Data Center read-back
-- advisory retrieval context
-- Windows preview packaging workflow
-
-目前仍非最終產品：
-
-- 非正式 production installer
-- 尚未 code signing
-- 尚未 auto-update
-- 尚未 bundle model
-- 尚未 bundle API key
-- 尚未正式雲端 SaaS
-- 手機原生 App 尚未提供
-- 外網 tunnel 不自動設定
-- macOS / Linux package 尚未完成
+* 本地 FastAPI API
+* React + Vite + TypeScript Web UI
+* Windows Desktop / Tauri preview build
+* FastAPI sidecar build
+* Sandbox 模式
+* 模型 Provider 設定
+* LM Studio / Ollama / OpenAI-compatible API 設定
+* API key 遮罩與清除
+* 模型連線測試
+* 一般 Chat 入口
+* Chat intent routing
+* Chat-to-Workbench 建議卡
+* 任務建立
+* SCBKR 五維草案生成
+* 模型 Task Understanding
+* 系統編譯 S/C/B/K/R
+* 使用者修改 / 模型修改工作台
+* 使用者簽名確認
+* confirmed 後才可 generate
+* 模型正式生成
+* 驗收 pass / fail / rollback
+* 入庫建議
+* 使用者二次確認入庫
+* Data Center 讀回
+* ledger / hash / audit
+* 四庫引用 context
+* owner_signed evidence reuse
+* activeBackendUrl routing
+* external_api guard
+* 非 loopback model URL 安全阻擋
+* 手機同 Wi-Fi 連線基礎
 
 ---
 
-十、固定端口
+## 十三、尚未完成 / 待正式收束
+
+以下不是產品概念缺口，而是 Release Candidate 發行與上線前收束項：
+
+* P15-Q 尚未執行
+* Windows smoke script 需對齊 P15-P second_confirm gate
+* Desktop metadata 仍需從 preview / skeleton 收束
+* README 舊階段描述需更新
+* Release build script 需正式化
+* Release smoke script 需正式化
+* code signing 尚未設定
+* auto-update 尚未設定
+* macOS package 尚未完成
+* Linux package 尚未完成
+* 手機原生 App 尚未提供
+* Google Play 版本尚未提供
+* Microsoft Store 提交流程尚未整理
+* 英文 UI label pack 尚未完成
+* 多語系切換尚未完成
+* 雲端 SaaS 版本尚未提供
+* 外網 tunnel 不自動設定
+* model bundle 不內建
+* API key 不內建
+
+---
+
+## 十四、固定端口
 
 後端 API：
 
+```text
 http://localhost:8787
+```
 
 前端 Web：
 
+```text
 http://localhost:5500
+```
 
 LM Studio 常見本機 endpoint：
 
+```text
 http://localhost:1234/v1
+```
 
 Ollama OpenAI-compatible endpoint：
 
+```text
 http://localhost:11434/v1
+```
 
 注意：
 
-"localhost" / "127.0.0.1" 表示同一台電腦本機。
-如果使用 "192.168.x.x" 或遠端網址，即使是 LM Studio / Ollama，也會被視為外部模型連線，需要 external_api 授權。
+```text
+localhost / 127.0.0.1 表示同一台電腦本機。
+192.168.x.x 或遠端網址會被視為外部模型連線，需要 external_api 授權。
+```
 
 ---
 
-十一、快速開始
+## 十五、快速開始
 
 安裝 Python package：
 
+```bash
 python -m pip install -e .
+```
 
 安裝前端依賴：
 
+```bash
 npm --prefix apps/web install --package-lock=false
+```
 
 啟動後端：
 
+```bash
 python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8787
+```
 
 啟動前端：
 
+```bash
 npm --prefix apps/web run dev
+```
 
 打開：
 
+```text
 http://localhost:5500
+```
 
 ---
 
-十二、模型接入
+## 十六、常用測試
+
+後端與單元測試：
+
+```bash
+python -m pytest -q
+```
+
+前端 build：
+
+```bash
+npm --prefix apps/web run build
+```
+
+Desktop skeleton / release check：
+
+```bash
+npm --prefix apps/desktop run check:skeleton
+```
+
+API title smoke：
+
+```bash
+python - <<'PY'
+from apps.api.main import app
+print(app.title)
+PY
+```
+
+Windows desktop build / smoke 目前正在 P15-Q 收束中。
+P15-Q 將對齊 P15-P 的 owner signature、review gate、second confirm storage gate。
+
+---
+
+## 十七、模型接入
 
 使用者可自行接入：
 
-- Sandbox
-- LM Studio
-- Ollama
-- OpenAI-compatible API
-- 自訂 endpoint
+* Sandbox
+* LM Studio
+* Ollama
+* OpenAI-compatible API
+* 自訂 endpoint
 
 模型設定包含：
 
-- Provider
-- Mode
-- Base URL
-- Model Name
-- API Key
-- Temperature
-- Max Tokens
-- Timeout
+* Provider
+* Mode
+* Base URL
+* Model Name
+* API Key
+* Temperature
+* Max Tokens
+* Timeout
 
 API Key 在讀取設定時只會遮罩，不會明文回傳。
 
 ---
 
-十三、手機同 Wi-Fi 使用
+## 十八、手機同 Wi-Fi 使用
 
-若前端開發伺服器使用 LAN host 啟動，手機與電腦在同一個 Wi-Fi 下，可用手機打開：
+若前端開發伺服器使用 LAN host 啟動，手機與電腦在同一 Wi-Fi 下，可用手機打開：
 
+```text
 http://{電腦區網IP}:5500
+```
 
 手機可以作為操作入口：
 
-- 聊天
-- 打開 Workbench
-- 設定 Backend API URL
-- 設定模型
-- 建立工單
-- 確認 S/C/B/K/R
-- 驗收
-- 二次確認入庫
-- 查看 Data Center
+* 聊天
+* 打開 Workbench
+* 設定 Backend API URL
+* 設定模型
+* 建立確認單
+* 查看 S/C/B/K/R
+* 使用者簽名
+* 生成
+* 驗收
+* 二次確認入庫
+* 查看 Data Center
 
-但手機不是內建 LLM。
+手機不是內建 LLM。
 手機端資料仍透過 activeBackendUrl 連回使用者指定的本地後端 / desktop sidecar / API。
 
 ---
 
-十四、產品階段
+## 十九、英文版規劃
 
-目前版本：
+英文版不重寫底層邏輯。
 
-SCBKR 本地責任鏈模型｜自接入 MVP App
+英文版將以 label pack / i18n 方式處理：
 
-目前技術階段：
+```text
+聊天 → Chat
+工作台 → Workbench
+資料中心 → Data Center
+確認責任鏈 → Confirm Responsibility Chain
+使用者簽名 → Owner Signature
+入庫建議 → Storage Recommendation
+二次確認寫入 → Second Confirm Storage
+審計資料 → Audit
+```
 
-P15-G Complete → P15-H Final UI Reference Lock Pending
+底層仍維持：
 
-下一階段可選：
-
-- P15-H：最終 UI 對齊
-- 桌面封裝強化：Electron / Tauri
-- 本地主機手機連線強化
-- SQLite / ledger / ChromaDB / memory persistent runtime 強化
-- 正式 installer
-- code signing
-- auto-update
-- macOS / Linux package
-- 雲端收費版
-- 固化規則庫裁決服務
+* S/C/B/K/R
+* owner_signature_required
+* model_role = describe_compile_only
+* confirmed gate
+* review gate
+* storage_confirm gate
+* second_confirm gate
+* Evidence Relation Gate
+* Data Center
+* 四庫
+* ledger / hash / replay
 
 ---
 
-十五、English Summary
+## 二十、English Summary
 
-SCBKR Local Responsibility Chain Model is a self-connected local AI workflow control layer.
+SCBKR Local Responsibility Chain Model is a local AI responsibility-chain control system.
 
 It is not a general chatbot.
 It is not a simple RAG tool.
-It is not a large model company.
-It is not a tool that lets the model decide and answer directly for the user.
+It is not a model company.
+It does not allow the model to directly decide and act on behalf of the user.
 
-SCBKR makes the model declare the task, boundary, basis, acceptance criteria, and responsibility chain before generation.
+SCBKR makes the model enter a responsibility-chain workflow before generation.
 
-Users can connect their own:
+The system uses:
 
-- LM Studio
-- Ollama
-- OpenAI-compatible API
-- Custom model endpoint
+* Chat as the natural-language entry
+* Workbench as the confirmation surface
+* S/C/B/K/R as the responsibility-chain grammar
+* Data Center as the replayable storage layer
+* Four stores as reusable indexed rule stores
+* Owner signature as the rule closure condition
 
-The system guides each task through a five-dimensional confirmation process:
+The model can assist, draft, describe, and compile.
+The model cannot confirm, sign, review, store, update, or delete by itself.
 
-- S｜Subject / Interface
-- C｜Causality / Backend
-- B｜Boundary / Behavior
-- K｜Knowledge / Style
-- R｜Replay / Signature
+A rule only becomes valid after owner signature.
+A result can only be stored after review and second confirmation.
+Future tasks can only reuse evidence that is owner-signed, review-passed, and not revoked / archived / superseded.
 
-Only after user confirmation can the model generate.
+Current stage:
 
-SCBKR reduces invalid tokens, repeated generation, compute waste, and memory pollution by forcing responsibility-chain confirmation before output and storage.
-
-The current stage is:
-
-Self-Connected MVP App
-P15-G completed
-P15-H final UI alignment pending
-
-Current capabilities include:
-
-- Local FastAPI backend
-- React / Vite / TypeScript frontend
-- Windows Desktop Preview workflow
-- Connection Center
-- Active backend URL routing
-- Real model gateway
-- LM Studio / Ollama / OpenAI-compatible API support
-- SCBKR five-dimensional draft
-- User confirmation gate
-- Generation gate
-- Review gate
-- Storage confirmation gate
-- SQLite task persistence
-- JSONL ledger
-- Physical local storage
-- Data Center read-back
-- Four-store retrieval context
-- External API permission guard
-- Non-loopback model URL protection
-- API key masking
-- Same-Wi-Fi mobile operation foundation
-
-SCBKR principle:
-
-«The model does not answer first.
-It explains first.
-The model does not generate first.
-It confirms first.
-Build your own responsibility-chain model.»
+```text
+P15-P core closure completed.
+P15-Q Release Candidate alignment pending.
+```
 
 ---
 
-十六、簽名
+## 二十一、產品原則
+
+```text
+模型不是先回答，而是先交代。
+模型不是先生成，而是先確認。
+模型可以參與，但不能越權。
+規則不是模型成立，而是使用者簽名成立。
+資料不是自動記憶，而是驗收後入庫。
+引用不是關鍵字命中，而是 evidence relation。
+聊天不是無限上下文，而是四庫索引與責任鏈回放。
+```
+
+---
+
+## 二十二、簽名
 
 語意防火牆創辦人
 許文耀 / 沈耀888π
