@@ -29,12 +29,13 @@ from core.ledger.ledger_event import build_ledger_event
 from core.ledger.jsonl_ledger import append_ledger_event, read_ledger_events, rebuild_ledger_index_from_jsonl
 from core.review_rules.rule_confirmation import confirm_memory_rule_plan
 from core.review_rules.rule_draft import build_memory_rule_draft
-from core.scbkr.confirmation import all_dimensions_confirmed, confirm_all_dimensions
+from core.scbkr.confirmation import all_dimensions_confirmed, confirm_all_dimensions, strip_confirmation_metadata
 from core.scbkr.generator import create_scbkr_draft
 from core.scbkr.draft_grammar import (
     build_task_understanding_messages,
     build_scbkr_from_understanding,
     classify_evidence_relation,
+    normalize_task_understanding,
     ADOPTABLE_RELATIONS,
 )
 from core.storage.physical_store import commit_memory_rule, commit_storage_items, hash_payload
@@ -240,6 +241,8 @@ def _contains_forbidden_draft_state(value: Any) -> bool:
                 return True
             if key == "confirmation_status" and item == "confirmed":
                 return True
+            if key == "signature_status" and item in ("confirmed", "owner_signed"):
+                return True
             if _contains_forbidden_draft_state(item):
                 return True
     if isinstance(value, list):
@@ -320,15 +323,25 @@ def _build_four_store_context(raw_input: str, task_id: str | None = None) -> dic
             hit["must_cite"] = True
         (adopted if ok else rejected).append(hit)
     for item in list_persisted_storage_items(limit=50):
-        if item.get("status") in ("revoked", "archived", "superseded"):
-            continue
         target = item.get("target")
         if target in ("corpus", "logic", "memory", "vector_db"):
-            text_value = str((item.get("payload") or item).get("summary") or (item.get("payload") or item).get("content") or item.get("relative_path") or item.get("hash"))
+            payload = item.get("payload") or item
+            text_value = str(payload.get("summary") or payload.get("content") or payload.get("purpose") or payload.get("raw_input") or item.get("relative_path") or item.get("hash"))
             source_store = "vector" if target == "vector_db" else target
             relation = classify_evidence_relation(raw_input, text_value, source_store=source_store)
+            signature_status = payload.get("signature_status") or payload.get("scbkr_snapshot", {}).get("signature_status")
+            review_passed = item.get("review_passed") is True or payload.get("review_passed") is True or payload.get("review_result", {}).get("review_passed") is True
+            unavailable_status = item.get("status") in ("revoked", "archived", "superseded") or payload.get("status") in ("revoked", "archived", "superseded")
+            if unavailable_status:
+                relation.update({"adopted": False, "adoption_scope": "none", "relation_reason": "狀態不可用：revoked / archived / superseded"})
+            elif signature_status != "owner_signed":
+                relation.update({"adopted": False, "adoption_scope": "none", "relation_reason": "未完成使用者簽名"})
+            elif review_passed is not True:
+                relation.update({"adopted": False, "adoption_scope": "none", "relation_reason": "未通過使用者驗收"})
+            elif relation.get("relation") == "similar_grammar":
+                relation.update({"adopted": False, "adoption_scope": "grammar"})
             ok, reason = bool(relation["adopted"]), relation["relation_reason"]
-            hit = {"source_store": source_store, "rule": text_value[:800], "status": "沿用" if ok else "未採用：相關性不足", "adopted": ok, "reason": reason, "rule_confirmed": ok, "storage_item_id": item.get("item_id"), **relation}
+            hit = {"source_store": source_store, "rule": text_value[:800], "status": "沿用" if ok else "未採用：相關性不足", "adopted": ok, "reason": reason, "rule_confirmed": ok, "storage_item_id": item.get("item_id"), "signature_status": signature_status, "review_passed": review_passed, "hash": item.get("hash") or item.get("content_hash"), **relation}
             (adopted if ok else rejected).append(hit)
     for rule in list_persisted_memory_rules(limit=20):
         text_value = str(rule.get("rule_text") or rule.get("memory_rule") or rule.get("payload") or rule)
@@ -348,7 +361,7 @@ def _validate_task_understanding(candidate: Any) -> dict[str, Any]:
         raise ValueError("model cannot set signature_status")
     if str(candidate.get("model_role", "describe_compile_only")) != "describe_compile_only":
         raise ValueError("model_role must be describe_compile_only")
-    return candidate
+    return normalize_task_understanding(candidate)
 
 
 def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_context: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool, str | None]:
@@ -450,6 +463,19 @@ def validate_scbkr_draft_for_confirmation(candidate: Any) -> None:
                 problems.append(f"{dimension}.{field}: empty field")
     if problems:
         raise HTTPException(status_code=400, detail="SCBKR draft is incomplete: " + "; ".join(problems))
+
+
+def _reset_owner_signature_status(scbkr: dict[str, Any]) -> None:
+    if not isinstance(scbkr, dict):
+        return
+    scbkr["signature_status"] = "waiting_owner_signature"
+    scbkr["owner_signature_required"] = True
+    scbkr["model_signature_allowed"] = False
+    scbkr["model_role"] = "describe_compile_only"
+    scbkr.setdefault("R", {})["signature_status"] = "waiting_owner_signature"
+    scbkr["R"]["required_signer"] = "user"
+    scbkr["R"]["model_signature_allowed"] = False
+    scbkr["R"]["closure_condition"] = "owner_signature_required"
 
 
 def _invalidate_downstream_after_scbkr_revision(task: dict[str, Any], status_before: str | None) -> bool:
@@ -968,6 +994,7 @@ def edit_scbkr(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     if candidate is not None:
         validate_scbkr_draft_for_confirmation(candidate)
         task["scbkr"] = candidate
+    _reset_owner_signature_status(task["scbkr"])
     task["confirmed"] = False
     task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
     task["scbkr"]["confirmation_status"] = "draft"
@@ -986,7 +1013,7 @@ def scbkr_patch_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     if layer not in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
         raise HTTPException(status_code=400, detail="layer must be S/C/B/K/R")
     before = task.get("scbkr", {}).get(layer, {})
-    after = dict(before)
+    after = strip_confirmation_metadata(dict(before))
     after["pending_questions"] = [f"使用者要求修改：{instruction or '請依使用者指令調整此層。'}"]
     if layer == "B" and ("日期" in instruction or "date" in instruction.lower()):
         after["stop_conditions"] = list(after.get("stop_conditions") or []) + ["模型不得自行確認事件日期；日期必須由使用者填寫或確認。"]
@@ -1007,8 +1034,14 @@ def apply_scbkr_patch(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     _validate_scbkr_patch_after_draft(layer, after_draft)
     current_scbkr = deepcopy(task["scbkr"])
     candidate_scbkr = deepcopy(current_scbkr)
+    for key in ("confirmed", "confirmed_at", "confirmed_by", "confirmation_statement", "signature", "confirmed_snapshot", "confirmed_snapshot_hash"):
+        candidate_scbkr.pop(key, None)
+    for dim in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
+        if isinstance(candidate_scbkr.get(dim), dict):
+            candidate_scbkr[dim] = strip_confirmation_metadata(candidate_scbkr[dim])
     candidate_scbkr[layer] = deepcopy(after_draft)
     candidate_scbkr["confirmation_status"] = "draft"
+    _reset_owner_signature_status(candidate_scbkr)
     try:
         validate_scbkr_draft_for_confirmation(candidate_scbkr)
         if _contains_forbidden_draft_state(candidate_scbkr):
@@ -1020,6 +1053,7 @@ def apply_scbkr_patch(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     status_before = task.get("status")
     task["scbkr"] = candidate_scbkr
+    _reset_owner_signature_status(task["scbkr"])
     task["confirmed"] = False
     task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
     _invalidate_downstream_after_scbkr_revision(task, status_before)
@@ -1311,6 +1345,8 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         for required_key in ("generation_result", "review_result", "scbkr"):
             if required_key not in task:
                 raise ValueError(f"{required_key} is required before storage commit")
+        if task.get("confirmed") is not True or task.get("scbkr", {}).get("signature_status") != "owner_signed":
+            raise ValueError("owner-signed SCBKR confirmation is required before storage commit")
         if not all_dimensions_confirmed(task["scbkr"]):
             raise ValueError("SCBKR must be fully confirmed before storage commit")
         if "storage_request" not in task:
@@ -1329,7 +1365,7 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             return task
         if not selected_targets:
             raise ValueError("尚未選擇寫入目標。請先選擇向量庫、語料庫、程式邏輯庫或記憶庫。")
-        if payload.get("storage_confirmed") is not True and payload.get("second_confirm") is not True:
+        if payload.get("storage_confirmed") is not True or payload.get("second_confirm") is not True:
             raise ValueError("請勾選或按下「使用者二次確認寫入」後才能入庫。")
         if payload.get("confirmed_by") != "user":
             raise ValueError("confirmed_by=user is required")

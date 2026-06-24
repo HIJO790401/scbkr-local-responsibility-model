@@ -1,5 +1,6 @@
 """SCBKR draft grammar, understanding compiler, and evidence relation gate."""
 from __future__ import annotations
+import json
 from copy import deepcopy
 from typing import Any
 
@@ -17,6 +18,76 @@ S 定義任務主體；C 定義責任鏈因果；B 定義邊界行為；K 區分
 GENERIC_STOPWORDS = {"文案", "規則", "確認單", "任務", "計畫", "生成", "草案", "scbkr", "責任鏈", "使用者", "輸出", "內容", "流程", "判斷"}
 ADOPTABLE_RELATIONS = {"direct_match", "same_domain", "similar_logic", "style_reference"}
 
+
+
+def normalize_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple, set, dict)):
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        except TypeError:
+            return str(value).strip()
+    return str(value).strip()
+
+
+def normalize_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_items = [value]
+    elif isinstance(value, (list, tuple, set)):
+        raw_items = []
+        for item in value:
+            if isinstance(item, (list, tuple, set)):
+                raw_items.extend(item)
+            else:
+                raw_items.append(item)
+    elif isinstance(value, dict):
+        raw_items = [json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))]
+    else:
+        raw_items = [value]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = normalize_text(item)
+        if not text or text.lower() in {"none", "null"}:
+            continue
+        if text not in seen:
+            normalized.append(text)
+            seen.add(text)
+    return normalized
+
+
+def first_non_empty(*values: Any) -> str:
+    for value in values:
+        text = normalize_text(value)
+        if text and text.lower() not in {"none", "null"}:
+            return text
+    return ""
+
+
+def normalize_task_understanding(candidate: dict[str, Any]) -> dict[str, Any]:
+    normalized = {
+        "task_domain": normalize_text(candidate.get("task_domain")),
+        "task_subject": first_non_empty(candidate.get("task_subject"), candidate.get("core_claim"), candidate.get("user_goal")),
+        "user_original_judgement": normalize_text(candidate.get("user_original_judgement")),
+        "user_goal": normalize_text(candidate.get("user_goal")),
+        "output_format": normalize_list(candidate.get("output_format")),
+        "core_claim": normalize_text(candidate.get("core_claim")),
+        "causal_chain": normalize_list(candidate.get("causal_chain")),
+        "boundary_rules": normalize_list(candidate.get("boundary_rules")),
+        "forbidden_dilutions": normalize_list(candidate.get("forbidden_dilutions")),
+        "basis_sources": normalize_list(candidate.get("basis_sources")),
+        "evidence_relation_notes": normalize_list(candidate.get("evidence_relation_notes")),
+        "acceptance_criteria": normalize_list(candidate.get("acceptance_criteria")),
+        "storage_candidates": normalize_list(candidate.get("storage_candidates")),
+        "owner_signature_required": True,
+        "model_role": "describe_compile_only",
+    }
+    return normalized
 
 def build_scbkr_grammar_pack() -> str:
     return SCBKR_GRAMMAR_PACK_ZH
@@ -42,7 +113,7 @@ def has_task_subject(raw_input: str) -> bool:
 def _tokens(text: str) -> set[str]:
     raw = (text or "").lower()
     found = {t for t in raw.replace("/", " ").replace("_", " ").replace("-", " ").split() if len(t) >= 2}
-    for key in ("滷肉飯", "商業", "文案", "餐飲", "ui", "介面", "工作台", "人類", "描述", "確定性", "邏輯"):
+    for key in ("滷肉飯", "商業", "文案", "餐飲", "ui", "介面", "工作台", "人類", "描述", "確定性", "邏輯", "二手手機", "交易", "防詐", "風險", "買賣"):
         if key in raw:
             found.add(key)
     return found - GENERIC_STOPWORDS
@@ -57,7 +128,7 @@ def classify_evidence_relation(raw_input: str, candidate_text: str, *, score: An
         relation, reason = "conflict", "candidate conflicts with task-specific terms"
     elif len(overlap) >= 2 or any(token in overlap for token in ("滷肉飯", "工作台", "人類", "確定性")):
         relation, adopted, scope, reason = "direct_match", True, "basis", f"task-specific overlap: {', '.join(sorted(overlap))}"
-    elif ("商業" in q and "商業" in c) or ("餐飲" in q and "餐飲" in c):
+    elif ("商業" in q and "商業" in c) or ("餐飲" in q and "餐飲" in c) or ({"交易", "二手手機", "防詐", "風險"} & q and {"交易", "二手手機", "防詐", "風險"} & c):
         relation, adopted, scope, reason = "same_domain", True, "basis", "same domain"
     elif "文案" in (raw + text) and not overlap:
         relation, scope, reason = "candidate_only", "none", "only generic copywriting token matched"
@@ -88,13 +159,26 @@ def _human_logic_overrides(raw_input: str, draft: dict[str, Any]) -> None:
 def build_scbkr_from_understanding(raw_input: str, task_type: str, understanding: dict[str, Any] | None, evidence_context: dict[str, Any] | None = None) -> dict[str, Any]:
     if not has_task_subject(raw_input):
         return {"draft_source": "draft_failed", "confirmation_status": "draft_failed", "model_participated": False, "model_role": "describe_compile_only", "model_signature_allowed": False, "owner_signature_required": True, "signature_status": "waiting_owner_signature", "failure_reason": "missing_task_subject"}
-    model_ok = isinstance(understanding, dict) and bool(str(understanding.get("task_subject") or understanding.get("core_claim") or "").strip()) and not any(understanding.get(k) is True for k in ("confirmed", "review_passed", "storage_confirmed", "physical_write_performed")) and understanding.get("model_role", "describe_compile_only") == "describe_compile_only"
+    understanding = normalize_task_understanding(understanding) if isinstance(understanding, dict) else None
+    model_ok = isinstance(understanding, dict) and bool(first_non_empty(understanding.get("task_subject"), understanding.get("core_claim"), understanding.get("user_goal"))) and understanding.get("model_role") == "describe_compile_only"
     draft = create_scbkr_draft(raw_input, task_type)
     if model_ok:
+        boundary_rules = normalize_list(understanding.get("boundary_rules"))
+        forbidden_dilutions = normalize_list(understanding.get("forbidden_dilutions"))
+        acceptance_criteria = normalize_list(understanding.get("acceptance_criteria"))
+        causal_chain = normalize_list(understanding.get("causal_chain"))
+        core_claim = normalize_text(understanding.get("core_claim"))
         draft["S"]["task_subject"] = understanding.get("task_subject") or draft["S"]["task_subject"]
-        draft["C"]["core_logic"] = understanding.get("causal_chain") or [understanding.get("core_claim")]
-        draft["B"]["stop_conditions"] = list(draft["B"].get("stop_conditions", [])) + list(understanding.get("boundary_rules") or []) + list(understanding.get("forbidden_dilutions") or [])
-        draft["R"]["acceptance_criteria"] = list(draft["R"].get("acceptance_criteria", [])) + list(understanding.get("acceptance_criteria") or [])
+        output_format = normalize_list(understanding.get("output_format"))
+        if output_format:
+            draft["S"]["output_format"] = output_format
+        logic_items = causal_chain
+        if not logic_items and core_claim:
+            logic_items = [core_claim]
+        if logic_items:
+            draft["C"]["core_logic"] = logic_items
+        draft["B"]["stop_conditions"] = list(draft["B"].get("stop_conditions", [])) + boundary_rules + forbidden_dilutions
+        draft["R"]["acceptance_criteria"] = list(draft["R"].get("acceptance_criteria", [])) + acceptance_criteria
     adopted = (evidence_context or {}).get("adopted_hits", []) or []
     if adopted:
         draft["K"]["references"] = ["使用者原始指令", "SCBKR 基礎責任鏈語法"] + [h.get("rule") or h.get("summary") or h.get("case_id") for h in adopted]
