@@ -98,6 +98,28 @@ HIGH_PRIVILEGE_DRAFT_KEYS = {"review_passed", "storage_confirmed", "physical_wri
 SCBKR_COMMITTED_EDIT_MESSAGE = "本任務已寫入資料中心或記憶庫規則，不能直接改寫原 SCBKR。請建立新版本或新任務。已入庫或已完成 / 已寫入記憶庫規則的任務不可直接改寫 SCBKR。"
 SCBKR_INVALID_PATCH_MESSAGE = "模型提出的修改草案不完整，未套用到任務。原本的 SCBKR 已保留，請重新產生修改草案或手動修改欄位。"
 
+SCBKR_PRODUCT_ZH = """SCBKR 是本地責任鏈 AI 工作流系統，由許文耀／沈耀888pi，語意防火牆創辦人建立。它可透過 API、本地 LLM、LM Studio、Ollama、OpenAI-compatible endpoint 連線。目的，是在生成前先確認任務、邊界、依據、驗收與責任鏈，降低無效生成、GPU 浪費、算力成本與反覆修正成本。SCBKR 支援任務紀錄、確認單、生成結果、驗收紀錄、入庫資料，也支援向量庫、語料庫、程式邏輯庫、記憶庫、回放帳本。模型只能建議，不能自動入庫；使用者確認前不得生成，驗收前不得入庫。"""
+SCBKR_WORKBENCH_CAPABILITY_ZH = """可以，我可以協助編輯 SCBKR 工作台。
+
+但我不能繞過使用者直接改寫，也不能自動套用修改。正確流程是：使用者在 Workbench 選擇 S / C / B / K / R 層級，輸入自然語言修改指令，按「產生修改草案」，系統只產生人話摘要與欄位差異，不會自動套用。使用者按「套用修改」後，才會寫回 task.scbkr。套用後 confirmed=false，舊 generation / review / storage plan 會作廢，必須重新確認責任鏈後，才能再次生成。
+
+驗收通過後，我可以產生入庫建議，建議是否寫入向量庫、語料庫、程式邏輯庫、記憶庫。模型只能建議，不能自動入庫；必須由使用者二次確認後才會 physical write。寫入後，後續任務可以從 Data Center 與四庫引用已確認資料，Workbench 也會顯示引用證據。"""
+
+def _normalize_scbkr_terms(text: str) -> str:
+    return (text or "").lower().replace("sckr", "scbkr").replace("工作檯", "工作台")
+
+def _is_scbkr_product_question(text: str) -> bool:
+    normalized = _normalize_scbkr_terms(text)
+    has_term = any(token in normalized for token in ("scbkr", "workbench", "data center", "四庫", "s/c/b/k/r", "工作台"))
+    asks_identity = any(token in normalized for token in ("什麼是", "是什么", "介紹", "定義", "是什麼", "what is"))
+    return has_term and asks_identity
+
+def _is_workbench_capability_question(text: str) -> bool:
+    normalized = _normalize_scbkr_terms(text)
+    has_workbench = any(token in normalized for token in ("scbkr", "workbench", "工作台", "s/c/b/k/r"))
+    asks_capability = any(token in normalized for token in ("能編輯", "可以編輯", "修改", "怎麼編輯", "如何編輯", "edit", "update", "revise"))
+    return has_workbench and asks_capability
+
 
 def _looks_english(text: str) -> bool:
     letters = sum(ch.isascii() and ch.isalpha() for ch in text)
@@ -673,6 +695,12 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     if _is_identity_question(user_text):
         reply = IDENTITY_EN if _looks_english(user_text) else IDENTITY_ZH
         source = "identity"
+    elif _is_workbench_capability_question(user_text):
+        reply = SCBKR_WORKBENCH_CAPABILITY_ZH
+        source = "scbkr_workbench_capability_lock"
+    elif _is_scbkr_product_question(user_text):
+        reply = SCBKR_PRODUCT_ZH
+        source = "scbkr_product_lock"
     elif not _model_connected():
         reply = "模型尚未連線。請先到連線設定儲存並測試模型連線；未 connected 時不會假裝模型回覆。"
         source = "not_connected"
@@ -682,7 +710,7 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         try:
             _assert_model_gateway_call_allowed(MODEL_SETTINGS)
-            response = _post_openai_compatible(MODEL_SETTINGS, [{"role": "system", "content": "你是 SCBKR 一般聊天入口。不要建立 task，不要寫入 Data Center。"}, {"role": "user", "content": user_text}])
+            response = _post_openai_compatible(MODEL_SETTINGS, [{"role": "system", "content": "你是 SCBKR 一般聊天入口。預設使用繁體中文，不得自行切簡體中文，不得使用中國電商語氣，不得自行編造價格、優惠、工法、傳承。不要建立 task，不要寫入 Data Center。若使用者問 SCBKR / Workbench / Data Center / 四庫 / S/C/B/K/R，必須依本產品定義回答；不得把 SCBKR 解釋成外部組織、SAP、學校、科研平台或未知縮寫。"}, {"role": "user", "content": user_text}])
             reply = parse_chat_completion_response(response)
             source = "model_gateway"
         except PermissionError as exc:
