@@ -146,6 +146,87 @@ def _build_chat_suggestion(user_text: str) -> dict[str, Any]:
     }
 
 
+
+
+CHAT_INTENTS = {
+    "normal_chat", "suggest_create_confirmation", "create_confirmation",
+    "suggest_new_rule_confirmation", "create_new_rule_confirmation", "data_center_query",
+    "suggest_data_center_update_confirmation", "create_data_center_update_confirmation",
+    "suggest_data_center_delete_confirmation", "create_data_center_delete_confirmation",
+}
+
+def _normalize_chat_intent_text(text: str) -> str:
+    value = _normalize_scbkr_terms(text)
+    replacements = {
+        "責任練": "責任鏈", "工作檯": "工作台", "work bench": "workbench",
+        "sckr": "scbkr", "任務確認單": "確認單", "責任確認單": "確認單",
+    }
+    for old, new in replacements.items():
+        value = value.replace(old, new)
+    for ch in " ，,。！？!?:：；;（）()[]【】\n\t":
+        value = value.replace(ch, "")
+    return value
+
+def route_chat_intent(message: str) -> dict[str, Any]:
+    raw = (message or "").strip()
+    normalized = _normalize_chat_intent_text(raw)
+    def has_any(tokens: tuple[str, ...]) -> bool:
+        return any(token in normalized for token in tokens)
+    delete_terms = ("刪除", "移除", "封存", "不要再引用", "取消引用", "revoke", "archive")
+    update_terms = ("幫我改", "更新", "更改", "修改那筆", "修改某", "改那條", "update")
+    query_terms = ("幫我查", "幫我找", "找到哪天", "哪個計畫", "上週那個", "某個任務", "某筆資料", "資料中心")
+    create_terms = (
+        "生成確認單", "建立確認單", "生成責任鏈", "建立責任鏈", "責任鏈任務確認單", "責任鏈確認單",
+        "工作台草案", "開工作台", "幫我建確認單", "幫我做責任鏈", "你能生成責任鏈確認單嗎",
+        "workbench草案", "scbkr確認單", "scbkr任務", "確認單草案",
+    )
+    suggest_terms = ("我想做", "我要處理", "以後要重用", "變成規則", "規劃一個流程", "商業文案計畫", "滷肉飯文案")
+    if has_any(delete_terms):
+        intent = "create_data_center_delete_confirmation" if has_any(("確認單", "建立", "生成")) else "suggest_data_center_delete_confirmation"
+    elif has_any(update_terms):
+        intent = "create_data_center_update_confirmation" if has_any(("確認單", "建立", "生成")) else "suggest_data_center_update_confirmation"
+    elif has_any(query_terms):
+        intent = "data_center_query"
+    elif has_any(create_terms) or ("確認單" in normalized and has_any(("生成", "建立", "建", "開"))):
+        intent = "create_confirmation"
+    elif has_any(suggest_terms):
+        intent = "suggest_new_rule_confirmation" if "規則" in normalized else "suggest_create_confirmation"
+    else:
+        intent = "normal_chat"
+    return {"intent": intent, "normalized": normalized, "message": raw, "inferred_task_type": "general"}
+
+def _extract_json_object(text: str) -> Any:
+    value = (text or "").strip()
+    if "```" in value:
+        parts = value.split("```")
+        for part in parts:
+            candidate = part.strip()
+            if candidate.lower().startswith("json"):
+                candidate = candidate[4:].strip()
+            if candidate.startswith("{"):
+                try: return json.loads(candidate)
+                except Exception: pass
+    start = value.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escape = False
+        for index in range(start, len(value)):
+            ch = value[index]
+            if in_string:
+                if escape: escape = False
+                elif ch == "\\": escape = True
+                elif ch == '"': in_string = False
+            else:
+                if ch == '"': in_string = True
+                elif ch == "{": depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return json.loads(value[start:index + 1])
+        start = value.find("{", start + 1)
+    return json.loads(value)
+
 def _contains_forbidden_draft_state(value: Any) -> bool:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -201,9 +282,33 @@ def _model_connected() -> bool:
     return MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("last_test_status") == "success"
 
 
+def _keyword_tokens(text: str) -> set[str]:
+    raw = (text or "").lower()
+    tokens = {t for t in raw.replace("/", " ").replace("_", " ").split() if len(t) >= 2}
+    for key in ("滷肉飯", "文案", "餐飲", "ui", "介面", "規則", "計畫", "商業"):
+        if key in raw:
+            tokens.add(key)
+    return tokens
+
+def _retrieval_relevance(raw_input: str, source_store: str, text_value: str, task_type: str = "general", score: Any = None) -> tuple[bool, str]:
+    try:
+        if score is not None and float(score) >= 0.25:
+            return True, "score >= threshold"
+    except Exception:
+        pass
+    query_tokens = _keyword_tokens(raw_input)
+    text_tokens = _keyword_tokens(text_value)
+    overlap = query_tokens & text_tokens
+    if len(overlap) >= 1 and not ({"滷肉飯", "文案"} & query_tokens and {"ui", "介面"} & text_tokens and "滷肉飯" not in text_tokens):
+        return True, "keyword/domain match"
+    if task_type and task_type in text_value:
+        return True, "metadata type match"
+    return False, "未採用：相關性不足"
+
 def _build_four_store_context(raw_input: str, task_id: str | None = None) -> dict[str, Any]:
-    """Read confirmed Data Center/four-store evidence before model drafting."""
-    hits: list[dict[str, Any]] = []
+    """Read confirmed Data Center/four-store evidence before model drafting, with relevance gate."""
+    adopted: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
     try:
         retrieval = query_retrieval_cases(raw_input, task_id=task_id, top_k=5)
@@ -213,18 +318,27 @@ def _build_four_store_context(raw_input: str, task_id: str | None = None) -> dic
         case_type = str(candidate.get("case_type") or candidate.get("target") or "vector")
         source_store = "memory" if "memory" in case_type else "vector"
         text_value = str(candidate.get("retrieval_text", ""))
-        hit = {"source_store": source_store, "rule": text_value[:800], "case_id": candidate.get("case_id"), "status": "沿用", "rule_confirmed": True, "score": candidate.get("score")}
-        hits.append(hit)
+        ok, reason = _retrieval_relevance(raw_input, source_store, text_value, score=candidate.get("score"))
+        hit = {"source_store": source_store, "rule": text_value[:800], "case_id": candidate.get("case_id"), "status": "沿用" if ok else "未採用：相關性不足", "adopted": ok, "reason": reason, "rule_confirmed": ok, "score": candidate.get("score")}
         if any(token in text_value for token in ("不得", "禁止", "不准", "must not")):
             hit["must_cite"] = True
-    for item in list_persisted_storage_items(limit=20):
+        (adopted if ok else rejected).append(hit)
+    for item in list_persisted_storage_items(limit=50):
+        if item.get("status") in ("revoked", "archived", "superseded"):
+            continue
         target = item.get("target")
-        if target in ("corpus", "logic", "memory"):
-            hits.append({"source_store": target, "rule": str((item.get("payload") or item).get("summary") or item.get("relative_path") or item.get("hash"))[:800], "status": "待確認" if not item.get("task_id") else "沿用", "rule_confirmed": bool(item.get("task_id")), "storage_item_id": item.get("item_id")})
+        if target in ("corpus", "logic", "memory", "vector_db"):
+            text_value = str((item.get("payload") or item).get("summary") or (item.get("payload") or item).get("content") or item.get("relative_path") or item.get("hash"))
+            source_store = "vector" if target == "vector_db" else target
+            ok, reason = _retrieval_relevance(raw_input, source_store, text_value)
+            hit = {"source_store": source_store, "rule": text_value[:800], "status": "沿用" if ok else "未採用：相關性不足", "adopted": ok, "reason": reason, "rule_confirmed": ok, "storage_item_id": item.get("item_id")}
+            (adopted if ok else rejected).append(hit)
     for rule in list_persisted_memory_rules(limit=20):
         text_value = str(rule.get("rule_text") or rule.get("memory_rule") or rule.get("payload") or rule)
-        hits.append({"source_store": "memory", "rule": text_value[:800], "status": "沿用", "rule_confirmed": True, "must_cite": any(t in text_value for t in ("不得", "禁止", "不准", "must not")), "memory_rule_id": rule.get("rule_id")})
-    return {"retrieval_first": True, "query": raw_input, "retrieval_result": retrieval, "hits": hits, "conflicts": conflicts, "no_confirmed_rules": not any(h.get("rule_confirmed") for h in hits), "must_cite_confirmed_rules": [h for h in hits if h.get("rule_confirmed") and h.get("must_cite")]}
+        ok, reason = _retrieval_relevance(raw_input, "memory", text_value)
+        hit = {"source_store": "memory", "rule": text_value[:800], "status": "沿用" if ok else "未採用：相關性不足", "adopted": ok, "reason": reason, "rule_confirmed": ok, "must_cite": any(t in text_value for t in ("不得", "禁止", "不准", "must not")), "memory_rule_id": rule.get("rule_id")}
+        (adopted if ok else rejected).append(hit)
+    return {"retrieval_first": True, "query": raw_input, "retrieval_result": retrieval, "hits": adopted, "adopted_hits": adopted, "rejected_hits": rejected, "conflicts": conflicts, "no_confirmed_rules": not adopted, "must_cite_confirmed_rules": [h for h in adopted if h.get("must_cite")]}
 
 
 def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_context: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool, str | None]:
@@ -237,7 +351,8 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
                 skipped_reason = "external_api_permission_disabled"
                 raise PermissionError(skipped_reason)
             response = _post_openai_compatible(MODEL_SETTINGS, build_scbkr_draft_generation_messages(raw_input, task_type, retrieval_context))
-            draft = json.loads(parse_chat_completion_response(response))
+            model_raw = parse_chat_completion_response(response)
+            draft = _extract_json_object(model_raw)
             draft = _validate_model_authored_scbkr_draft(draft)
         except PermissionError:
             draft = None
@@ -687,6 +802,18 @@ def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     return result
 
 
+@app.post("/api/chat/intent")
+def chat_intent(payload: dict[str, Any]) -> dict[str, Any]:
+    message = str(payload.get("message", "")).strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+    result = route_chat_intent(message)
+    if result["intent"].startswith("suggest"):
+        result["suggestion"] = _build_chat_suggestion(message)
+        result["suggestion"].update({"title": "可生成 SCBKR 確認單", "actions": ["生成確認單", "繼續聊天", "取消"]})
+    return result
+
+
 @app.post("/api/chat/general")
 def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     user_text = str(payload.get("message", "")).strip()
@@ -811,6 +938,24 @@ def create_scbkr(task_id: str) -> dict[str, Any]:
         payload={"compatibility_event": True, "confirmation_status": task["scbkr"].get("confirmation_status")},
     )
     return task
+
+
+@app.post("/api/tasks/{task_id}/scbkr/regenerate-draft")
+def regenerate_scbkr_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    task = _get_task(task_id)
+    _ensure_scbkr_edit_allowed(task)
+    status_before = task.get("status")
+    raw_input = str(payload.get("raw_input") or task.get("raw_input") or "").strip()
+    task["data_center_context"] = _build_four_store_context(raw_input, task_id)
+    task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task.get("task_type", "general"), task["data_center_context"])
+    task["status"] = "waiting_user_confirm"
+    task["confirmed"] = False
+    if skipped_reason:
+        task["draft_model_call_skipped_reason"] = skipped_reason
+    save_task(task)
+    save_scbkr_confirmation(task_id, task["scbkr"])
+    _append_task_event("scbkr_draft_regenerated", task, status_before=status_before, status_after=task["status"], payload={"fallback_used": fallback_used, "fallback_reason": skipped_reason})
+    return {"task_id": task_id, "scbkr": task["scbkr"], "draft_source": task["scbkr"].get("draft_source"), "fallback_used": fallback_used, "fallback_reason": skipped_reason, "model_raw_preview": "", "schema_valid": not fallback_used, **_task_response(task)}
 
 
 @app.patch("/api/tasks/{task_id}/scbkr")
@@ -1459,6 +1604,61 @@ def data_center_section(section: str, task_id: str | None = None) -> dict[str, A
     elif section == "ledger": items = ledger[-200:]
     else: raise HTTPException(status_code=404, detail="data center section not found")
     return {"section": section, "mode": "task" if task_id else "all", "task_id": task_id, "count": len(items), "items": items, "empty_message": "目前尚無資料。" if not items else ""}
+
+
+
+def _find_storage_item(item_id: str) -> dict[str, Any]:
+    for item in list_persisted_storage_items(limit=1000):
+        if item.get("item_id") == item_id:
+            return item
+    raise HTTPException(status_code=404, detail="data center item not found")
+
+@app.post("/api/data-center/query")
+def data_center_query(payload: dict[str, Any]) -> dict[str, Any]:
+    query = str(payload.get("query", "")).strip()
+    items = []
+    for section in ("vector", "corpus", "logic", "memory"):
+        section_items = data_center_section(section).get("items", [])
+        for item in section_items:
+            haystack = json.dumps(item, ensure_ascii=False)
+            if not query or any(token and token in haystack for token in _keyword_tokens(query)):
+                items.append(item)
+    return {"query": query, "candidates": items[:20], "count": len(items[:20])}
+
+@app.post("/api/data-center/items/{item_id}/update-confirm")
+def update_data_center_item_confirm(item_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("update_confirmed") is not True or payload.get("confirmed_by") != "user" or not str(payload.get("signature", "")).strip():
+        raise HTTPException(status_code=400, detail="update confirmation requires user confirmation and signature")
+    old = _find_storage_item(item_id)
+    now = _now()
+    old_updated = deepcopy(old)
+    new_payload = payload.get("new_payload") or deepcopy(old.get("payload") or {})
+    new_item_id = f"{item_id}-v{uuid4().hex[:8]}"
+    old_updated["status"] = "superseded"
+    old_updated["superseded_by"] = new_item_id
+    old_updated["updated_at"] = now
+    new_item = deepcopy(old)
+    new_item.update({"item_id": new_item_id, "parent_item_id": item_id, "version": int(old.get("version") or 1) + 1, "status": "active", "payload": new_payload, "created_at": now, "updated_at": now, "change_reason": payload.get("change_reason")})
+    new_item["content_hash"] = hash_payload(new_payload)
+    save_storage_item(old_updated)
+    save_storage_item(new_item)
+    append_ledger_event(build_ledger_event("data_center_item_updated", task_id=old.get("task_id"), trace_id=f"dc-{item_id}", ledger_id="data-center-ledger", payload={"item_id": item_id, "new_item_id": new_item_id, "change_reason": payload.get("change_reason"), "versioned": True}))
+    return {"old_item": _dc_item_from_storage(old_updated), "new_item": _dc_item_from_storage(new_item), "versioned": True}
+
+@app.post("/api/data-center/items/{item_id}/delete-confirm")
+def delete_data_center_item_confirm(item_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("delete_confirmed") is not True or payload.get("confirmed_by") != "user" or not str(payload.get("signature", "")).strip():
+        raise HTTPException(status_code=400, detail="delete confirmation requires user confirmation and signature")
+    item = _find_storage_item(item_id)
+    mode = payload.get("mode") if payload.get("mode") in ("archive", "revoke") else "archive"
+    updated = deepcopy(item)
+    updated["status"] = "archived" if mode == "archive" else "revoked"
+    updated[f"{updated['status']}_at"] = _now()
+    updated["delete_reason"] = payload.get("delete_reason")
+    save_storage_item(updated)
+    append_ledger_event(build_ledger_event("data_center_item_deleted", task_id=item.get("task_id"), trace_id=f"dc-{item_id}", ledger_id="data-center-ledger", payload={"item_id": item_id, "mode": mode, "hard_delete": False, "delete_reason": payload.get("delete_reason")}))
+    return {"item": _dc_item_from_storage(updated), "mode": mode, "hard_delete": False}
+
 
 @app.get("/api/tasks/{task_id}/storage-items")
 def get_task_storage_items(task_id: str) -> dict[str, Any]:
