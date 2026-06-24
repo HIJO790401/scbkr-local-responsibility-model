@@ -49,6 +49,25 @@ async function api<T>(path: string, init?: RequestInit, backendUrl = storedBacke
 const humanText = (v: any) => Array.isArray(v) ? v.join("\n") : typeof v === "object" && v ? Object.values(v).filter(Boolean).join("\n") : String(v ?? "");
 const parse = (value: string, old: any) => Array.isArray(old) ? value.split("\n").map((x) => x.trim()).filter(Boolean) : value;
 const resultText = (task: TaskSummary | null) => String(task?.generation_result?.content ?? task?.generation_result?.generated_text ?? "尚未生成。確認責任鏈後才能開始生成。");
+const invalidateDownstreamForRevision = (current: TaskSummary): TaskSummary => {
+  const next: TaskSummary = {
+    ...current,
+    confirmed: false,
+    status: "waiting_user_confirm",
+    review_passed: false,
+    storage_confirmed: false,
+  };
+
+  delete next.generation_result;
+  delete next.review_result;
+  delete next.storage_suggestion;
+  delete next.storage_request;
+  delete next.storage_plan;
+  delete next.storage_result;
+  delete next.memory_rule_draft;
+
+  return next;
+};
 const statusLabel = (task: TaskSummary | null) => !task ? "尚未建立任務" : task.status === "waiting_model_draft" ? "等待模型草案" : task.status === "waiting_user_confirm" ? "等待責任鏈確認" : task.status === "confirmed" ? "已確認責任鏈，可開始生成" : task.status === "waiting_review" ? "等待驗收" : task.status === "review_passed" ? "驗收通過，可產生入庫建議" : task.status === "waiting_storage_confirm" ? "等待二次確認入庫" : task.status === "storage_committed" || task.status === "completed" ? "入庫完成" : task.status;
 function JsonBlock({ value }: { value: unknown }) { return <pre className="json-block raw-json">{JSON.stringify(value, null, 2)}</pre>; }
 
@@ -81,7 +100,7 @@ export default function App() {
   const locked = Boolean((task as any)?.physical_write_performed) || task?.status === "completed" || task?.status === "storage_committed";
   const sourceLabel = task?.scbkr?.fallback_used ? "fallback 草案" : task ? "模型草案" : "尚未建立";
   const sourceReason = task?.scbkr?.fallback_used ? (task.scbkr?.fallback_reason || task.draft_model_call_skipped_reason || "模型尚未連線或草案生成失敗。") : "模型已產生本次草案。";
-  const can = { confirm: task?.status === "waiting_user_confirm" && !locked, generate: task?.status === "confirmed", review: task?.status === "waiting_review" || Boolean(task?.generation_result), suggest: task?.status === "review_passed" || task?.review_passed, storage: task?.status === "waiting_storage_confirm" || Boolean(task?.storage_plan) };
+  const can = { confirm: task?.status === "waiting_user_confirm" && !locked, generate: task?.status === "confirmed", review: task?.status === "waiting_review" && Boolean(task?.generation_result), suggest: task?.status === "review_passed" || task?.review_passed, storage: task?.status === "waiting_storage_confirm" || Boolean(task?.storage_plan) };
 
   const refresh = async () => { try { await api("/health", undefined, activeBackendUrl); setHealth("online"); const m = await api<ModelSettings>("/api/settings/model", undefined, activeBackendUrl); setModel(m); setModelForm({ ...modelForm, provider: m.provider || modelForm.provider, mode: m.mode || modelForm.mode, base_url: m.base_url || modelForm.base_url, model_name: m.model_name || modelForm.model_name, api_key: "" }); } catch (e) { setHealth("offline"); setMessage(String(e)); } };
   useEffect(() => { localStorage.setItem(ACTIVE_BACKEND_STORAGE_KEY, activeBackendUrl); void refresh(); }, [activeBackendUrl]);
@@ -97,7 +116,14 @@ export default function App() {
   const applyPatch = () => task && pendingPatch && !locked && run("套用修改", () => api<TaskSummary>(`/api/tasks/${task.task_id}/scbkr/apply-patch`, { method: "POST", body: JSON.stringify({ patch: pendingPatch }) })).then(() => setPendingPatch(null));
   const saveDates = () => task && run("確認日期", () => api<TaskSummary>(`/api/tasks/${task.task_id}/dates`, { method: "POST", body: JSON.stringify({ event_date: eventDate, model_inferred_date: modelDate, date_source: "user", user_confirmed: Boolean(eventDate) }) }));
   const review = (decision: "pass" | "fail") => task && run(decision === "pass" ? "通過驗收" : "驗收失敗", () => api<TaskSummary>(`/api/tasks/${task.task_id}/review`, { method: "POST", body: JSON.stringify({ review_decision: decision, review_message: decision === "pass" ? "使用者通過驗收" : "建立記憶規則" }) }));
-  const returnToRevision = () => task && setTask({ ...task, confirmed: false, status: "waiting_user_confirm", review_passed: false });
+  const returnToRevision = () => {
+    if (!task) return;
+    setTask(invalidateDownstreamForRevision(task));
+    setStorageSuggestion(null);
+    setSelectedTargets([]);
+    setPendingPatch(null);
+    setMessage("已退回修改，舊生成、驗收與入庫資料已作廢。請重新確認責任鏈後再生成。");
+  };
   const enableModelGenerate = async () => { const r = await run("開啟模型生成權限", () => api("/api/settings/permissions", { method: "POST", body: JSON.stringify({ model_generate: true }) })); if (r) setMessage("模型生成權限已開啟"); };
   const storageSuggest = async () => { if (!task) return; const r = await run("產生入庫建議", () => api<TaskSummary>(`/api/tasks/${task.task_id}/storage-suggestion`, { method: "POST", body: JSON.stringify({}) })); setStorageSuggestion(r?.storage_suggestion || r); };
   const storageRequest = () => task && run("產生入庫請求", () => api<TaskSummary>(`/api/tasks/${task.task_id}/storage-request`, { method: "POST", body: JSON.stringify({ selected_targets: selectedTargets, user_decision: selectedTargets.length ? "custom" : "do_not_store", signature: "user" }) }));

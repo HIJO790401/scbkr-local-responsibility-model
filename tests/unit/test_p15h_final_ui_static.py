@@ -69,7 +69,8 @@ def test_patch1_model_generate_permission_entry_uses_existing_api():
 
 def test_patch1_waiting_review_actions_include_fail_and_return_to_revision():
     assert 'can = { confirm: task?.status === "waiting_user_confirm"' in APP
-    assert 'review: task?.status === "waiting_review"' in APP
+    assert 'review: task?.status === "waiting_review" && Boolean(task?.generation_result)' in APP
+    assert 'review: task?.status === "waiting_review" || Boolean(task?.generation_result)' not in APP
     assert '<button onClick={() => review("pass")}>通過驗收</button>' in APP
     assert '<button onClick={() => review("fail")}>驗收失敗</button>' in APP
     assert '<button onClick={returnToRevision}>退回修改</button>' in APP
@@ -77,6 +78,41 @@ def test_patch1_waiting_review_actions_include_fail_and_return_to_revision():
     assert 'review_decision: decision' in APP
     assert 'status: "waiting_user_confirm"' in APP
     assert 'review_passed: false' in APP
+
+
+def test_patch2_return_to_revision_invalidates_downstream_state():
+    assert "const invalidateDownstreamForRevision = (current: TaskSummary): TaskSummary" in APP
+    assert "setTask(invalidateDownstreamForRevision(task))" in APP
+    for assignment in [
+        'confirmed: false',
+        'status: "waiting_user_confirm"',
+        'review_passed: false',
+        'storage_confirmed: false',
+    ]:
+        assert assignment in APP
+    for field in [
+        "generation_result",
+        "review_result",
+        "storage_suggestion",
+        "storage_request",
+        "storage_plan",
+        "storage_result",
+        "memory_rule_draft",
+    ]:
+        assert f"delete next.{field};" in APP
+    assert "setStorageSuggestion(null)" in APP
+    assert "setSelectedTargets([])" in APP
+    assert "setPendingPatch(null)" in APP
+    assert "舊生成、驗收與入庫資料已作廢" in APP
+
+
+def test_patch2_review_actions_require_waiting_review_and_generation_result():
+    assert 'review: task?.status === "waiting_review" && Boolean(task?.generation_result)' in APP
+    assert 'review: task?.status === "waiting_review" || Boolean(task?.generation_result)' not in APP
+    action_source = APP.split('<section className="step-card action-card">', 1)[1].split('{can.suggest &&', 1)[0]
+    assert "can.review &&" in action_source
+    assert "通過驗收" in action_source
+    assert "驗收失敗" in action_source
 
 
 def test_patch1_raw_permission_key_is_not_primary_visible_label():
