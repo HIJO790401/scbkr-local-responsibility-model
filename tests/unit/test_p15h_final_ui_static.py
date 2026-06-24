@@ -71,6 +71,7 @@ def test_patch1_waiting_review_actions_include_fail_and_return_to_revision():
     assert 'can = { confirm: task?.status === "waiting_user_confirm"' in APP
     assert 'review: task?.status === "waiting_review" && Boolean(task?.generation_result)' in APP
     assert 'review: task?.status === "waiting_review" || Boolean(task?.generation_result)' not in APP
+    assert 'revise: ["waiting_review", "review_failed", "rollback_requested"].includes(task?.status ?? "") && !locked' in APP
     assert '<button onClick={() => review("pass")}>通過驗收</button>' in APP
     assert '<button onClick={() => review("fail")}>驗收失敗</button>' in APP
     assert '<button onClick={returnToRevision}>退回修改</button>' in APP
@@ -82,7 +83,8 @@ def test_patch1_waiting_review_actions_include_fail_and_return_to_revision():
 
 def test_patch2_return_to_revision_invalidates_downstream_state():
     assert "const invalidateDownstreamForRevision = (current: TaskSummary): TaskSummary" in APP
-    assert "setTask(invalidateDownstreamForRevision(task))" in APP
+    assert "const localRevision = invalidateDownstreamForRevision(task)" in APP
+    assert "setTask(localRevision)" in APP
     for assignment in [
         'confirmed: false',
         'status: "waiting_user_confirm"',
@@ -119,3 +121,31 @@ def test_patch1_raw_permission_key_is_not_primary_visible_label():
     visible_source = APP.split("return <main", 1)[1]
     assert ">model_generate<" not in visible_source
     assert "model_generate：" not in visible_source
+
+
+def test_patch3_return_to_revision_persists_scbkr_revision():
+    assert "const returnToRevision = async ()" in APP
+    assert 'api<TaskSummary>(`/api/tasks/${task.task_id}/scbkr`, {' in APP
+    assert 'method: "PATCH"' in APP
+    assert 'scbkr: task.scbkr' in APP
+    assert 'layer: "return_to_revision"' in APP
+    assert 'const persisted = await run("退回修改"' in APP
+    assert "setTask(invalidateDownstreamForRevision(persisted))" in APP
+    assert APP.count("invalidateDownstreamForRevision(") >= 2
+    assert "setStorageSuggestion(null)" in APP
+    assert "setSelectedTargets([])" in APP
+    assert "setPendingPatch(null)" in APP
+
+
+def test_patch3_review_failed_can_revise_without_review_buttons():
+    assert 'review: task?.status === "waiting_review" && Boolean(task?.generation_result)' in APP
+    assert 'revise: ["waiting_review", "review_failed", "rollback_requested"].includes(task?.status ?? "") && !locked' in APP
+    action_source = APP.split('<section className="step-card action-card">', 1)[1].split('{can.suggest &&', 1)[0]
+    review_group = action_source.split('{can.review &&', 1)[1].split('}{can.revise &&', 1)[0]
+    revise_group = action_source.split('{can.revise &&', 1)[1]
+    assert "通過驗收" in review_group
+    assert "驗收失敗" in review_group
+    assert "退回修改" not in review_group
+    assert "退回修改" in revise_group
+    assert 'can.review &&' in action_source
+    assert 'can.revise &&' in action_source
