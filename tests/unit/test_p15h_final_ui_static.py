@@ -55,3 +55,31 @@ def test_data_center_and_storage_labels_are_traditional_chinese():
         assert label in APP
     for label in ["後端 API URL", "測試後端 API", "儲存設定", "測試模型連線", "清除 API Key", "切回 Sandbox"]:
         assert label in APP
+
+
+def test_patch1_model_generate_permission_entry_uses_existing_api():
+    assert "開啟模型生成權限" in APP
+    assert "enableModelGenerate" in APP
+    assert 'api("/api/settings/permissions"' in APP
+    assert "JSON.stringify({ model_generate: true })" in APP
+    assert "模型生成權限已開啟" in APP
+    assert "模型生成權限開啟失敗，請確認後端 API 是否連線。" in APP
+    assert "fetch(\"/api/settings/permissions" not in APP
+
+
+def test_patch1_waiting_review_actions_include_fail_and_return_to_revision():
+    assert 'can = { confirm: task?.status === "waiting_user_confirm"' in APP
+    assert 'review: task?.status === "waiting_review"' in APP
+    assert '<button onClick={() => review("pass")}>通過驗收</button>' in APP
+    assert '<button onClick={() => review("fail")}>驗收失敗</button>' in APP
+    assert '<button onClick={returnToRevision}>退回修改</button>' in APP
+    assert 'const review = (decision: "pass" | "fail")' in APP
+    assert 'review_decision: decision' in APP
+    assert 'status: "waiting_user_confirm"' in APP
+    assert 'review_passed: false' in APP
+
+
+def test_patch1_raw_permission_key_is_not_primary_visible_label():
+    visible_source = APP.split("return <main", 1)[1]
+    assert ">model_generate<" not in visible_source
+    assert "model_generate：" not in visible_source
