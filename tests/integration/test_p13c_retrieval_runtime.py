@@ -15,7 +15,7 @@ def test_p13c_retrieval_runtime_api_flow(tmp_path, monkeypatch):
     t["generation_result"]={"status":"waiting_review","review_passed":False,"storage_confirmed":False,"output":"local retrieval API implementation"}; t["status"]="waiting_review"; main.save_task(t)
     t=main.review(t["task_id"], {"review_decision":"pass","reviewer_signature":"sig"})
     t=main.storage_request(t["task_id"])
-    t=main.storage_confirm(t["task_id"], {"storage_confirmed":True,"confirmed_by":"user","signature":"sig","selected_targets":["corpus","logic","exports"]})
+    t=main.storage_confirm(t["task_id"], {"storage_confirmed":True,"second_confirm":True,"confirmed_by":"user","signature":"sig","selected_targets":["corpus","logic","exports"]})
     assert not (tmp_path/"vector_db").exists()
     indexed=main.index_task_retrieval(t["task_id"])
     assert indexed["indexed_cases"]
@@ -75,7 +75,7 @@ def test_p13c_chromadb_upsert_failure_keeps_sqlite_and_fallback_query(tmp_path, 
     t["generation_result"]={"status":"waiting_review","review_passed":False,"storage_confirmed":False,"output":"resilient fallback retrieval implementation"}; t["status"]="waiting_review"; main.save_task(t)
     t=main.review(t["task_id"], {"review_decision":"pass","reviewer_signature":"sig"})
     t=main.storage_request(t["task_id"])
-    t=main.storage_confirm(t["task_id"], {"storage_confirmed":True,"confirmed_by":"user","signature":"sig","selected_targets":["corpus"]})
+    t=main.storage_confirm(t["task_id"], {"storage_confirmed":True,"second_confirm":True,"confirmed_by":"user","signature":"sig","selected_targets":["corpus"]})
 
     indexed=main.index_task_retrieval(t["task_id"])
     assert indexed["indexed_cases"]
@@ -113,7 +113,7 @@ def test_p13c_merged_query_keeps_sqlite_fallback_only_case_when_chromadb_nonempt
         t["generation_result"]={"status":"waiting_review","review_passed":False,"storage_confirmed":False,"output":output}; t["status"]="waiting_review"; main.save_task(t)
         t=main.review(t["task_id"], {"review_decision":"pass","reviewer_signature":"sig"})
         t=main.storage_request(t["task_id"])
-        return main.storage_confirm(t["task_id"], {"storage_confirmed":True,"confirmed_by":"user","signature":"sig","selected_targets":["corpus"]})
+        return main.storage_confirm(t["task_id"], {"storage_confirmed":True,"second_confirm":True,"confirmed_by":"user","signature":"sig","selected_targets":["corpus"]})
 
     t_a = commit_task("legacy alpha retrieval case", "legacy alpha retrieval implementation")
     indexed_a = main.index_task_retrieval(t_a["task_id"])

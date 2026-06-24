@@ -88,7 +88,7 @@ def test_storage_confirm_with_signature_writes_corpus_logic_exports_and_indexes(
 
     response = client.post(
         f"/api/tasks/{task['task_id']}/storage-confirm",
-        json={"storage_confirmed": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus", "logic", "exports", "vector_db"]},
+        json={"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus", "logic", "exports", "vector_db"]},
     )
 
     assert response.status_code == 200
@@ -109,7 +109,7 @@ def test_storage_confirm_with_signature_writes_corpus_logic_exports_and_indexes(
 def test_storage_confirm_missing_signature_is_rejected(monkeypatch, isolated_runtime):
     task = create_review_passed_task(monkeypatch)
 
-    response = client.post(f"/api/tasks/{task['task_id']}/storage-confirm", json={"storage_confirmed": True, "confirmed_by": "user"})
+    response = client.post(f"/api/tasks/{task['task_id']}/storage-confirm", json={"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user"})
 
     assert response.status_code == 400
     assert not (isolated_runtime / "corpus").exists()
@@ -120,7 +120,7 @@ def test_review_failed_task_cannot_storage_commit(monkeypatch, isolated_runtime)
 
     response = client.post(
         f"/api/tasks/{task['task_id']}/storage-confirm",
-        json={"storage_confirmed": True, "confirmed_by": "user", "signature": "storage-sig"},
+        json={"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig"},
     )
 
     assert response.status_code == 400

@@ -40,8 +40,8 @@ def deterministic_storage_suggestion(task: dict[str, Any], user_preference: str 
     generation = str(task.get("generation_result", {}))
     text = f"{raw} {scbkr} {generation}".lower()
     has_docs = any(token in text for token in ("pdf", "docx", "markdown", "網頁", "文件", "報告", "文章", "url", "http", "資料來源", "外部資料"))
-    has_long_term = any(token in text for token in ("長期偏好", "固定規則", "禁止", "不得", "未來任務", "記憶規則", "驗收失敗"))
-    is_logic = any(token in text for token in ("api", "ui", "workflow", "流程", "測試", "權限", "規則", "程式", "邏輯", "scbkr"))
+    has_long_term = any(token in text for token in ("長期偏好", "固定規則", "禁止", "不得", "未來任務", "記憶規則", "驗收失敗", "以後", "判準"))
+    is_logic = any(token in text for token in ("api", "ui", "workflow", "流程", "測試", "權限", "規則", "程式", "邏輯", "scbkr", "邊界", "後果", "查證", "條件"))
     suggestions = {
         "vector": {
             "recommended": True,

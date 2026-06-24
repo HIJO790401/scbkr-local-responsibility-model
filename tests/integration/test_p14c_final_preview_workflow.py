@@ -64,7 +64,7 @@ def test_p14c_final_sandbox_full_workflow_complete_and_persistence(tmp_path, mon
     requested = main.storage_request(task["task_id"])
     assert requested["status"] == "waiting_storage_confirm"
     assert requested["physical_write_performed"] is False
-    committed = main.storage_confirm(task["task_id"], {"storage_confirmed": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus", "logic", "exports"]})
+    committed = main.storage_confirm(task["task_id"], {"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus", "logic", "exports"]})
     assert committed["storage_confirmed"] is True
     assert committed["physical_write_performed"] is True
     completed = main.complete_task(task["task_id"], {"confirmed_by": "user"})
@@ -89,7 +89,7 @@ def test_p14c_final_review_failed_and_unsigned_storage_gates(tmp_path, monkeypat
     with pytest.raises(Exception):
         main.storage_request(task["task_id"])
     with pytest.raises(Exception):
-        main.storage_confirm(task["task_id"], {"storage_confirmed": True, "confirmed_by": "user", "signature": "storage-sig"})
+        main.storage_confirm(task["task_id"], {"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig"})
     assert main._get_task(task["task_id"])["physical_write_performed"] is False
 
     task2 = make_confirmed_task(main)
@@ -99,7 +99,7 @@ def test_p14c_final_review_failed_and_unsigned_storage_gates(tmp_path, monkeypat
     with pytest.raises(Exception):
         main.storage_confirm(task2["task_id"], {"storage_confirmed": False, "confirmed_by": "user", "signature": "storage-sig"})
     with pytest.raises(Exception):
-        main.storage_confirm(task2["task_id"], {"storage_confirmed": True, "confirmed_by": "user"})
+        main.storage_confirm(task2["task_id"], {"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user"})
     assert main._get_task(task2["task_id"])["physical_write_performed"] is False
 
 
@@ -110,7 +110,7 @@ def test_p14c_completed_task_remains_retrieval_indexable_and_advisory(tmp_path, 
     main.generate(task["task_id"])
     main.review(task["task_id"], {"review_decision": "pass", "reviewer_signature": "review-sig"})
     main.storage_request(task["task_id"])
-    committed = main.storage_confirm(task["task_id"], {"storage_confirmed": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus"]})
+    committed = main.storage_confirm(task["task_id"], {"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus"]})
     assert main.index_task_retrieval(committed["task_id"])["indexed_cases"]
 
     completed = main.complete_task(task["task_id"], {"confirmed_by": "user"})
@@ -136,7 +136,7 @@ def test_p14c_completed_task_retrieval_index_keeps_required_gates(tmp_path, monk
     main.generate(task["task_id"])
     main.review(task["task_id"], {"review_decision": "pass", "reviewer_signature": "review-sig"})
     main.storage_request(task["task_id"])
-    main.storage_confirm(task["task_id"], {"storage_confirmed": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus"]})
+    main.storage_confirm(task["task_id"], {"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus"]})
     completed = main.complete_task(task["task_id"], {"confirmed_by": "user"})
     completed[field] = False
     main.save_task(completed)
