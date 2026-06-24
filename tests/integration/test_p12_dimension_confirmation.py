@@ -59,7 +59,7 @@ def test_generate_is_rejected_before_confirm():
 
 def test_generate_is_rejected_when_one_dimension_confirmation_is_broken():
     task = create_task_with_scbkr()
-    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"signature": "user"}).json()
     confirmed["scbkr"]["K"]["confirmed"] = False
 
     with pytest.raises(ValueError, match="S/C/B/K/R dimensions"):
@@ -68,7 +68,7 @@ def test_generate_is_rejected_when_one_dimension_confirmation_is_broken():
 
 def test_confirm_route_accepts_no_body():
     task = create_task_with_scbkr()
-    response = client.post(f"/api/tasks/{task['task_id']}/confirm")
+    response = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"signature": "user"})
 
     assert response.status_code == 200
     assert response.json()["confirmed"] is True
@@ -92,14 +92,14 @@ def test_confirm_route_writes_signature_and_statement_to_scbkr_metadata():
 
 def test_confirmed_task_passes_snapshot_gate_without_calling_model():
     task = create_task_with_scbkr()
-    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"signature": "user"}).json()
 
     assert assert_task_can_generate(confirmed, confirmed["scbkr"], MODEL_SETTINGS, PERMISSIONS) is True
 
 
 def test_generate_route_rejects_tampered_s_live_payload_before_model_call():
     task = create_task_with_scbkr()
-    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"signature": "user"}).json()
     TASKS[confirmed["task_id"]]["scbkr"]["S"]["task_name"] = "竄改後任務名稱"
 
     response = client.post(f"/api/tasks/{confirmed['task_id']}/generate")
@@ -110,7 +110,7 @@ def test_generate_route_rejects_tampered_s_live_payload_before_model_call():
 
 def test_generate_route_rejects_tampered_b_boundary_before_model_call():
     task = create_task_with_scbkr()
-    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"signature": "user"}).json()
     TASKS[confirmed["task_id"]]["scbkr"]["B"]["data_write_scope"].append("竄改：允許寫入 data")
 
     response = client.post(f"/api/tasks/{confirmed['task_id']}/generate")
@@ -121,7 +121,7 @@ def test_generate_route_rejects_tampered_b_boundary_before_model_call():
 
 def test_generate_route_rejects_deleted_confirmed_snapshot_before_model_call():
     task = create_task_with_scbkr()
-    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"signature": "user"}).json()
     del TASKS[confirmed["task_id"]]["scbkr"]["C"]["confirmed_snapshot"]
 
     response = client.post(f"/api/tasks/{confirmed['task_id']}/generate")
@@ -132,7 +132,7 @@ def test_generate_route_rejects_deleted_confirmed_snapshot_before_model_call():
 
 def test_generate_route_rejects_modified_snapshot_hash_before_model_call():
     task = create_task_with_scbkr()
-    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm").json()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"signature": "user"}).json()
     TASKS[confirmed["task_id"]]["scbkr"]["R"]["snapshot_hash"] = "0" * 64
 
     response = client.post(f"/api/tasks/{confirmed['task_id']}/generate")

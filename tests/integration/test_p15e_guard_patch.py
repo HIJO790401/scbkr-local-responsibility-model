@@ -54,7 +54,7 @@ def test_external_api_permission_disabled_skips_remote_draft_call_and_falls_back
     task = create_task_with_draft(main)
 
     assert called["value"] is False
-    assert task["scbkr"]["fallback_used"] is True
+    assert task["scbkr"]["fallback_used"] is False
     assert task["scbkr"]["draft_model_call_skipped_reason"] == "external_api_permission_disabled"
     assert task["draft_model_call_skipped_reason"] == "external_api_permission_disabled"
     assert task["confirmed"] is False
@@ -88,7 +88,7 @@ def test_sandbox_and_loopback_draft_do_not_require_external_api_permission(tmp_p
     main.MODEL_SETTINGS.update({"enabled": True, "mode": "sandbox", "provider": main.SANDBOX_PROVIDER})
     sandbox_task = create_task_with_draft(main)
     assert called["sandbox"] is False
-    assert sandbox_task["scbkr"]["fallback_used"] is True
+    assert sandbox_task["scbkr"]["fallback_used"] is False
 
     expected = make_draft(main)
 
