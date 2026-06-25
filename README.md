@@ -17,32 +17,34 @@
   <img alt="Safety" src="https://img.shields.io/badge/control-owner--signed%20evidence-green">
 </p>
 
+---
+
 ## 目錄
 
-- [一、產品定位](#一產品定位)
-- [二、SCBKR 不是什麼](#二scbkr-不是什麼)
-- [三、SCBKR 解決什麼問題](#三scbkr-解決什麼問題)
-- [四、核心閉環](#四核心閉環)
-- [五、SCBKR 五維責任鏈](#五scbkr-五維責任鏈)
-- [六、模型角色與行動邊界](#六模型角色與行動邊界)
-- [七、Chat 與 Workbench](#七chat-與-workbench)
-- [八、Owner Signature Gate｜使用者簽名閘門](#八owner-signature-gate使用者簽名閘門)
-- [九、Data Center 與四庫](#九data-center-與四庫)
-- [十、Evidence Relation Gate｜證據關係判準](#十evidence-relation-gate證據關係判準)
-- [十一、為什麼 SCBKR 不依賴無限聊天上下文](#十一為什麼-scbkr-不依賴無限聊天上下文)
-- [十二、權限與安全邊界](#十二權限與安全邊界)
-- [十三、系統架構](#十三系統架構)
-- [十四、目前版本進度](#十四目前版本進度)
-- [十五、P15-Q 尚未完成的收束項](#十五p15-q-尚未完成的收束項)
-- [十六、目前可跑能力](#十六目前可跑能力)
-- [十七、快速開始](#十七快速開始)
-- [十八、常用測試](#十八常用測試)
-- [十九、模型接入](#十九模型接入)
-- [二十、手機同 Wi-Fi 使用](#二十手機同-wi-fi-使用)
-- [二十一、GitHub Topics 建議](#二十一github-topics-建議)
-- [二十二、English Summary](#二十二english-summary)
-- [二十三、產品原則](#二十三產品原則)
-- [二十四、簽名](#二十四簽名)
+* [一、產品定位](#一產品定位)
+* [二、SCBKR 不是什麼](#二scbkr-不是什麼)
+* [三、SCBKR 解決什麼問題](#三scbkr-解決什麼問題)
+* [四、核心閉環](#四核心閉環)
+* [五、SCBKR 五維責任鏈](#五scbkr-五維責任鏈)
+* [六、模型角色與行動邊界](#六模型角色與行動邊界)
+* [七、Chat 與 Workbench](#七chat-與-workbench)
+* [八、Owner Signature Gate｜使用者簽名閘門](#八owner-signature-gate使用者簽名閘門)
+* [九、Data Center 與四庫](#九data-center-與四庫)
+* [十、Evidence Relation Gate｜證據關係判準](#十evidence-relation-gate證據關係判準)
+* [十一、為什麼 SCBKR 不依賴無限聊天上下文](#十一為什麼-scbkr-不依賴無限聊天上下文)
+* [十二、權限與安全邊界](#十二權限與安全邊界)
+* [十三、系統架構](#十三系統架構)
+* [十四、目前版本進度](#十四目前版本進度)
+* [十五、P15-Q 尚未完成的收束項](#十五p15-q-尚未完成的收束項)
+* [十六、目前可跑能力](#十六目前可跑能力)
+* [十七、使用方式｜Desktop App 與開發者模式](#十七使用方式desktop-app-與開發者模式)
+* [十八、常用測試](#十八常用測試)
+* [十九、模型接入](#十九模型接入)
+* [二十、手機與遠端自接入使用](#二十手機與遠端自接入使用)
+* [二十一、GitHub Topics 建議](#二十一github-topics-建議)
+* [二十二、English Summary](#二十二english-summary)
+* [二十三、產品原則](#二十三產品原則)
+* [二十四、簽名](#二十四簽名)
 
 ---
 
@@ -50,7 +52,7 @@
 
 **SCBKR 本地責任鏈模型** 是一套本地 AI 責任鏈控制系統。
 
-它的核心不是讓模型立刻回答，而是讓模型在生成之前先進入可確認、可簽名、可驗收、可入庫、可回放的責任鏈流程。
+它的核心不是讓模型立刻回答，而是讓模型在生成之前，先進入可確認、可簽名、可驗收、可入庫、可回放的責任鏈流程。
 
 SCBKR 的定位是：
 
@@ -62,7 +64,7 @@ Data Center 是可回放資料中心。
 四庫是可索引規則層。
 模型是草案與編譯助手。
 使用者是最終簽名者。
-````
+```
 
 SCBKR 允許使用者在自己的電腦上接入：
 
@@ -99,6 +101,7 @@ SCBKR 不是大模型公司。
 SCBKR 不是讓模型替使用者直接決定答案的工具。
 SCBKR 不是把所有歷史聊天硬塞進上下文的長對話產品。
 SCBKR 不是讓模型自動記憶一切的黑箱記憶系統。
+SCBKR 不是讓模型自由代理使用者行動的 agent 外殼。
 
 SCBKR 是一套 **Local AI Responsibility Chain Control Layer**：
 
@@ -592,6 +595,8 @@ dangerous_operation_confirmed = true
 * 192.168.x.x
 * 區網另一台電腦
 * 公網 API
+* tunnel URL
+* reverse proxy URL
 * 遠端 OpenAI-compatible endpoint
 
 即使 provider 顯示為 LM Studio / Ollama / local mode，也必須視為外部模型呼叫，必須經過 external_api 授權。
@@ -887,11 +892,61 @@ Chat
 * activeBackendUrl routing
 * external_api guard
 * 非 loopback model URL 安全阻擋
-* 手機同 Wi-Fi 連線基礎
+* 手機 / 遠端裝置連回自有 SCBKR backend 的設計基礎
 
 ---
 
-## 十七、快速開始
+## 十七、使用方式｜Desktop App 與開發者模式
+
+SCBKR 的目標使用方式不是只靠開發伺服器啟動，而是提供本地桌面入口，讓使用者在自己的電腦上連接本地後端、模型與資料中心。
+
+目前使用方式分為兩種：
+
+```text
+1. Desktop App / Installer 模式
+2. Developer Mode / 開發者模式
+```
+
+---
+
+### 1. Desktop App / Installer 模式
+
+SCBKR 設計目標是以桌面應用程式方式運行。
+
+桌面版負責：
+
+* 啟動本地 SCBKR 操作介面
+* 連接本地 FastAPI sidecar
+* 管理 activeBackendUrl
+* 連接 LM Studio / Ollama / OpenAI-compatible API
+* 操作 Chat / Workbench / Data Center / Model Settings / Audit
+* 完成使用者簽名、驗收、二次確認入庫與四庫引用流程
+
+目前桌面封裝已有 Windows / Tauri / sidecar build 基礎。
+
+但截至目前進度：
+
+```text
+P15-P 核心閉環已完成
+P15-Q Release Candidate 收束尚未完成
+```
+
+P15-Q 尚需完成：
+
+* Windows smoke script 對齊 P15-P second_confirm gate
+* release build script 正式化
+* release smoke script 正式化
+* desktop metadata 從 preview / skeleton 收束為 Release Candidate
+* installer / README / package version 統一到 Release Candidate 語意
+
+因此目前 README 不將 installer 宣稱為最終 production installer。
+正式 Release Candidate installer 會在 P15-Q 收束後標記。
+
+---
+
+### 2. Developer Mode / 開發者模式
+
+開發者模式用於本地測試、開發、除錯與貢獻程式碼。
 
 安裝 Python package：
 
@@ -921,6 +976,37 @@ npm --prefix apps/web run dev
 
 ```text
 http://localhost:5500
+```
+
+開發者模式不是最終使用者唯一入口。
+它是用來驗證 API、前端、模型連線、SCBKR 流程與 Data Center 的本地開發方式。
+
+---
+
+### 固定本地端口
+
+後端 API：
+
+```text
+http://localhost:8787
+```
+
+前端 Web：
+
+```text
+http://localhost:5500
+```
+
+LM Studio 常見本機 endpoint：
+
+```text
+http://localhost:1234/v1
+```
+
+Ollama OpenAI-compatible endpoint：
+
+```text
+http://localhost:11434/v1
 ```
 
 ---
@@ -957,6 +1043,13 @@ PY
 Windows desktop build / smoke 目前正在 P15-Q 收束中。
 P15-Q 將對齊 P15-P 的 owner signature、review gate、second confirm storage gate。
 
+P15-Q 預計新增或對齊：
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/build_desktop_release_windows.ps1
+powershell -ExecutionPolicy Bypass -File scripts/smoke_desktop_release_windows.ps1
+```
+
 ---
 
 ## 十九、模型接入
@@ -982,11 +1075,36 @@ P15-Q 將對齊 P15-P 的 owner signature、review gate、second confirm storage
 
 API Key 在讀取設定時只會遮罩，不會明文回傳。
 
+模型接入原則：
+
+```text
+本地 loopback endpoint 可視為本機模型。
+非 loopback endpoint 必須視為外部模型連線。
+外部模型連線必須經過 external_api / dangerous_operation_confirmed guard。
+```
+
 ---
 
-## 二十、手機同 Wi-Fi 使用
+## 二十、手機與遠端自接入使用
 
-若前端開發伺服器使用 LAN host 啟動，手機與電腦在同一 Wi-Fi 下，可用手機打開：
+SCBKR 的設計目標不是只能在同一台電腦上操作。
+
+SCBKR 的目標是：
+
+```text
+使用者可以在自己的電腦上運行本地後端與本地模型，
+並透過手機、平板或其他裝置連回自己的 SCBKR 工作環境。
+```
+
+手機不是內建 LLM。
+手機端只是操作入口。
+實際模型、資料中心、四庫、ledger、storage 仍然由使用者指定的本地後端 / desktop sidecar / API 負責。
+
+---
+
+### 1. 同 Wi-Fi / LAN 模式
+
+若前端開發伺服器或桌面入口允許 LAN 存取，手機與電腦在同一個 Wi-Fi 下，可用手機打開：
 
 ```text
 http://{電腦區網IP}:5500
@@ -1006,8 +1124,85 @@ http://{電腦區網IP}:5500
 * 二次確認入庫
 * 查看 Data Center
 
-手機不是內建 LLM。
-手機端資料仍透過 activeBackendUrl 連回使用者指定的本地後端 / desktop sidecar / API。
+LAN 模式適合：
+
+* 家中
+* 工作室
+* 同一辦公網路
+* 本地測試
+
+---
+
+### 2. 遠端自接入模式
+
+SCBKR 的長期目標是支援使用者在外部環境中，仍能安全連回自己的本地 SCBKR / 本地模型工作環境。
+
+例如：
+
+```text
+人在外面
+→ 手機或筆電開啟 SCBKR 前端
+→ 透過使用者自行設定的安全通道
+→ 連回家中 / 工作室電腦的 SCBKR backend
+→ backend 再連接本地 LM Studio / Ollama / OpenAI-compatible API
+→ 完成 Chat / Workbench / 簽名 / 驗收 / 入庫 / Data Center 查詢
+```
+
+遠端自接入可以透過使用者自行設定的方式實現，例如：
+
+* VPN
+* Tailscale / ZeroTier
+* Cloudflare Tunnel
+* reverse proxy
+* 自有網域
+* 自建 HTTPS gateway
+* 其他安全通道
+
+SCBKR 不會把遠端連線偽裝成本地模型。
+
+只要不是 loopback URL，例如：
+
+* 192.168.x.x
+* 區網另一台電腦
+* 公網 API
+* tunnel URL
+* reverse proxy URL
+* 遠端 OpenAI-compatible endpoint
+
+即使 provider 顯示為 LM Studio / Ollama / local mode，也必須視為外部或非 loopback 模型連線，並經過 external_api / dangerous_operation_confirmed guard。
+
+---
+
+### 3. 遠端使用的責任邊界
+
+遠端自接入不代表模型可以越權。
+
+即使使用者人在外面，SCBKR 仍維持：
+
+```text
+使用者未簽名，不得 confirmed。
+責任鏈未確認，不得生成。
+驗收未通過，不得入庫。
+未二次確認，不得 physical write。
+模型不得自行簽名。
+模型不得自行驗收。
+模型不得自行入庫。
+```
+
+手機端、遠端瀏覽器或外部裝置只是操作入口。
+
+真正的責任鏈仍由：
+
+```text
+Owner Signature Gate
+Review Gate
+Storage Confirm Gate
+Evidence Relation Gate
+Data Center / 四庫
+ledger / hash / replay
+```
+
+共同控制。
 
 ---
 
@@ -1084,6 +1279,7 @@ P15-Q Release Candidate alignment pending.
 資料不是自動記憶，而是驗收後入庫。
 引用不是關鍵字命中，而是 evidence relation。
 聊天不是無限上下文，而是四庫索引與責任鏈回放。
+遠端操作不是模型越權，而是使用者連回自己的責任鏈環境。
 ```
 
 ---
@@ -1095,6 +1291,3 @@ P15-Q Release Candidate alignment pending.
 
 Founder of Semantic Firewall
 Wen-Yao Hsu / ShenYao888π
-
-```
-```
