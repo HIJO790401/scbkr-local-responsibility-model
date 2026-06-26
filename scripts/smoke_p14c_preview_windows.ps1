@@ -47,8 +47,14 @@ try {
   if ($Task.generation_result.external_call_performed -ne $false) { throw "generation_result.external_call_performed was not false" }
   if ($Task.generation_result.model_provider -ne "sandbox_mock_model") { throw "Unexpected provider" }
   $Task = Invoke-Json POST "/api/tasks/$($Task.task_id)/review" @{ review_decision = "pass"; review_message = "smoke pass" }
-  $Task = Invoke-Json POST "/api/tasks/$($Task.task_id)/storage-request" @{ signature = $OwnerSignature; selected_targets = @("corpus", "logic", "exports") }
-  $Task = Invoke-Json POST "/api/tasks/$($Task.task_id)/storage-confirm" @{ storage_confirmed = $true; second_confirm = $true; confirmed_by = "user"; signature = $OwnerSignature; selected_targets = @("corpus", "logic", "exports") }
+  $Task = Invoke-Json POST "/api/tasks/$($Task.task_id)/storage-request" @{ signature = $OwnerSignature; selected_targets = @("vector", "corpus", "logic", "memory") }
+  try {
+    Invoke-Json POST "/api/tasks/$($Task.task_id)/storage-confirm" @{ storage_confirmed = $true; confirmed_by = "user"; signature = $OwnerSignature; selected_targets = @("vector", "corpus", "logic", "memory") } | Out-Null
+    throw "storage-confirm without second_confirm unexpectedly succeeded"
+  } catch {
+    if ($_.Exception.Message -like "*unexpectedly succeeded*") { throw }
+  }
+  $Task = Invoke-Json POST "/api/tasks/$($Task.task_id)/storage-confirm" @{ storage_confirmed = $true; second_confirm = $true; confirmed_by = "user"; signature = $OwnerSignature; selected_targets = @("vector", "corpus", "logic", "memory") }
   if ($Task.confirmed -ne $true) { throw "task confirmed was not true" }
   if ($Task.scbkr.signature_status -ne "owner_signed") { throw "signature_status was not owner_signed" }
   if ($Task.review_passed -ne $true) { throw "review_passed was not true" }
