@@ -1,4 +1,4 @@
-"""P14-C Windows preview FastAPI sidecar entrypoint.
+"""SCBKR Windows release candidate FastAPI sidecar entrypoint.
 
 This module is intended as the PyInstaller target for `scbkr-api.exe`. It sets
 safe local defaults before importing the FastAPI app so runtime path constants
@@ -18,12 +18,12 @@ def _default_windows_app_data() -> Path:
 
 
 def configure_sidecar_environment() -> dict[str, str]:
-    os.environ.setdefault("SCBKR_DESKTOP_PREVIEW", "1")
+    os.environ.setdefault("SCBKR_DESKTOP_RUNTIME", "release-candidate")
     os.environ.setdefault("SCBKR_DATA_DIR", str(_default_windows_app_data()))
     os.environ.setdefault("SCBKR_API_HOST", "127.0.0.1")
     os.environ.setdefault("SCBKR_API_PORT", "8787")
     return {
-        "SCBKR_DESKTOP_PREVIEW": os.environ["SCBKR_DESKTOP_PREVIEW"],
+        "SCBKR_DESKTOP_RUNTIME": os.environ["SCBKR_DESKTOP_RUNTIME"],
         "SCBKR_DATA_DIR": os.environ["SCBKR_DATA_DIR"],
         "SCBKR_API_HOST": os.environ["SCBKR_API_HOST"],
         "SCBKR_API_PORT": os.environ["SCBKR_API_PORT"],

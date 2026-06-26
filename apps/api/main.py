@@ -83,7 +83,7 @@ SCBKR_CONFIRMATION_REQUIRED_FIELDS = {
     "R": ["expected_outputs", "acceptance_criteria", "ledger_requirements", "storage_options", "signature_status", "review_status", "replay_requirements"],
 }
 
-app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.14.0-p14c-preview")
+app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.15.0-rc.1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=LOCAL_DESKTOP_CORS_ORIGINS,
@@ -711,13 +711,18 @@ def system_status() -> dict[str, Any]:
 def desktop_status() -> dict[str, Any]:
     sidecar_host = os.environ.get("SCBKR_API_HOST", "127.0.0.1")
     sidecar_port = int(os.environ.get("SCBKR_API_PORT", "8787"))
-    preview_package_built = os.environ.get("SCBKR_DESKTOP_PREVIEW") == "1"
+    release_runtime = os.environ.get("SCBKR_DESKTOP_RUNTIME") == "release-candidate"
+    release_package_built = release_runtime or os.environ.get("SCBKR_DESKTOP_PREVIEW") == "1"
+    desktop_stage = "P14-C-preview"
     return {
-        "desktop_stage": "P14-C-preview",
+        "desktop_stage": desktop_stage,
         "desktop_shell": True,
         "installer_built": False,
-        "preview_package_built": preview_package_built,
+        "preview_package_built": release_package_built,
+        "release_candidate_package_built": release_package_built,
         "tauri_skeleton": True,
+        "desktop_release_candidate": True,
+        "release_candidate_stage": "P15-Q-release-candidate",
         "sidecar_supported": True,
         "sidecar_running": True,
         "sandbox_available": True,
@@ -731,10 +736,12 @@ def desktop_status() -> dict[str, Any]:
         "data_dir": os.environ.get("SCBKR_DATA_DIR"),
         "external_call_required": MODEL_SETTINGS.get("mode") in ("external", "hybrid"),
         "preview": True,
-        "preview_package": "built" if preview_package_built else "preview runtime",
+        "preview_package": "built" if release_package_built else "preview runtime",
+        "release_candidate_package": "built" if release_package_built else "runtime",
         "production_packaging": False,
         "production_packaging_status": "future stage pending",
         "installer": "not a production installer",
+        "release_candidate_installer": "release candidate installer",
     }
 
 

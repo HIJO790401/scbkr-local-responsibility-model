@@ -7,7 +7,7 @@ struct SidecarState(Mutex<Option<Child>>);
 fn start_api_sidecar() -> Option<Child> {
     let mut command = Command::new("scbkr-api");
     command
-        .env("SCBKR_DESKTOP_PREVIEW", "1")
+        .env("SCBKR_DESKTOP_RUNTIME", "release-candidate")
         .env("SCBKR_API_HOST", "127.0.0.1")
         .env("SCBKR_API_PORT", "8787")
         .stdout(Stdio::null())
@@ -31,5 +31,5 @@ fn main() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("error while running SCBKR P14-C desktop preview");
+        .expect("error while running SCBKR desktop release candidate");
 }
