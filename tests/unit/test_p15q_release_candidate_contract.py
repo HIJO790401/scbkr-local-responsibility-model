@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 APP = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
@@ -51,3 +52,36 @@ def test_release_candidate_metadata_and_readme_contracts():
     readme = Path("README.md").read_text(encoding="utf-8")
     assert "P15-Q Release Candidate" in readme
     assert "準備進入 P15-H" not in readme
+
+
+def _selected_target_sets(script: str):
+    return re.findall(r'selected_targets = @\(([^)]*)\)', script)
+
+
+def test_windows_smoke_targets_are_formal_four_store_targets_only():
+    for script in (PREVIEW_SMOKE, RELEASE_SMOKE):
+        assert 'selected_targets = @("corpus", "logic", "exports")' not in script
+        assert 'selected_targets = @("vector", "corpus", "logic", "memory")' in script
+        for targets in _selected_target_sets(script):
+            assert '"exports"' not in targets
+            for target in ('"vector"', '"corpus"', '"logic"', '"memory"'):
+                assert target in targets
+
+
+def test_storage_ui_targets_remain_formal_four_store_targets():
+    storage_suggestion = Path("core/storage/storage_suggestion.py").read_text(encoding="utf-8")
+    assert 'UI_TARGETS = ("vector", "corpus", "logic", "memory")' in storage_suggestion
+    assert 'UI_TARGETS = ("vector", "corpus", "logic", "memory", "exports")' not in storage_suggestion
+
+
+def test_data_center_confirm_uses_dedicated_signature_and_blocks_empty_signature():
+    assert 'const [dataCenterOwnerSignature, setDataCenterOwnerSignature] = useState("")' in APP
+    assert '資料中心使用者簽名' in APP
+    assert '請先輸入資料中心使用者簽名，才能確認更改或封存資料。' in APP
+    assert 'signature: dataCenterOwnerSignature.trim()' in APP
+    assert 'signature: ownerSignature.trim(), change_reason' not in APP
+    assert 'signature: ownerSignature.trim(), delete_reason' not in APP
+    assert 'if (!signature) { setMessage(dataCenterSignatureRequiredMessage); return; }' in APP
+    assert 'disabled={!updateDraft || !dataCenterOwnerSignature.trim()}' in APP
+    assert 'disabled={!dataCenterOwnerSignature.trim()}' in APP
+    assert 'setDataCenterOwnerSignature("")' in APP
