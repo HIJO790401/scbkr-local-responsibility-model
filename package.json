@@ -1,8 +1,8 @@
 {
   "name": "scbkr-local-responsibility-model",
   "private": true,
-  "version": "0.0.0",
-  "description": "SCBKR local responsibility chain model P0 skeleton",
+  "version": "0.15.0-rc.1",
+  "description": "SCBKR Local Responsibility Chain Model release candidate",
   "scripts": {
     "setup": "sh scripts/setup.sh",
     "dev": "sh scripts/dev.sh",

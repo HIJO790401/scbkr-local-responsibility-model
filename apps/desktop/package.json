@@ -1,15 +1,18 @@
 {
-  "name": "scbkr-desktop-skeleton",
-  "version": "0.14.0-p14c-preview",
+  "name": "scbkr-desktop",
+  "version": "0.15.0-rc.1",
   "private": true,
-  "description": "P14-C Windows desktop preview package skeleton for SCBKR Local Responsibility Model. Unsigned preview, not production.",
+  "description": "SCBKR Local Responsibility Model desktop release candidate",
   "type": "module",
   "scripts": {
     "dev": "echo \"P14-B skeleton only: run apps/web and apps/api separately, then use Tauri dev in a Rust-enabled environment.\"",
     "check:skeleton": "node -e \"const fs=require('fs'); ['src-tauri/tauri.conf.json','src-tauri/Cargo.toml','src-tauri/src/main.rs','src/App.tsx'].forEach(p=>{if(!fs.existsSync(p)) throw new Error(p+' missing')}); console.log('desktop skeleton ok')\"",
     "tauri:build:preview": "npm run generate:icon && tauri build",
     "check:preview": "npm run check:skeleton",
-    "generate:icon": "cd ../.. && python scripts/generate_tauri_preview_icon.py"
+    "generate:icon": "cd ../.. && python scripts/generate_tauri_preview_icon.py",
+    "tauri:build:rc": "npm run generate:icon && tauri build",
+    "check:release": "npm run check:skeleton && node -e \"const p=require('./package.json'); if(p.name!=='scbkr-desktop') throw new Error('desktop package name must be release candidate'); console.log('desktop release ok')\"",
+    "build:release:windows": "cd ../.. && powershell -ExecutionPolicy Bypass -File scripts/build_desktop_release_windows.ps1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

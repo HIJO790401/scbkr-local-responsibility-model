@@ -1,6 +1,6 @@
 [package]
-name = "scbkr_desktop_skeleton"
-version = "0.14.0-p14b"
+name = "scbkr_desktop"
+version = "0.15.0-rc.1"
 edition = "2021"
 publish = false
 
