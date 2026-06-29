@@ -9,12 +9,18 @@ function hasCompanionToken(search) {
   return new URLSearchParams(search || "").has("companion_token");
 }
 
+function isTauriDesktopHostname(hostname) {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === "tauri.localhost";
+}
+
 function resolveApiBaseUrl(input) {
   const envApiUrl = input.envApiUrl?.trim();
   if (envApiUrl) return envApiUrl;
   if (input.protocol !== "http:" && input.protocol !== "https:") return DEFAULT_API_BASE_URL;
   const hostname = input.hostname.trim();
   const origin = `${input.protocol}//${hostname}${input.port ? `:${input.port}` : ""}`;
+  if (isTauriDesktopHostname(hostname)) return DEFAULT_API_BASE_URL;
   const loopback = isLoopbackHostname(hostname);
   if (!loopback) return origin;
   if (input.port === "8787") return origin;
@@ -33,6 +39,8 @@ const cases = [
   ["CASE 08", { protocol: "http:", hostname: "127.0.0.1", port: "5173", search: "" }, DEFAULT_API_BASE_URL],
   ["CASE 09", { protocol: "http:", hostname: "127.0.0.1", port: "8788", search: "?companion_token=abc" }, "http://127.0.0.1:8788"],
   ["CASE 10", { protocol: "http:", hostname: "localhost", port: "8788", search: "" }, DEFAULT_API_BASE_URL],
+  ["CASE 11", { protocol: "http:", hostname: "tauri.localhost", port: "", search: "" }, DEFAULT_API_BASE_URL],
+  ["CASE 12", { protocol: "https:", hostname: "tauri.localhost", port: "", search: "" }, DEFAULT_API_BASE_URL],
 ];
 
 for (const [name, input, expected] of cases) {

@@ -17,6 +17,11 @@ export function hasCompanionToken(search: string): boolean {
   return new URLSearchParams(search || "").has("companion_token");
 }
 
+export function isTauriDesktopHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === "tauri.localhost";
+}
+
 export function resolveApiBaseUrl(input: ApiBaseDecisionInput): string {
   const envApiUrl = input.envApiUrl?.trim();
   if (envApiUrl) return envApiUrl;
@@ -25,6 +30,8 @@ export function resolveApiBaseUrl(input: ApiBaseDecisionInput): string {
 
   const hostname = input.hostname.trim();
   const origin = `${input.protocol}//${hostname}${input.port ? `:${input.port}` : ""}`;
+  if (isTauriDesktopHostname(hostname)) return DEFAULT_API_BASE_URL;
+
   const loopback = isLoopbackHostname(hostname);
 
   if (!loopback) return origin;

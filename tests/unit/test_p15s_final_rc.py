@@ -85,6 +85,9 @@ def test_frontend_api_base_runtime_matrix_and_companion_token_contract():
     assert "export function resolveApiBaseUrl" in api_base
     assert "export function isLoopbackHostname" in api_base
     assert "export function hasCompanionToken" in api_base
+    assert "export function isTauriDesktopHostname" in api_base
+    assert "tauri.localhost" in api_base
+    assert api_base.index("if (isTauriDesktopHostname(hostname)) return DEFAULT_API_BASE_URL") < api_base.index("if (!loopback) return origin")
     assert 'from "./apiBase"' in app and "resolveApiBaseUrl" in app
     assert "X-SCBKR-Companion-Token" in app
     assert "companion_token" in app
@@ -97,6 +100,7 @@ def test_frontend_api_base_runtime_matrix_and_companion_token_contract():
     matrix_contracts = [
         ("envApiUrl highest priority", "if (envApiUrl) return envApiUrl"),
         ("non-http fallback", 'input.protocol !== "http:" && input.protocol !== "https:"'),
+        ("tauri desktop sidecar fallback", "if (isTauriDesktopHostname(hostname)) return DEFAULT_API_BASE_URL"),
         ("non-loopback page origin", "if (!loopback) return origin"),
         ("loopback 8787 page origin", 'if (input.port === "8787") return origin'),
         ("loopback companion token page origin", "if (hasCompanionToken(input.search)) return origin"),
@@ -119,11 +123,15 @@ def test_frontend_api_base_runtime_matrix_and_companion_token_contract():
         {"case": "CASE 08", "current": "http://127.0.0.1:5173", "expected": "http://127.0.0.1:8787"},
         {"case": "CASE 09", "current": "http://127.0.0.1:8788/?companion_token=abc", "expected": "http://127.0.0.1:8788"},
         {"case": "CASE 10", "current": "http://localhost:8788", "expected": "http://127.0.0.1:8787"},
+        {"case": "CASE 11", "current": "http://tauri.localhost", "expected": "http://127.0.0.1:8787"},
+        {"case": "CASE 12", "current": "https://tauri.localhost", "expected": "http://127.0.0.1:8787"},
     ]
     script = Path("scripts/check_api_base_matrix.mjs").read_text(encoding="utf-8")
     for row in matrix_cases:
         assert row["case"] in script
         assert row["expected"] in script
+    assert "tauri.localhost" in script
+    assert script.index("CASE 11") < script.index("CASE 12")
 
 
 def test_readme_final_rc_contract_and_images_exist():
