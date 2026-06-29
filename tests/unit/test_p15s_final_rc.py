@@ -77,12 +77,23 @@ def test_lan_non_loopback_token_assets_and_health_minimal(monkeypatch):
 
 def test_frontend_api_base_and_companion_token_contract():
     app = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
-    assert "window.location.origin" in app
-    assert "window.location.port === \"8787\"" not in app
     assert 'const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787"' in app
-    assert 'return DEFAULT_API_BASE_URL' in app
+    assert "function isLoopbackHostname" in app
+    assert "function shouldUsePageOriginForApi" in app
+    assert "window.location.origin" in app
+    assert "localhost" in app
+    assert "127.0.0.1" in app
+    assert "::1" in app
     assert "X-SCBKR-Companion-Token" in app
     assert "companion_token" in app
+    assert "VITE_SCBKR_API_URL" in app
+    assert 'return DEFAULT_API_BASE_URL' in app
+    assert 'window.location.port === "8787"' not in app
+    assert 'window.location.port === "8787") return window.location.origin' not in app
+    assert '/^https?:$/.test(window.location.protocol)) return window.location.origin;' not in app
+    default_api_base_url = app[app.index("function defaultApiBaseUrl"):app.index("const API_BASE_URL")]
+    assert "shouldUsePageOriginForApi()" in default_api_base_url
+    assert "window.location.protocol)) return window.location.origin" not in default_api_base_url
 
 
 def test_readme_final_rc_contract_and_images_exist():
