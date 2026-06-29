@@ -85,3 +85,10 @@ def test_data_center_confirm_uses_dedicated_signature_and_blocks_empty_signature
     assert 'disabled={!updateDraft || !dataCenterOwnerSignature.trim()}' in APP
     assert 'disabled={!dataCenterOwnerSignature.trim()}' in APP
     assert 'setDataCenterOwnerSignature("")' in APP
+
+
+def test_storage_confirm_has_no_legacy_exports_physical_target_path():
+    main_py = Path("apps/api/main.py").read_text(encoding="utf-8")
+    assert "legacy_exports_requested" not in main_py
+    assert 'physical_targets.append("exports")' not in main_py
+    assert 'if t != "exports"' not in main_py
