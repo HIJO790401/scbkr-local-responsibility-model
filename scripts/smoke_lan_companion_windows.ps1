@@ -8,7 +8,10 @@ if ($Main -notmatch '/assets/') { throw "LAN asset public path missing" }
 if ($Main -notmatch 'X-SCBKR-Companion-Token') { throw "API token header guard missing" }
 if ($Main -notmatch 'mount_web_dist_if_available') { throw "web UI static serving missing" }
 $Web = Get-Content apps\web\src\App.tsx -Raw
-if ($Web -match 'window.location.port === "8787"') { throw "frontend LAN origin must not be restricted to port 8787" }
+if ($Web -notmatch 'shouldUsePageOriginForApi') { throw "frontend API-origin helper missing" }
+if ($Web -notmatch 'isLoopbackHostname') { throw "frontend loopback helper missing" }
 if ($Web -notmatch 'window.location.origin') { throw "frontend LAN origin default missing" }
 if ($Web -notmatch 'DEFAULT_API_BASE_URL = "http://127.0.0.1:8787"') { throw "desktop default API base missing" }
+if ($Web -match 'window.location.port === "8787"') { throw "frontend LAN origin must not be restricted to port 8787" }
+if ($Web -match '/\^https\?:\$/.test\(window.location.protocol\)\) return window.location.origin;') { throw "frontend API base must not return page origin for every http/https page" }
 Write-Host "LAN Companion smoke checks passed. For live HTTP checks run start_lan_companion_windows.ps1 and test with/without X-SCBKR-Companion-Token."
