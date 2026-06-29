@@ -1,6 +1,6 @@
 {
   "name": "scbkr-desktop",
-  "version": "0.15.0-rc.1",
+  "version": "0.15.0-rc.2",
   "private": true,
   "description": "SCBKR Local Responsibility Model desktop release candidate",
   "type": "module",

@@ -31,15 +31,15 @@ try {
   $Health = Invoke-Json GET "/health"
   if (-not ($Health.ok -eq $true -or $Health.service -eq "scbkr-api")) { throw "Health did not report alive" }
   $Status = Invoke-Json GET "/api/desktop/status"
-  if ($Status.release_candidate_stage -ne "P15-Q-release-candidate") { throw "Unexpected release_candidate_stage: $($Status.release_candidate_stage)" }
+  if ($Status.release_candidate_stage -ne "P15-S-1.0-final-rc") { throw "Unexpected release_candidate_stage: $($Status.release_candidate_stage)" }
 
   Invoke-Json POST "/api/settings/model" @{ mode = "sandbox" } | Out-Null
   $ModelTest = Invoke-Json POST "/api/model/test"
   if ($ModelTest.external_call_performed -ne $false) { throw "Sandbox model test performed an external call" }
 
-  $Task = Invoke-Json POST "/api/tasks/create" @{ raw_input = "P15-Q release candidate smoke task"; task_type = "workflow" }
+  $Task = Invoke-Json POST "/api/tasks/create" @{ raw_input = "P15-S release candidate smoke task"; task_type = "workflow" }
   $Task = Invoke-Json POST "/api/tasks/$($Task.task_id)/scbkr"
-  $Task = Invoke-Json POST "/api/tasks/$($Task.task_id)/confirm" @{ confirmed_by = "user"; confirmation_statement = "P15-Q smoke confirms SCBKR."; signature = $OwnerSignature }
+  $Task = Invoke-Json POST "/api/tasks/$($Task.task_id)/confirm" @{ confirmed_by = "user"; confirmation_statement = "P15-S smoke confirms SCBKR."; signature = $OwnerSignature }
   if ($Task.confirmed -ne $true) { throw "task confirmed was not true" }
   if ($Task.scbkr.signature_status -ne "owner_signed") { throw "signature_status was not owner_signed" }
 
