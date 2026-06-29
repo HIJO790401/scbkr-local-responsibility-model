@@ -33,27 +33,42 @@ def test_sidecar_lan_mode_requires_token(monkeypatch):
     assert configure_sidecar_environment()["SCBKR_COMPANION_TOKEN"] == "secret"
 
 
-def test_lan_non_loopback_token_and_health_minimal(monkeypatch):
+def test_lan_public_asset_paths_and_api_protection_contract():
+    from apps.api import main
+
+    assert main._is_public_companion_asset_path("/") is True
+    assert main._is_public_companion_asset_path("/index.html") is True
+    assert main._is_public_companion_asset_path("/assets/index.js") is True
+    assert main._is_public_companion_asset_path("/assets/index.css") is True
+    assert main._is_public_companion_asset_path("/health") is True
+    assert main._is_public_companion_asset_path("/api/settings/model") is False
+    assert main._is_public_companion_asset_path("/api/tasks/create") is False
+
+
+def test_lan_non_loopback_token_assets_and_health_minimal(monkeypatch):
     monkeypatch.setenv("SCBKR_LAN_COMPANION_ENABLED", "1")
     monkeypatch.setenv("SCBKR_COMPANION_TOKEN", "secret")
     from apps.api import main
 
     class DummyUrl:
-        path = "/api/settings/model"
+        def __init__(self, path):
+            self.path = path
 
     class DummyRequest:
-        url = DummyUrl()
         client = type("Client", (), {"host": "192.168.1.50"})()
         query_params = {}
-        def __init__(self, token=""):
+        def __init__(self, path, token=""):
+            self.url = DummyUrl(path)
             self.headers = {"X-SCBKR-Companion-Token": token} if token else {}
 
     async def ok_response(_request):
         return "ok"
 
-    denied = asyncio.run(main.require_companion_token_for_lan_requests(DummyRequest(), ok_response))
+    asset = asyncio.run(main.require_companion_token_for_lan_requests(DummyRequest("/assets/index.js"), ok_response))
+    assert asset == "ok"
+    denied = asyncio.run(main.require_companion_token_for_lan_requests(DummyRequest("/api/settings/model"), ok_response))
     assert denied.status_code == 401
-    allowed = asyncio.run(main.require_companion_token_for_lan_requests(DummyRequest("secret"), ok_response))
+    allowed = asyncio.run(main.require_companion_token_for_lan_requests(DummyRequest("/api/settings/model", "secret"), ok_response))
     assert allowed == "ok"
     health = main.health()
     assert health["ok"] is True and health["lan_companion_enabled"] is True
@@ -63,7 +78,8 @@ def test_lan_non_loopback_token_and_health_minimal(monkeypatch):
 def test_frontend_api_base_and_companion_token_contract():
     app = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
     assert "window.location.origin" in app
-    assert "window.location.port === \"8787\"" in app
+    assert "window.location.port === \"8787\"" not in app
+    assert 'const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787"' in app
     assert 'return DEFAULT_API_BASE_URL' in app
     assert "X-SCBKR-Companion-Token" in app
     assert "companion_token" in app
@@ -72,7 +88,10 @@ def test_frontend_api_base_and_companion_token_contract():
 def test_readme_final_rc_contract_and_images_exist():
     readme = Path("README.md").read_text(encoding="utf-8")
     assert "Desktop Mode" in readme and "LAN Companion Mode" in readme
-    assert "手機不能直接用 `192.168.x.x` 連入" in readme
+    assert "手機不是直接連本地 LLM" in readme
+    assert "手機 → SCBKR 後端 → 本地 LLM" in readme
+    assert "手機直接連本地 LLM" not in readme.replace("手機不是直接連本地 LLM", "")
+    assert "LAN Companion Mode requires a companion token and is never enabled by default" in readme
     assert "127.0.0.1:8000" not in readme and ":8000/health" not in readme
     assert "README_EN.md" not in readme
     assert "下一階段才是 P16 / SCBKR 2.0 Rule Design Engine" in readme

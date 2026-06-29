@@ -33,7 +33,7 @@ const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787";
 const COMPANION_TOKEN_STORAGE_KEY = "scbkr.companionToken";
 function defaultApiBaseUrl() {
   if (import.meta.env.VITE_SCBKR_API_URL) return import.meta.env.VITE_SCBKR_API_URL;
-  if (typeof window !== "undefined" && /^https?:$/.test(window.location.protocol) && window.location.port === "8787") return window.location.origin;
+  if (typeof window !== "undefined" && /^https?:$/.test(window.location.protocol)) return window.location.origin;
   return DEFAULT_API_BASE_URL;
 }
 const API_BASE_URL = defaultApiBaseUrl().replace(/\/+$/, "");

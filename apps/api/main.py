@@ -117,9 +117,27 @@ def _companion_token_valid(request: Request) -> bool:
     return bool(expected) and supplied == expected
 
 
+def _is_public_companion_asset_path(path: str) -> bool:
+    return (
+        path in {
+            "/",
+            "/index.html",
+            "/health",
+            "/favicon.ico",
+            "/favicon.png",
+            "/manifest.json",
+            "/robots.txt",
+            "/vite.svg",
+        }
+        or path.startswith("/assets/")
+    )
+
+
 @app.middleware("http")
 async def require_companion_token_for_lan_requests(request: Request, call_next):
-    if lan_companion_enabled() and request.url.path != "/health" and not _client_is_loopback(request):
+    if lan_companion_enabled() and not _client_is_loopback(request):
+        if _is_public_companion_asset_path(request.url.path):
+            return await call_next(request)
         if not _companion_token_valid(request):
             return JSONResponse(status_code=401, content={"detail": "LAN Companion Mode requires a valid companion token"})
     return await call_next(request)

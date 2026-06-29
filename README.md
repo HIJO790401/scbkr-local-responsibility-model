@@ -106,12 +106,20 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 
 ![Mobile Companion](docs/images/mobile-companion-en.png)
 
-- 中文：手機端只是操作入口，不是獨立模型主體，也不是第二個 Runtime。
-- English: The phone is only an operation entry point, not an independent model host or second runtime.
+- 中文：手機不是直接連本地 LLM。
+- English: The phone does not connect directly to the local LLM.
+- 中文：手機只是操作入口。
+- English: The phone is only an operation entry point.
+- 中文：手機瀏覽器先連到電腦上的 SCBKR LAN Companion Web UI。
+- English: The phone browser connects to the SCBKR LAN Companion Web UI running on the computer.
+- 中文：手機 → SCBKR 後端 → 本地 LLM。所有模型呼叫仍由電腦上的 SCBKR 後端執行。
+- English: Phone → SCBKR backend → local LLM. All model calls are still executed by the SCBKR backend on the computer.
+- 中文：本地 LLM / LM Studio / Ollama / OpenAI-compatible API 仍由電腦端設定。
+- English: Local LLM / LM Studio / Ollama / OpenAI-compatible API settings remain computer-side settings.
+- 中文：手機端不能繞過使用者簽名、驗收、二次確認、Data Center Gate 或四庫限制。
+- English: The phone cannot bypass owner signature, user review, second confirmation, the Data Center Gate, or four-store limits.
 - 中文：啟動方式：在 Windows 上執行 `powershell -ExecutionPolicy Bypass -File scripts/start_lan_companion_windows.ps1`，依畫面顯示的 URL 在手機瀏覽器開啟。
 - English: Start it on Windows with `powershell -ExecutionPolicy Bypass -File scripts/start_lan_companion_windows.ps1`, then open the displayed URL in the phone browser.
-- 中文：手機端仍須遵守使用者簽名、使用者驗收、二次確認、Data Center Gate、四庫限制。
-- English: The phone still must obey owner signature, user review, second confirmation, Data Center Gate, and four-store limits.
 
 ## 11. 隱私與安全邊界｜Privacy and Safety Boundary
 
