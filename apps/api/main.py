@@ -1361,7 +1361,7 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if "storage_plan" not in task:
             raise ValueError("尚未建立入庫計畫。請先產生入庫請求。")
         user_decision = task.get("user_decision") or task.get("storage_request", {}).get("user_decision")
-        selected_targets = validate_ui_targets([t for t in (payload.get("selected_targets") or task.get("selected_targets") or task.get("storage_plan", {}).get("selected_targets") or []) if t != "exports"])
+        selected_targets = validate_ui_targets(payload.get("selected_targets") or task.get("selected_targets") or task.get("storage_plan", {}).get("selected_targets") or [])
         if not selected_targets and user_decision in ("temporary_only", "do_not_store"):
             task["storage_confirmed"] = False
             task["physical_write_performed"] = False
@@ -1381,10 +1381,7 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("signature is required")
 
         plan_targets = [to_plan_target(target) for target in selected_targets]
-        legacy_exports_requested = "exports" in (payload.get("selected_targets") or [])
         physical_targets = [target for target in plan_targets if target in ("vector_db", "corpus", "logic", "memory")]
-        if legacy_exports_requested and "exports" not in physical_targets:
-            physical_targets.append("exports")
         proposed_plan = build_storage_commit_plan(task, task.get("review_result", {}), plan_targets, storage_signature=signature if "memory" in plan_targets else None, storage_notes=payload.get("storage_notes", "P15-C user second-confirmed storage commit."))
         proposed_plan["selected_targets"] = selected_targets
         proposed_plan["physical_write_performed"] = False

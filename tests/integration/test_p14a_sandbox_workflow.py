@@ -38,7 +38,7 @@ def test_p14a_sandbox_full_workflow_no_external_model(tmp_path, monkeypatch):
     assert requested["physical_write_performed"] is False
     committed = main.storage_confirm(
         task["task_id"],
-        {"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus", "logic", "exports"]},
+        {"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["vector", "corpus", "logic", "memory"]},
     )
     assert committed["physical_write_performed"] is True
     assert committed["status"] == "storage_committed"

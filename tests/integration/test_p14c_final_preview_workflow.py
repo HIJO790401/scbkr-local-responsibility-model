@@ -64,7 +64,7 @@ def test_p14c_final_sandbox_full_workflow_complete_and_persistence(tmp_path, mon
     requested = main.storage_request(task["task_id"])
     assert requested["status"] == "waiting_storage_confirm"
     assert requested["physical_write_performed"] is False
-    committed = main.storage_confirm(task["task_id"], {"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus", "logic", "exports"]})
+    committed = main.storage_confirm(task["task_id"], {"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["vector", "corpus", "logic", "memory"]})
     assert committed["storage_confirmed"] is True
     assert committed["physical_write_performed"] is True
     completed = main.complete_task(task["task_id"], {"confirmed_by": "user"})

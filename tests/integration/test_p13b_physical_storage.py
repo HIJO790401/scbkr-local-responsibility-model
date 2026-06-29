@@ -81,14 +81,14 @@ def create_review_failed_task(monkeypatch):
     return failed.json()
 
 
-def test_storage_confirm_with_signature_writes_corpus_logic_exports_and_indexes(monkeypatch, isolated_runtime):
+def test_storage_confirm_with_signature_writes_formal_four_store_targets_and_indexes(monkeypatch, isolated_runtime):
     repo_sqlite_existed = REPO_SQLITE_PATH.exists()
     repo_ledger_existed = REPO_LEDGER_JSONL_PATH.exists()
     task = create_review_passed_task(monkeypatch)
 
     response = client.post(
         f"/api/tasks/{task['task_id']}/storage-confirm",
-        json={"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["corpus", "logic", "exports", "vector_db"]},
+        json={"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["vector", "corpus", "logic", "memory"]},
     )
 
     assert response.status_code == 200
@@ -97,13 +97,27 @@ def test_storage_confirm_with_signature_writes_corpus_logic_exports_and_indexes(
     assert body["status"] == "storage_committed"
     assert (isolated_runtime / "corpus").is_dir()
     assert (isolated_runtime / "logic").is_dir()
-    assert (isolated_runtime / "exports").is_dir()
+    assert not (isolated_runtime / "exports").exists()
     assert (isolated_runtime / "vector_db").is_dir()
-    assert {item["target"] for item in list_storage_items(task_id=task["task_id"])} == {"vector_db", "corpus", "logic", "exports"}
+    assert (isolated_runtime / "memory").is_dir()
+    assert {item["target"] for item in list_storage_items(task_id=task["task_id"])} == {"vector_db", "corpus", "logic", "memory"}
     event_types = [event["event_type"] for event in read_ledger_events(task_id=task["task_id"])]
     assert "storage_physical_write_completed" in event_types
     assert REPO_SQLITE_PATH.exists() is repo_sqlite_existed
     assert REPO_LEDGER_JSONL_PATH.exists() is repo_ledger_existed
+
+
+def test_storage_confirm_rejects_exports_selected_target(monkeypatch, isolated_runtime):
+    task = create_review_passed_task(monkeypatch)
+
+    response = client.post(
+        f"/api/tasks/{task['task_id']}/storage-confirm",
+        json={"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "storage-sig", "selected_targets": ["vector", "exports"]},
+    )
+
+    assert response.status_code == 400
+    assert "寫入目標只能是 vector / corpus / logic / memory" in str(response.json())
+    assert not (isolated_runtime / "exports").exists()
 
 
 def test_storage_confirm_missing_signature_is_rejected(monkeypatch, isolated_runtime):
