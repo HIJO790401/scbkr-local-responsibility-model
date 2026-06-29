@@ -26,48 +26,19 @@ onChange={(e: any) => updateField(dim, field.key, e.target.value)}
 預期輸出 驗收條件 回放要求 入庫選項 簽名狀態 引用證據 本次未命中已確認資料 source_store
 */
 
+import { DEFAULT_API_BASE_URL, resolveApiBaseUrl } from "./apiBase";
 import type { ModelSettings, ScbkrDimensionKey, TaskSummary, TaskType } from "./types";
 
-const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787";
 // fetch(`${candidate}/health`) is kept as a contract string; runtime adds the optional companion token header.
 const COMPANION_TOKEN_STORAGE_KEY = "scbkr.companionToken";
-function isLoopbackHostname(hostname: string) {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
-}
-function hasCompanionTokenInUrl() {
-  if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).has("companion_token");
-}
-function shouldUsePageOriginForApi() {
-  if (typeof window === "undefined") return false;
-  if (!/^https?:$/.test(window.location.protocol)) return false;
-
-  const hostname = window.location.hostname;
-  const port = window.location.port;
-
-  // LAN / phone / another device opening the computer host:
-  // 192.168.x.x, 10.x.x.x, hostname.local, etc.
-  // This must use the current origin so the phone calls back to the computer.
-  if (!isLoopbackHostname(hostname)) return true;
-
-  // Sidecar-served default local page:
-  // http://127.0.0.1:8787
-  // This is safe to use as origin.
-  if (port === "8787") return true;
-
-  // LAN Companion custom-port URL opened locally with token:
-  // http://127.0.0.1:8788/?companion_token=...
-  // Allow origin only when companion_token is present.
-  if (hasCompanionTokenInUrl()) return true;
-
-  // Localhost dev / preview pages such as 5500 or 5173 are static dev servers.
-  // They must call the FastAPI sidecar at DEFAULT_API_BASE_URL.
-  return false;
-}
 function defaultApiBaseUrl() {
-  if (import.meta.env.VITE_SCBKR_API_URL) return import.meta.env.VITE_SCBKR_API_URL;
-  if (shouldUsePageOriginForApi()) return window.location.origin;
-  return DEFAULT_API_BASE_URL;
+  return resolveApiBaseUrl({
+    protocol: typeof window !== "undefined" ? window.location.protocol : "",
+    hostname: typeof window !== "undefined" ? window.location.hostname : "",
+    port: typeof window !== "undefined" ? window.location.port : "",
+    search: typeof window !== "undefined" ? window.location.search : "",
+    envApiUrl: import.meta.env.VITE_SCBKR_API_URL,
+  });
 }
 const API_BASE_URL = defaultApiBaseUrl().replace(/\/+$/, "");
 const ACTIVE_BACKEND_STORAGE_KEY = "scbkr.activeBackendUrl";

@@ -75,25 +75,55 @@ def test_lan_non_loopback_token_assets_and_health_minimal(monkeypatch):
     assert "secret" not in str(health)
 
 
-def test_frontend_api_base_and_companion_token_contract():
+def test_frontend_api_base_runtime_matrix_and_companion_token_contract():
     app = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
-    assert 'const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787"' in app
-    assert "function isLoopbackHostname" in app
-    assert "function shouldUsePageOriginForApi" in app
-    assert "window.location.origin" in app
-    assert "localhost" in app
-    assert "127.0.0.1" in app
-    assert "::1" in app
+    api_base_path = Path("apps/web/src/apiBase.ts")
+    assert api_base_path.exists()
+    api_base = api_base_path.read_text(encoding="utf-8")
+
+    assert 'export const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787"' in api_base
+    assert "export function resolveApiBaseUrl" in api_base
+    assert "export function isLoopbackHostname" in api_base
+    assert "export function hasCompanionToken" in api_base
+    assert 'from "./apiBase"' in app and "resolveApiBaseUrl" in app
     assert "X-SCBKR-Companion-Token" in app
     assert "companion_token" in app
+    assert "activeBackendUrl" in app
     assert "VITE_SCBKR_API_URL" in app
-    assert 'return DEFAULT_API_BASE_URL' in app
     assert 'window.location.port === "8787"' not in app
-    assert 'window.location.port === "8787") return window.location.origin' not in app
     assert '/^https?:$/.test(window.location.protocol)) return window.location.origin;' not in app
-    default_api_base_url = app[app.index("function defaultApiBaseUrl"):app.index("const API_BASE_URL")]
-    assert "shouldUsePageOriginForApi()" in default_api_base_url
-    assert "window.location.protocol)) return window.location.origin" not in default_api_base_url
+    assert 'return window.location.origin' not in app[app.index("function defaultApiBaseUrl"):app.index("const API_BASE_URL")]
+
+    matrix_contracts = [
+        ("envApiUrl highest priority", "if (envApiUrl) return envApiUrl"),
+        ("non-http fallback", 'input.protocol !== "http:" && input.protocol !== "https:"'),
+        ("non-loopback page origin", "if (!loopback) return origin"),
+        ("loopback 8787 page origin", 'if (input.port === "8787") return origin'),
+        ("loopback companion token page origin", "if (hasCompanionToken(input.search)) return origin"),
+        ("loopback dev/custom fallback", "return DEFAULT_API_BASE_URL"),
+        ("localhost loopback", 'normalized === "localhost"'),
+        ("127.0.0.1 loopback", 'normalized === "127.0.0.1"'),
+        ("::1 loopback", 'normalized === "::1"'),
+    ]
+    for label, needle in matrix_contracts:
+        assert needle in api_base, label
+
+    matrix_cases = [
+        {"case": "CASE 01", "envApiUrl": "http://custom:9999", "current": "http://localhost:5500", "expected": "http://custom:9999"},
+        {"case": "CASE 02", "protocol": "file:", "expected": "http://127.0.0.1:8787"},
+        {"case": "CASE 03", "current": "http://127.0.0.1:8787", "expected": "http://127.0.0.1:8787"},
+        {"case": "CASE 04", "current": "http://localhost:8787", "expected": "http://localhost:8787"},
+        {"case": "CASE 05", "current": "http://192.168.1.5:8787", "expected": "http://192.168.1.5:8787"},
+        {"case": "CASE 06", "current": "http://192.168.1.5:8788", "expected": "http://192.168.1.5:8788"},
+        {"case": "CASE 07", "current": "http://localhost:5500", "expected": "http://127.0.0.1:8787"},
+        {"case": "CASE 08", "current": "http://127.0.0.1:5173", "expected": "http://127.0.0.1:8787"},
+        {"case": "CASE 09", "current": "http://127.0.0.1:8788/?companion_token=abc", "expected": "http://127.0.0.1:8788"},
+        {"case": "CASE 10", "current": "http://localhost:8788", "expected": "http://127.0.0.1:8787"},
+    ]
+    script = Path("scripts/check_api_base_matrix.mjs").read_text(encoding="utf-8")
+    for row in matrix_cases:
+        assert row["case"] in script
+        assert row["expected"] in script
 
 
 def test_readme_final_rc_contract_and_images_exist():

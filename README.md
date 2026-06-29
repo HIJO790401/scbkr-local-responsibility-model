@@ -153,8 +153,8 @@ npm --prefix apps/desktop run check:release
 
 - 中文：本機 API 預設：`http://127.0.0.1:8787`。
 - English: Default local API: `http://127.0.0.1:8787`.
-- 中文：開發 / preview 頁面若由 localhost dev server 提供，前端仍會連回 FastAPI sidecar `http://127.0.0.1:8787`；LAN Companion 頁面由電腦 sidecar 提供時，才使用目前頁面 origin。
-- English: When the UI is served by a localhost dev / preview server, the frontend still calls the FastAPI sidecar at `http://127.0.0.1:8787`; when the UI is served through LAN Companion from the computer sidecar, it uses the current page origin.
+- 中文：API base 會依 runtime matrix 判斷：LAN Companion 頁面使用目前頁面 origin；localhost dev / preview 頁面仍連回 FastAPI sidecar `http://127.0.0.1:8787`；`VITE_SCBKR_API_URL` 永遠最高優先。
+- English: The API base follows a runtime matrix: LAN Companion pages use the current page origin, localhost dev / preview pages still call the FastAPI sidecar at `http://127.0.0.1:8787`, and `VITE_SCBKR_API_URL` always has the highest priority.
 
 ## 15. 測試與驗收｜Testing and Validation
 
