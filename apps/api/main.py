@@ -11,12 +11,16 @@ from uuid import uuid4
 from typing import Any
 from urllib.parse import urlparse
 from urllib.error import URLError, HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrlRequest, urlopen
 import json
 import os
+import sys
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from core.generation.sandbox_model import SANDBOX_PROVIDER, generate_with_sandbox_model
 from core.model_gateway.connection_test import make_test_status
@@ -83,7 +87,7 @@ SCBKR_CONFIRMATION_REQUIRED_FIELDS = {
     "R": ["expected_outputs", "acceptance_criteria", "ledger_requirements", "storage_options", "signature_status", "review_status", "replay_requirements"],
 }
 
-app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.15.0-rc.1")
+app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.15.0-rc.2")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=LOCAL_DESKTOP_CORS_ORIGINS,
@@ -96,6 +100,30 @@ _TASK_COUNTER = count(1)
 TASKS: dict[str, dict[str, Any]] = {}
 MODEL_SETTINGS: dict[str, Any] = dict(DEFAULT_MODEL_SETTINGS)
 PERMISSIONS: dict[str, Any] = dict(DEFAULT_PERMISSION_SETTINGS)
+
+
+def lan_companion_enabled() -> bool:
+    return os.environ.get("SCBKR_LAN_COMPANION_ENABLED") == "1"
+
+
+def _client_is_loopback(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    return host in {"127.0.0.1", "::1", "localhost"}
+
+
+def _companion_token_valid(request: Request) -> bool:
+    expected = os.environ.get("SCBKR_COMPANION_TOKEN", "")
+    supplied = request.headers.get("X-SCBKR-Companion-Token") or request.query_params.get("companion_token")
+    return bool(expected) and supplied == expected
+
+
+@app.middleware("http")
+async def require_companion_token_for_lan_requests(request: Request, call_next):
+    if lan_companion_enabled() and request.url.path != "/health" and not _client_is_loopback(request):
+        if not _companion_token_valid(request):
+            return JSONResponse(status_code=401, content={"detail": "LAN Companion Mode requires a valid companion token"})
+    return await call_next(request)
+
 
 
 IDENTITY_ZH = "我是 SCBKR 責任鏈語言模型，由台灣台中「語意防火牆」創辦人許文耀／沈耀888pi 研發，透過使用者自接的本地 LLM 或 API 運作。我的目標是讓模型在生成前先交代任務、邊界、依據與責任，協助降低 token、算力與重複推理消耗。使用者可以自訂規則、建立閉環、審計模型輸出，降低模型幻覺風險。若需要規則庫、合作或相關資訊，可寄信至 [ken0963521@gmail.com](mailto:ken0963521@gmail.com) 聯繫。"
@@ -641,7 +669,7 @@ def save_task(task: dict[str, Any]) -> dict[str, Any]:
 def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, str]]) -> dict[str, Any]:
     payload = build_chat_completion_payload(messages, settings)
     url = settings["base_url"].rstrip("/") + "/chat/completions"
-    request = Request(
+    request = UrlRequest(
         url,
         data=json.dumps(payload).encode("utf-8"),
         headers=build_headers(settings),
@@ -688,8 +716,11 @@ def _try_model_storage_suggestion(task: dict[str, Any]) -> dict[str, Any] | None
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    _ensure_runtime()
-    return {"ok": True, "service": "scbkr-api", "runtime": "P13-A/B/C SQLite + JSONL retrieval runtime"}
+    return {
+        "ok": True,
+        "runtime": os.environ.get("SCBKR_DESKTOP_RUNTIME", "api"),
+        "lan_companion_enabled": lan_companion_enabled(),
+    }
 
 
 @app.get("/api/system/status")
@@ -722,7 +753,7 @@ def desktop_status() -> dict[str, Any]:
         "release_candidate_package_built": release_package_built,
         "tauri_skeleton": True,
         "desktop_release_candidate": True,
-        "release_candidate_stage": "P15-Q-release-candidate",
+        "release_candidate_stage": "P15-S-1.0-final-rc",
         "sidecar_supported": True,
         "sidecar_running": True,
         "sandbox_available": True,
@@ -1729,3 +1760,48 @@ def get_task_ledger_events(task_id: str) -> dict[str, Any]:
 @app.post("/api/ledger/rebuild-index")
 def rebuild_ledger_index() -> dict[str, Any]:
     return rebuild_ledger_index_from_jsonl()
+
+
+def _candidate_web_dist_dirs() -> list[Path]:
+    candidates: list[Path] = []
+    if os.environ.get("SCBKR_WEB_DIST_DIR"):
+        candidates.append(Path(os.environ["SCBKR_WEB_DIST_DIR"]))
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "web-dist")
+    exe_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+    candidates.append(exe_dir / "web-dist")
+    candidates.append(Path(__file__).resolve().parents[2] / "apps" / "web" / "dist")
+    return candidates
+
+
+def _find_web_dist_dir() -> Path | None:
+    for candidate in _candidate_web_dist_dirs():
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
+def mount_web_dist_if_available() -> Path | None:
+    web_dist = _find_web_dist_dir()
+    if web_dist is None:
+        return None
+    assets = web_dist / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets)), name="web-assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_web_ui(full_path: str) -> FileResponse:
+        requested = (web_dist / full_path).resolve() if full_path else web_dist / "index.html"
+        try:
+            requested.relative_to(web_dist.resolve())
+        except ValueError:
+            requested = web_dist / "index.html"
+        if requested.is_file() and requested.name != "index.html":
+            return FileResponse(requested)
+        return FileResponse(web_dist / "index.html")
+
+    return web_dist
+
+
+mount_web_dist_if_available()

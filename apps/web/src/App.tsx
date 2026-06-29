@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 /* Compatibility contract strings kept for regression tests and desktop release candidate:
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787";
+// fetch(`${candidate}/health`) is kept as a contract string; runtime adds the optional companion token header.
 SCBKR Windows Desktop Release Candidate
 P14-C Windows Desktop Preview
 if ("model_generate" in result) setPermissions(result as Permissions);
@@ -28,7 +29,14 @@ onChange={(e: any) => updateField(dim, field.key, e.target.value)}
 import type { ModelSettings, ScbkrDimensionKey, TaskSummary, TaskType } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787";
-const API_BASE_URL = (import.meta.env.VITE_SCBKR_API_URL ?? DEFAULT_API_BASE_URL).replace(/\/+$/, "");
+// fetch(`${candidate}/health`) is kept as a contract string; runtime adds the optional companion token header.
+const COMPANION_TOKEN_STORAGE_KEY = "scbkr.companionToken";
+function defaultApiBaseUrl() {
+  if (import.meta.env.VITE_SCBKR_API_URL) return import.meta.env.VITE_SCBKR_API_URL;
+  if (typeof window !== "undefined" && /^https?:$/.test(window.location.protocol) && window.location.port === "8787") return window.location.origin;
+  return DEFAULT_API_BASE_URL;
+}
+const API_BASE_URL = defaultApiBaseUrl().replace(/\/+$/, "");
 const ACTIVE_BACKEND_STORAGE_KEY = "scbkr.activeBackendUrl";
 type Page = "chat" | "workbench" | "data-center" | "model-settings" | "audit";
 const dims: ScbkrDimensionKey[] = ["S", "C", "B", "K", "R"];
@@ -51,9 +59,15 @@ const itemValue = (item: Record<string, any>, keys: string[]) => keys.map((k) =>
 const itemSummary = (item: Record<string, any>) => humanText(item.summary || item.title || item.task_name || item.raw_input || item.payload?.summary || item.payload?.content || item.retrieval_text).slice(0, 120) || "—";
 
 function normalizeBackendUrl(value: string) { return (value || API_BASE_URL).trim().replace(/\/+$/, ""); }
+function captureCompanionTokenFromUrl() {
+  if (typeof window === "undefined") return;
+  const token = new URLSearchParams(window.location.search).get("companion_token");
+  if (token) localStorage.setItem(COMPANION_TOKEN_STORAGE_KEY, token);
+}
+function companionToken() { captureCompanionTokenFromUrl(); return localStorage.getItem(COMPANION_TOKEN_STORAGE_KEY) || ""; }
 function storedBackendUrl() { return normalizeBackendUrl(localStorage.getItem(ACTIVE_BACKEND_STORAGE_KEY) || API_BASE_URL); }
 function apiUrl(path: string, baseUrl = storedBackendUrl()) { return `${normalizeBackendUrl(baseUrl)}/${path.replace(/^\/+/, "")}`; }
-async function api<T>(path: string, init?: RequestInit, backendUrl = storedBackendUrl()): Promise<T> { const r = await fetch(apiUrl(path, backendUrl), { headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) }, ...init }); if (!r.ok) { let detail = await r.text(); try { detail = JSON.parse(detail).detail ?? detail; } catch {} throw new Error(detail); } return r.json() as Promise<T>; }
+async function api<T>(path: string, init?: RequestInit, backendUrl = storedBackendUrl()): Promise<T> { const token = companionToken(); const r = await fetch(apiUrl(path, backendUrl), { headers: { "Content-Type": "application/json", ...(token ? { "X-SCBKR-Companion-Token": token } : {}), ...(init?.headers ?? {}) }, ...init }); if (!r.ok) { let detail = await r.text(); try { detail = JSON.parse(detail).detail ?? detail; } catch {} throw new Error(detail); } return r.json() as Promise<T>; }
 const humanText = (v: any) => Array.isArray(v) ? v.join("\n") : typeof v === "object" && v ? Object.values(v).filter(Boolean).join("\n") : String(v ?? "");
 const parse = (value: string, old: any) => Array.isArray(old) ? value.split("\n").map((x) => x.trim()).filter(Boolean) : value;
 const resultText = (task: TaskSummary | null) => String(task?.generation_result?.content ?? task?.generation_result?.generated_text ?? "尚未生成。確認責任鏈後才能開始生成。");
@@ -169,7 +183,7 @@ export default function App() {
   const storageSuggest = async () => { if (!task) return; const r = await run("產生入庫建議", () => api<TaskSummary>(`/api/tasks/${task.task_id}/storage-suggestion`, { method: "POST", body: JSON.stringify({}) })); setStorageSuggestion(r?.storage_suggestion || r); };
   const storageRequest = () => { if (!task) return; if (!ownerSignature.trim()) { setMessage("請先輸入使用者簽名，才能建立入庫請求或二次確認寫入。"); return; } return run("產生入庫請求", () => api<TaskSummary>(`/api/tasks/${task.task_id}/storage-request`, { method: "POST", body: JSON.stringify({ selected_targets: selectedTargets, user_decision: selectedTargets.length ? "custom" : "do_not_store", signature: ownerSignature.trim() }) })); };
   const storageConfirm = async () => { if (!task) return; if (!ownerSignature.trim()) { setMessage("請先輸入使用者簽名，才能建立入庫請求或二次確認寫入。"); return; } let current = task; if (!current.storage_plan) { const requested = await run("建立入庫計畫", () => api<TaskSummary>(`/api/tasks/${current.task_id}/storage-request`, { method: "POST", body: JSON.stringify({ selected_targets: selectedTargets, user_decision: selectedTargets.length ? "custom" : "do_not_store", signature: ownerSignature.trim() }) })); if (!requested?.task_id) { setMessage("入庫計畫建立失敗，尚未寫入資料中心。"); return; } current = requested; } const committed = await run("使用者二次確認寫入", () => api<TaskSummary>(`/api/tasks/${current.task_id}/storage-confirm`, { method: "POST", body: JSON.stringify({ storage_confirmed: true, second_confirm: true, confirmed_by: "user", signature: ownerSignature.trim(), selected_targets: selectedTargets }) })); if (committed?.task_id) { setTask(committed); setMessage("入庫完成。已寫入資料中心，可在資料中心查看寫入項目與回放紀錄。"); } };
-  const testBackend = () => run("測試後端 API", async () => { const candidate = normalizeBackendUrl(selectedBackendUrl || backendUrl); const r = await fetch(`${candidate}/health`); if (!r.ok) throw new Error(await r.text()); const result = await r.json(); setActiveBackendUrl(candidate); localStorage.setItem(ACTIVE_BACKEND_STORAGE_KEY, candidate); setHealth("online"); return result; });
+  const testBackend = () => run("測試後端 API", async () => { const candidate = normalizeBackendUrl(selectedBackendUrl || backendUrl); const token = companionToken(); const r = await fetch(`${candidate}/health`, { headers: token ? { "X-SCBKR-Companion-Token": token } : {} }); if (!r.ok) throw new Error(await r.text()); const result = await r.json(); setActiveBackendUrl(candidate); localStorage.setItem(ACTIVE_BACKEND_STORAGE_KEY, candidate); setHealth("online"); return result; });
   const saveModelSettings = (extra: Record<string, any> = {}) => run("儲存模型設定", () => api("/api/settings/model", { method: "POST", body: JSON.stringify(modelForm.provider === "sandbox_mock_model" ? { ...modelForm, ...extra, mode: "sandbox", model_name: "sandbox_mock_model", base_url: "", api_key: "" } : { ...modelForm, ...extra }) }));
   const testModel = () => run("測試模型連線", () => api("/api/model/test", { method: "POST", body: JSON.stringify(modelForm) }));
   const clearApiKey = () => saveModelSettings({ api_key: "", clear_api_key: true });

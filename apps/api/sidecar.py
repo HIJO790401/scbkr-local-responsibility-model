@@ -22,11 +22,14 @@ def configure_sidecar_environment() -> dict[str, str]:
     os.environ.setdefault("SCBKR_DATA_DIR", str(_default_windows_app_data()))
     os.environ.setdefault("SCBKR_API_HOST", "127.0.0.1")
     os.environ.setdefault("SCBKR_API_PORT", "8787")
+    os.environ.setdefault("SCBKR_LAN_COMPANION_ENABLED", "0")
     return {
         "SCBKR_DESKTOP_RUNTIME": os.environ["SCBKR_DESKTOP_RUNTIME"],
         "SCBKR_DATA_DIR": os.environ["SCBKR_DATA_DIR"],
         "SCBKR_API_HOST": os.environ["SCBKR_API_HOST"],
         "SCBKR_API_PORT": os.environ["SCBKR_API_PORT"],
+        "SCBKR_LAN_COMPANION_ENABLED": os.environ["SCBKR_LAN_COMPANION_ENABLED"],
+        "SCBKR_COMPANION_TOKEN": os.environ.get("SCBKR_COMPANION_TOKEN", ""),
     }
 
 
@@ -41,8 +44,15 @@ def main() -> int:
     env = configure_sidecar_environment()
     host = env["SCBKR_API_HOST"]
     port = int(env["SCBKR_API_PORT"])
-    if host != "127.0.0.1":
-        raise RuntimeError("SCBKR API sidecar must bind only to 127.0.0.1")
+    lan_enabled = env.get("SCBKR_LAN_COMPANION_ENABLED") == "1"
+    token = env.get("SCBKR_COMPANION_TOKEN", "")
+    if lan_enabled:
+        if host != "0.0.0.0":
+            raise RuntimeError("SCBKR LAN Companion Mode must bind to 0.0.0.0")
+        if not token.strip():
+            raise RuntimeError("SCBKR LAN Companion Mode requires SCBKR_COMPANION_TOKEN")
+    elif host != "127.0.0.1":
+        raise RuntimeError("SCBKR API sidecar must bind only to 127.0.0.1 unless LAN Companion Mode is enabled")
     assert_port_available(host, port)
 
     import uvicorn
