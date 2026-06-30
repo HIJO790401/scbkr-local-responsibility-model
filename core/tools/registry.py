@@ -62,6 +62,24 @@ class ToolGateEngine:
         rows = [json.loads(line) for line in self.trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         return rows[-max(1, min(limit, 1000)):][::-1]
 
+    def record_execution(self, authorization: dict[str, Any], status: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        if status not in {"execution_succeeded", "execution_failed"}:
+            raise ValueError("invalid execution status")
+        trace = {
+            "trace_id": f"tooltrace:{uuid4().hex}",
+            "parent_trace_id": authorization.get("trace_id"),
+            "timestamp": _now(),
+            "tool_id": authorization.get("tool_id"),
+            "action": authorization.get("action"),
+            "task_id": authorization.get("task_id"),
+            "allowed": authorization.get("allowed") is True,
+            "execution_status": status,
+            "metadata": metadata or {},
+        }
+        trace["trace_hash"] = hashlib.sha256(json.dumps(trace, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        self._append_trace(trace)
+        return trace
+
     def evaluate(self, request: dict[str, Any]) -> dict[str, Any]:
         tool = _tool(str(request.get("tool_id") or ""))
         action = str(request.get("action") or "observe")

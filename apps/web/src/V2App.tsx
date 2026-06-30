@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   Activity, Archive, Bot, Box, Braces, Check, ChevronRight, CircleGauge,
-  Database, FileKey, Globe2, HardDrive, Info, Languages, Menu, MessageSquare,
+  Cloud, CreditCard, Database, FileKey, Globe2, HardDrive, Info, KeyRound, Languages, Menu, MessageSquare,
   Network, Play, RefreshCw, Save, Search, Send, Settings, ShieldCheck,
-  SlidersHorizontal, Sparkles, SquareTerminal, Wrench, X,
+  SlidersHorizontal, Sparkles, SquareTerminal, Rocket, Wrench, X,
 } from "lucide-react";
-import ResponsibilityCore from "./components/ResponsibilityCore";
 import { getMessages, normalizeLocale, type Locale } from "./i18n";
 import { isLoopbackHostname, resolveApiBaseUrl } from "./apiBase";
 import type { ModelSettings, ScbkrDimensionKey, TaskSummary } from "./types";
@@ -15,9 +14,10 @@ const BACKEND_KEY = "scbkr.activeBackendUrl";
 const LOCALE_KEY = "scbkr.locale";
 const dims: ScbkrDimensionKey[] = ["S", "C", "B", "K", "R"];
 const dimColor: Record<ScbkrDimensionKey, string> = { S: "blue", C: "cyan", B: "yellow", K: "red", R: "green" };
+const ResponsibilityCore = lazy(() => import("./components/ResponsibilityCore"));
 
-type View = "command" | "rules" | "workbench" | "tools" | "data" | "model" | "about";
-type CommandMode = "chat" | "search" | "rule";
+type View = "command" | "rules" | "workbench" | "tools" | "data" | "runtime" | "model" | "launch" | "about" | "more";
+type CommandMode = "chat" | "web" | "search" | "rule";
 type Rule = Record<string, any>;
 type Tool = Record<string, any>;
 
@@ -64,6 +64,11 @@ export default function V2App() {
   const [traces, setTraces] = useState<Record<string, any>[]>([]);
   const [overview, setOverview] = useState<Record<string, any>>({});
   const [tokenMetrics, setTokenMetrics] = useState<Record<string, any>>({});
+  const [ruleState, setRuleState] = useState<Record<string, any>>({ state: "independent", effective_label: "獨立使用者規則" });
+  const [runtimeCatalog, setRuntimeCatalog] = useState<Record<string, any>[]>([]);
+  const [launchSettings, setLaunchSettings] = useState<Record<string, any>>({});
+  const [readiness, setReadiness] = useState<Record<string, any>>({ checks: [] });
+  const [permissions, setPermissions] = useState<Record<string, any>>({});
   const [notice, setNotice] = useState("");
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([
     { role: "assistant", content: en ? "SCBKR local runtime ready." : "SCBKR 本機責任核心已就緒。" },
@@ -73,6 +78,9 @@ export default function V2App() {
   const [naturalRuleText, setNaturalRuleText] = useState("");
   const [dataQuery, setDataQuery] = useState("");
   const [readResult, setReadResult] = useState<Record<string, any> | null>(null);
+  const [webResult, setWebResult] = useState<Record<string, any> | null>(null);
+  const [runtimeMode, setRuntimeMode] = useState("black_shield_strict");
+  const [runtimeSignature, setRuntimeSignature] = useState("");
   const [taskInput, setTaskInput] = useState("");
   const [task, setTask] = useState<TaskSummary | null>(null);
   const [ownerSignature, setOwnerSignature] = useState("");
@@ -118,12 +126,13 @@ export default function V2App() {
   async function refreshAll() {
     if (pairingRequired) return;
     const result = await run(en ? "Refresh runtime" : "更新系統", async () => {
-      const [healthData, modelData, manifestData, companionData, ruleData, packData, toolData, traceData, overviewData, tokenData] = await Promise.all([
+      const [healthData, modelData, manifestData, companionData, ruleData, packData, toolData, traceData, overviewData, tokenData, ruleStateData, runtimeData, launchData, readinessData, permissionData] = await Promise.all([
         api<any>("/health"), api<ModelSettings>("/api/settings/model"), api<any>(`/api/product/manifest?locale=${locale}`),
         api<any>("/api/companion/status"),
         api<any>("/api/rules"), api<any>("/api/rulepacks"), api<any>("/api/tools"), api<any>("/api/tools/traces?limit=20"), api<any>("/api/data-center/overview"), api<any>("/api/metrics/token-efficiency"),
+        api<any>("/api/rule-state/status"), api<any>("/api/rule-state/catalog"), api<any>("/api/launch/settings"), api<any>("/api/launch/readiness"), api<any>("/api/settings/permissions"),
       ]);
-      return { healthData, modelData, manifestData, companionData, ruleData, packData, toolData, traceData, overviewData, tokenData };
+      return { healthData, modelData, manifestData, companionData, ruleData, packData, toolData, traceData, overviewData, tokenData, ruleStateData, runtimeData, launchData, readinessData, permissionData };
     });
     if (!result) { setHealth("offline"); return; }
     setHealth("online");
@@ -136,6 +145,11 @@ export default function V2App() {
     setTraces(result.traceData.traces || []);
     setOverview(result.overviewData || {});
     setTokenMetrics(result.tokenData || {});
+    setRuleState(result.ruleStateData || {});
+    setRuntimeCatalog(result.runtimeData.runtimes || []);
+    setLaunchSettings(result.launchData || {});
+    setReadiness(result.readinessData || { checks: [] });
+    setPermissions(result.permissionData || {});
     setModelForm((current) => ({ ...current, ...result.modelData, api_key: "" }));
   }
 
@@ -153,6 +167,17 @@ export default function V2App() {
     if (!text) return;
     setMessages((current) => [...current, { role: "user", content: text }]);
     setChatInput("");
+    if (commandMode === "web") {
+      const result = await run(en ? "Search web" : "搜尋網路", () => api<any>("/api/tools/web-search", { method: "POST", body: JSON.stringify({ query: text, limit: 6, user_confirmation: true }) }));
+      if (result) {
+        setWebResult(result);
+        const summary = result.results.length ? result.results.map((item: any, index: number) => `${index + 1}. ${item.title}\n${item.url}\n${item.snippet}`).join("\n\n") : (en ? "No web results." : "沒有搜尋結果。");
+        setMessages((current) => [...current, { role: "assistant", content: summary }]);
+      } else {
+        setMessages((current) => [...current, { role: "assistant", content: en ? "Web search is not configured or was blocked. Open Launch Center to configure a provider and enable web_search permission." : "網路搜尋尚未設定或被 Gate 阻擋。請到上線中心設定搜尋服務並開啟 web_search 權限。" }]);
+      }
+      return;
+    }
     if (commandMode === "search") {
       const result = await readFourStores(text);
       if (result) setMessages((current) => [...current, { role: "assistant", content: result.answer }]);
@@ -260,6 +285,27 @@ export default function V2App() {
     return result;
   }
 
+  async function saveLaunchSettings() {
+    const saved = await run(en ? "Save launch settings" : "儲存上線設定", () => api<any>("/api/launch/settings", { method: "POST", body: JSON.stringify(launchSettings) }));
+    if (saved) { setLaunchSettings(saved); await refreshAll(); }
+  }
+
+  async function setWebPermission(enabled: boolean) {
+    const saved = await run(en ? "Update web permission" : "更新網路權限", () => api<any>("/api/settings/permissions", { method: "POST", body: JSON.stringify({ web_search: enabled }) }));
+    if (saved) setPermissions(saved);
+  }
+
+  async function activateRuntimePreview() {
+    if (!runtimeSignature.trim()) return;
+    const selected = await run(en ? "Activate runtime preview" : "啟用規則狀態預覽", () => api<any>("/api/rule-state/select", { method: "POST", body: JSON.stringify({ runtime_id: "shenyao-rule-state", version: "1.2.0", mode: runtimeMode, update_channel: "stable", developer_preview: true, preview_token: runtimeSignature }) }));
+    if (selected) { setRuleState(selected); setRuntimeSignature(""); }
+  }
+
+  async function useIndependentState() {
+    const state = await run(en ? "Use independent state" : "切換獨立規則狀態", () => api<any>("/api/rule-state/deactivate", { method: "POST", body: JSON.stringify({ reason: "user_selected_independent" }) }));
+    if (state) setRuleState(state);
+  }
+
   async function signRule() {
     if (!selectedRule || !ruleSignature.trim()) return;
     const signed = await run(en ? "Sign rule" : "簽名規則", () => api<any>(`/api/rules/${encodeURIComponent(selectedRule)}/sign`, { method: "POST", body: JSON.stringify({ owner_signature: ruleSignature }) }));
@@ -330,9 +376,12 @@ export default function V2App() {
     { id: "workbench" as View, label: copy.navigation.workbench, icon: SlidersHorizontal },
     { id: "tools" as View, label: en ? "Tools" : "工具", icon: Wrench },
     { id: "data" as View, label: copy.navigation.dataCenter, icon: Database },
+    { id: "runtime" as View, label: en ? "Rule State" : "規則狀態", icon: ShieldCheck },
     { id: "model" as View, label: copy.navigation.modelSettings, icon: Settings },
+    { id: "launch" as View, label: en ? "Launch" : "上線中心", icon: Rocket },
     { id: "about" as View, label: copy.navigation.about, icon: Info },
   ];
+  const mobileNav = [nav[0], nav[1], nav[2], nav[4], { id: "more" as View, label: en ? "More" : "更多", icon: Menu }];
 
   const stores = [
     { id: "vector", label: copy.stores.vector, count: overview.vector_count || 0, icon: Network },
@@ -364,11 +413,13 @@ export default function V2App() {
 
   const chatPanel = (
     <section className="command-zone chat-main" aria-label="一般聊天主視窗">
-      <ResponsibilityCore status={status} locale={locale} activeRules={activeRules} citations={citations} tokensAvoided={Number(tokenMetrics.estimated_tokens_avoided || task?.scbkr?.token_metrics?.estimated_tokens_avoided || 0)} />
+      <Suspense fallback={<div className="responsibility-core responsibility-core-loading" aria-label={en ? "Loading responsibility core" : "正在載入責任核心"} />}>
+        <ResponsibilityCore status={status} locale={locale} activeRules={activeRules} citations={citations} tokensAvoided={Number(tokenMetrics.estimated_tokens_avoided || task?.scbkr?.token_metrics?.estimated_tokens_avoided || 0)} />
+      </Suspense>
       <header className="command-header"><div><span>NATURAL LANGUAGE CONTROL PLANE</span><h1>{en ? "Natural Language Console" : "自然語言控制台"}</h1></div><div className="stage-chip"><Activity size={15} />{status}</div></header>
-      <div className="command-modes" role="tablist" aria-label={en ? "Natural language mode" : "自然語言模式"}><button className={commandMode === "chat" ? "active" : ""} onClick={() => setCommandMode("chat")}><MessageSquare size={15} />{en ? "Chat" : "一般對話"}</button><button className={commandMode === "search" ? "active" : ""} onClick={() => setCommandMode("search")}><Search size={15} />{en ? "Search stores" : "搜尋閱讀四庫"}</button><button className={commandMode === "rule" ? "active" : ""} onClick={() => setCommandMode("rule")}><FileKey size={15} />{en ? "Create rule" : "建立規則"}</button></div>
+      <div className="command-modes" role="tablist" aria-label={en ? "Natural language mode" : "自然語言模式"}><button className={commandMode === "chat" ? "active" : ""} onClick={() => setCommandMode("chat")}><MessageSquare size={15} />{en ? "Chat" : "一般對話"}</button><button className={commandMode === "web" ? "active" : ""} onClick={() => setCommandMode("web")}><Globe2 size={15} />{en ? "Web" : "網路搜尋"}</button><button className={commandMode === "search" ? "active" : ""} onClick={() => setCommandMode("search")}><Search size={15} />{en ? "Stores" : "搜尋四庫"}</button><button className={commandMode === "rule" ? "active" : ""} onClick={() => setCommandMode("rule")}><FileKey size={15} />{en ? "Rule" : "建立規則"}</button></div>
       <div className="message-list">{messages.map((item, index) => <div key={`${item.role}-${index}`} className={`message ${item.role}`}><span>{item.role === "assistant" ? "SCBKR" : en ? "YOU" : "你"}</span>{item.content}</div>)}</div>
-      <div className="chat-input"><label className="natural-input-label"><span>{commandMode === "chat" ? (en ? "Talk to the local model" : "直接用人話跟本機模型說") : commandMode === "search" ? (en ? "Ask the signed four stores" : "搜尋並閱讀已簽名四庫") : (en ? "Describe the rule you want" : "說出你要建立的規則")}</span><textarea aria-label={en ? "Natural language input" : "自然語言輸入"} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={commandMode === "chat" ? (en ? "Describe a task or ask SCBKR..." : "直接輸入你想做的事或想問的問題…") : commandMode === "search" ? (en ? "What do the signed stores say about..." : "例如：四庫裡有哪些關於發布規則的資料？") : (en ? "Before publishing, require my signature..." : "例如：凡是要發布內容，都必須先讓我簽名。")} /></label><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Run" : "執行"}>{commandMode === "search" ? <Search size={20} /> : commandMode === "rule" ? <FileKey size={20} /> : <Send size={20} />}</button></div>
+      <div className="chat-input"><label className="natural-input-label"><span>{commandMode === "chat" ? (en ? "Talk to the local model" : "直接用人話跟本機模型說") : commandMode === "web" ? (en ? "Search the live web through SCBKR gates" : "經過 SCBKR Gate 搜尋即時網路") : commandMode === "search" ? (en ? "Ask the signed four stores" : "搜尋並閱讀已簽名四庫") : (en ? "Describe the rule you want" : "說出你要建立的規則")}</span><textarea aria-label={en ? "Natural language input" : "自然語言輸入"} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={commandMode === "chat" ? (en ? "Describe a task or ask SCBKR..." : "直接輸入你想做的事或想問的問題…") : commandMode === "web" ? (en ? "Search current information on the web..." : "搜尋現在網路上的資料…") : commandMode === "search" ? (en ? "What do the signed stores say about..." : "例如：四庫裡有哪些關於發布規則的資料？") : (en ? "Before publishing, require my signature..." : "例如：凡是要發布內容，都必須先讓我簽名。")} /></label><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Run" : "執行"}>{commandMode === "web" ? <Globe2 size={20} /> : commandMode === "search" ? <Search size={20} /> : commandMode === "rule" ? <FileKey size={20} /> : <Send size={20} />}</button></div>
     </section>
   );
 
@@ -406,16 +457,25 @@ export default function V2App() {
 
   const dataPage = <section className="full-panel data-center-panel"><div className="page-head"><div><span>LOCAL EVIDENCE PLANE</span><h1>{en ? "Search & Read Data Center" : "四庫搜尋與閱讀區"}</h1></div><button onClick={() => void refreshAll()}><RefreshCw size={15} />{en ? "Refresh" : "讀回資料中心"}</button></div><div className="data-reader"><div><span>AUTHORITATIVE STORE READER</span><h2>{en ? "Ask your signed knowledge" : "用人話查詢已簽名資料"}</h2><small>{en ? "Vector matches are candidates only. The model reads signed and reviewed citations." : "向量只負責找候選；模型只整理已簽名、已驗收的正式引用。"}</small></div><div className="reader-input"><input aria-label={en ? "Search four stores" : "搜尋四庫"} value={dataQuery} onChange={(e) => setDataQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void readFourStores(); }} placeholder={en ? "Ask a question about your stored rules..." : "例如：我的發布規則要求什麼？"} /><button disabled={!dataQuery.trim()} onClick={() => void readFourStores()}><Search size={16} />{en ? "Search and read" : "搜尋並閱讀"}</button></div>{readResult && <div className={`reader-result ${readResult.citation_count ? "has-evidence" : "empty"}`}><header><b>{readResult.citation_count || 0} {en ? "authoritative citations" : "筆正式引用"}</b><span>{readResult.candidates_excluded || 0} {en ? "candidates excluded" : "筆候選已排除"}</span><em>{readResult.model_called ? (en ? "MODEL READING DRAFT" : "模型閱讀草稿") : (en ? "NO MODEL CLAIM" : "未讓模型無依據作答")}</em></header><p>{readResult.answer}</p>{(readResult.citations || []).map((citation: any, index: number) => <div className="citation-row" key={`${citation.content_hash}-${index}`}><b>{citation.source_store}</b><span>{citation.rule}</span><code>{String(citation.content_hash || "").slice(0, 12)}</code></div>)}</div>}</div><div className="store-band">{stores.map((store) => { const Icon = store.icon; return <section key={store.id}><Icon /><span>{store.label}</span><strong>{store.count}</strong></section>; })}</div><div className="trace-table"><h2>{en ? "Execution traces" : "執行回放"}</h2>{traces.map((trace) => <div key={trace.trace_id}><span className={`state-dot ${trace.allowed ? "active" : "revoked"}`} /><b>{trace.tool_id}</b><span>{trace.action}</span><span>{trace.reason}</span><time>{trace.timestamp}</time></div>)}</div></section>;
 
+  const runtime = runtimeCatalog[0];
+  const runtimeRelease = runtime?.versions?.[0];
+  const runtimePage = <section className="full-panel runtime-page"><div className="page-head"><div><span>RULE STATE RUNTIME</span><h1>{en ? "Rule State" : "規則狀態"}</h1></div><ShieldCheck size={25} /></div><div className={`rule-state-hero ${ruleState.state === "shenyao_active" ? "active" : "independent"}`}><div><span>{en ? "CURRENT GOVERNANCE" : "目前治理狀態"}</span><h2>{ruleState.effective_label}</h2><p>{ruleState.state === "shenyao_active" ? `${ruleState.runtime_id} · v${ruleState.runtime_version} · ${ruleState.mode}` : (en ? "Custom rules run without ShenYao completeness validation." : "使用者可自行建立規則，但不提供沈耀邏輯完整性保證。")}</p></div><b>{ruleState.state === "shenyao_active" ? "SHENYAO ACTIVE" : "INDEPENDENT"}</b></div><div className="runtime-layout"><section className="runtime-product"><div className="runtime-brand"><ShieldCheck size={32} /><div><span>PROTECTED RULE RUNTIME</span><h2>{runtime?.name?.[locale] || "沈耀規則狀態"}</h2></div></div><p>{runtime?.description?.[locale]}</p><dl><div><dt>{en ? "Author" : "作者"}</dt><dd>{runtime?.author}</dd></div><div><dt>{en ? "Version" : "版本"}</dt><dd>{runtimeRelease?.version || "1.2.0"} · stable</dd></div><div><dt>{en ? "Source" : "核心交付"}</dt><dd>{en ? "Protected runtime; source not distributed" : "受保護 Runtime；不散布私有原始規則"}</dd></div></dl><label>{en ? "Mode" : "運行模式"}<select value={runtimeMode} onChange={(e) => setRuntimeMode(e.target.value)}>{(runtimeRelease?.modes || ["black_shield_strict", "responsibility_audit", "draft_compiler"]).map((mode: string) => <option value={mode} key={mode}>{mode}</option>)}</select></label><label>{en ? "Owner preview token" : "作者預覽權杖"}<input type="password" value={runtimeSignature} onChange={(e) => setRuntimeSignature(e.target.value)} placeholder="SCBKR_OWNER_PREVIEW_TOKEN" /></label><div className="button-row"><button disabled={!runtimeSignature.trim()} onClick={() => void activateRuntimePreview()}><Play size={15} />{en ? "Activate preview" : "啟用預覽狀態"}</button><button disabled={ruleState.state !== "shenyao_active"} onClick={() => void useIndependentState()}><X size={15} />{en ? "Use independent state" : "切回獨立狀態"}</button></div></section><section className="subscription-console"><span>SUBSCRIPTION INTERFACE</span><h2>{en ? "Monthly or annual access" : "月費／年費使用權"}</h2><p>{en ? "Subscription grants runtime execution entitlement, not the private rule source." : "訂閱取得規則 Runtime 執行資格，不取得私有規則原始碼。"}</p><div className="plan-row"><div><b>{en ? "Monthly" : "月費"}</b><small>{launchSettings.stripe_monthly_price_id || (en ? "Waiting for Stripe Price ID" : "等待 Stripe Price ID")}</small></div><button disabled><CreditCard size={15} />{en ? "Not connected" : "尚未接通"}</button></div><div className="plan-row"><div><b>{en ? "Annual" : "年費"}</b><small>{launchSettings.stripe_annual_price_id || (en ? "Waiting for Stripe Price ID" : "等待 Stripe Price ID")}</small></div><button disabled><CreditCard size={15} />{en ? "Not connected" : "尚未接通"}</button></div><div className="runtime-changelog"><b>{en ? "Version contract" : "版本契約"}</b>{(runtimeRelease?.changelog || []).map((item: string) => <span key={item}><Check size={14} />{item}</span>)}</div></section></div></section>;
+
+  const launchPage = <section className="full-panel launch-page"><div className="page-head"><div><span>PRODUCTION CONTROL PLANE</span><h1>{en ? "Launch Center" : "上線中心"}</h1></div><Rocket size={25} /></div><div className="readiness-head"><div><span>{en ? "STORE READINESS" : "上架準備度"}</span><strong>{readiness.ready_count || 0}/{readiness.total_count || 8}</strong></div><div className="readiness-track"><i style={{ width: `${((readiness.ready_count || 0) / (readiness.total_count || 8)) * 100}%` }} /></div><small>{en ? "Fill in the services you create. Secret server keys never belong in the desktop client." : "你申請好服務後填在這裡；伺服器私鑰永遠不能放進桌面客戶端。"}</small></div><div className="launch-grid"><section><div className="integration-title"><Cloud /><div><b>Account & Domain</b><span>Supabase / Public URL</span></div></div><label>{en ? "Public domain" : "正式網域"}<input value={launchSettings.public_domain || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, public_domain: e.target.value })} placeholder="https://scbkr.example" /></label><label>Supabase URL<input value={launchSettings.supabase_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, supabase_url: e.target.value })} placeholder="https://project.supabase.co" /></label><label>Supabase publishable key<input type="password" value={launchSettings.supabase_publishable_key || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, supabase_publishable_key: e.target.value })} /></label></section><section><div className="integration-title"><CreditCard /><div><b>Stripe Billing</b><span>Entitlements / Customer Portal</span></div></div><label>Stripe publishable key<input value={launchSettings.stripe_publishable_key || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, stripe_publishable_key: e.target.value })} /></label><label>{en ? "Monthly Price ID" : "月費 Price ID"}<input value={launchSettings.stripe_monthly_price_id || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, stripe_monthly_price_id: e.target.value })} /></label><label>{en ? "Annual Price ID" : "年費 Price ID"}<input value={launchSettings.stripe_annual_price_id || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, stripe_annual_price_id: e.target.value })} /></label></section><section><div className="integration-title"><Globe2 /><div><b>Web Search</b><span>SearXNG / Brave Search</span></div></div><label>{en ? "Provider" : "搜尋服務"}<select value={launchSettings.search_provider || "searxng"} onChange={(e) => setLaunchSettings({ ...launchSettings, search_provider: e.target.value })}><option value="searxng">SearXNG</option><option value="brave">Brave Search API</option></select></label>{launchSettings.search_provider === "brave" ? <label>{en ? "Brave runtime credential" : "Brave 後端憑證"}<input disabled value={launchSettings.brave_api_key_configured ? (en ? "Configured" : "已設定") : (en ? "Not configured" : "未設定")} /></label> : <label>SearXNG URL<input value={launchSettings.searxng_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, searxng_url: e.target.value })} placeholder="https://search.example" /></label>}<label className="toggle-line"><input type="checkbox" checked={permissions.web_search === true} onChange={(e) => void setWebPermission(e.target.checked)} />{en ? "Allow confirmed web searches" : "允許經使用者確認的網路搜尋"}</label></section><section><div className="integration-title"><KeyRound /><div><b>Windows Distribution</b><span>Partner Center / Signing / Updater</span></div></div><label>Microsoft Partner Product ID<input value={launchSettings.microsoft_partner_product_id || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, microsoft_partner_product_id: e.target.value })} /></label><label>{en ? "Code signing subject" : "程式簽章主體"}<input value={launchSettings.code_signing_subject || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, code_signing_subject: e.target.value })} /></label><label>{en ? "Update endpoint" : "更新端點"}<input value={launchSettings.tauri_update_endpoint || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, tauri_update_endpoint: e.target.value })} /></label></section><section><div className="integration-title"><ShieldCheck /><div><b>Legal & Support</b><span>Privacy / Terms / Contact</span></div></div><label>{en ? "Privacy policy URL" : "隱私政策網址"}<input value={launchSettings.privacy_policy_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, privacy_policy_url: e.target.value })} /></label><label>{en ? "Terms URL" : "服務條款網址"}<input value={launchSettings.terms_of_service_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, terms_of_service_url: e.target.value })} /></label><label>{en ? "Support email" : "客服信箱"}<input value={launchSettings.support_email || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, support_email: e.target.value })} /></label></section><section className="checklist-panel"><span>LAUNCH CHECKLIST</span>{(readiness.checks || []).map((check: any) => <div key={check.id} className={check.ready ? "ready" : "pending"}><i>{check.ready ? <Check size={13} /> : <X size={13} />}</i><b>{check.label}</b><em>{check.owner_action ? (en ? "OWNER" : "需你申請") : (en ? "ENGINEERING" : "工程")}</em></div>)}</section></div><div className="launch-actions"><button onClick={() => void saveLaunchSettings()}><Save size={16} />{en ? "Save launch configuration" : "儲存上線設定"}</button><span>{readiness.ready_for_store_submission ? (en ? "Ready for store submission" : "已具備送審條件") : (en ? "Missing external accounts or release materials" : "仍缺外部帳號或發布資料")}</span></div></section>;
+
   const modelPage = <section className="full-panel model-settings"><div className="page-head"><div><span>RUNTIME CONNECTION</span><h1>模型設定</h1></div><Bot /></div><div className="settings-grid"><section><h2>{en ? "Desktop / phone connection" : "桌機 / 手機連線"}</h2><div className={`companion-state ${companion?.lan_companion_enabled ? "on" : "off"}`}><span>LAN COMPANION</span><b>{companion?.lan_companion_enabled ? "ON" : "OFF"}</b><small>{companion?.base_url || backend} · {companion?.active_devices || 0} devices</small></div><label>Backend API URL<input value={backend} onChange={(e) => setBackend(e.target.value)} /></label><label>Companion token<input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} /></label><div className="button-row"><button onClick={saveConnection}><Network size={15} />{en ? "Connect" : "儲存並連線"}</button><button disabled={!companion?.lan_companion_enabled} onClick={() => void startPairing()}><FileKey size={15} />{en ? "Pair code" : "取得配對碼"}</button><button disabled={!companion?.active_devices} onClick={() => void revokeCompanions()}><X size={15} />{en ? "Revoke" : "撤銷裝置"}</button></div>{pairing && <div className="pairing-code"><span>{en ? "PAIRING CODE" : "手機配對碼"}</span><strong>{pairing.pairing_code}</strong><small>{pairing.base_url}</small><time>{pairing.expires_at}</time></div>}</section><section><h2>LLM Runtime</h2><label>Provider<select value={modelForm.provider} onChange={(e) => setModelForm({ ...modelForm, provider: e.target.value })}><option value="lm_studio">LM Studio</option><option value="ollama">Ollama</option><option value="openai_compatible">OpenAI-compatible</option><option value="sandbox_mock_model">Sandbox</option></select></label><label>Base URL<input value={modelForm.base_url} onChange={(e) => setModelForm({ ...modelForm, base_url: e.target.value })} /></label><label>Model name<input value={modelForm.model_name} onChange={(e) => setModelForm({ ...modelForm, model_name: e.target.value })} /></label><label>API Key<input type="password" value={modelForm.api_key} onChange={(e) => setModelForm({ ...modelForm, api_key: e.target.value })} /></label><div className="button-row"><button onClick={() => void saveModel()}><Save size={15} />{en ? "Save" : "儲存設定"}</button><button onClick={() => void testModel()}><Activity size={15} />{en ? "Test" : "測試模型連線"}</button></div></section></div></section>;
 
   const aboutPage = <section className="full-panel about-panel"><div className="about-mark">SCBKR<span>2.0</span></div><h1>{manifest?.name || copy.product.name}</h1><p className="about-tagline">{manifest?.tagline || copy.product.category}</p><dl><div><dt>{en ? "Author" : "作者"}</dt><dd>{manifest?.creator?.name || "許文耀 / 沈耀888π"}</dd></div><div><dt>{en ? "Organization" : "組織"}</dt><dd>{manifest?.creator?.organization || "語意防火牆"}</dd></div><div><dt>{en ? "Contact" : "合作聯絡"}</dt><dd>{manifest?.creator?.contact_email || "ken0963521@gmail.com"}</dd></div><div><dt>{en ? "Runtime" : "運行定位"}</dt><dd>{manifest?.runtime_relationship || "Local rule-driven AI control layer"}</dd></div></dl></section>;
+
+  const morePage = <section className="full-panel more-page"><div className="page-head"><div><span>OPERATIONS</span><h1>{en ? "More" : "更多功能"}</h1></div><Menu /></div><div className="more-grid">{nav.filter((item) => ["tools", "runtime", "model", "launch", "about"].includes(item.id)).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setView(id)}><Icon size={23} /><b>{label}</b><ChevronRight size={16} /></button>)}</div></section>;
 
   let mobileContent = chatPanel;
   if (view === "rules") mobileContent = rulePanel;
   if (view === "workbench") mobileContent = workbenchPanel;
   if (view === "tools") mobileContent = toolPanel;
+  const standalonePage = view === "data" ? dataPage : view === "runtime" ? runtimePage : view === "model" ? modelPage : view === "launch" ? launchPage : view === "about" ? aboutPage : view === "more" ? morePage : null;
 
   if (pairingRequired) return <main className="pair-gate"><div className="pair-stars" /><section><div className="pair-mark"><ShieldCheck size={30} /><span>SCBKR 2.0</span></div><p>SECURE MOBILE COMPANION</p><h1>{en ? "Pair this phone" : "配對這支手機"}</h1><small>{en ? "Enter the one-time code shown on your desktop. The code expires after 10 minutes." : "輸入桌機顯示的一次性配對碼，配對碼 10 分鐘後失效。"}</small><label>{en ? "Pairing code" : "6 位數配對碼"}<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={pairCode} onChange={(event) => setPairCode(event.target.value.replace(/\D/g, "").slice(0, 6))} onKeyDown={(event) => { if (event.key === "Enter") void redeemPairingCode(); }} placeholder="000000" /></label>{pairError && <div className="pair-error">{pairError}</div>}<button disabled={pairCode.length !== 6} onClick={() => void redeemPairingCode()}><FileKey size={17} />{en ? "Pair securely" : "安全配對"}</button><button className="pair-language" onClick={switchLocale}><Languages size={15} />{en ? "繁體中文" : "English"}</button><footer>{backend}</footer></section></main>;
 
-  return <main className="app-shell v2-shell"><aside className="side-nav"><div className="brand-lockup"><Box size={24} /><div><b>SCBKR</b><span>RESPONSIBILITY OS</span></div></div>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)} title={label}><Icon size={18} /><span>{label}</span></button>)}<button onClick={switchLocale} title="Language"><Languages size={18} /><span>{locale === "en" ? "繁中" : "EN"}</span></button></aside><nav className="mobile-drawer">{nav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon size={18} /><span>{label}</span></button>)}</nav><header className="top-status-bar"><button className="mobile-menu icon-button" onClick={() => setView("command")}><Menu size={18} /></button><span className={`system-signal ${health}`}><i />API {health}</span><span>MODEL {model?.enabled && model?.last_test_status === "success" ? "LINKED" : "STANDBY"}</span><span>RULES {activeRules}</span><span>TOKEN SAVE {tokenMetrics.estimated_tokens_avoided || 0}</span><span>CITATIONS {citations}</span><button className="locale-button" onClick={switchLocale}><Globe2 size={14} />{locale}</button><em>{notice}</em></header><div className="desktop-stage">{!isMobile && (view === "data" ? dataPage : view === "model" ? modelPage : view === "about" ? aboutPage : desktopCommand)}</div><div className="mobile-stage">{isMobile && (view === "data" ? dataPage : view === "model" ? modelPage : view === "about" ? aboutPage : mobileContent)}</div>{dataDock}</main>;
+  return <main className="app-shell v2-shell"><aside className="side-nav"><div className="brand-lockup"><Box size={24} /><div><b>SCBKR</b><span>RESPONSIBILITY OS</span></div></div>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)} title={label}><Icon size={18} /><span>{label}</span></button>)}<button onClick={switchLocale} title="Language"><Languages size={18} /><span>{locale === "en" ? "繁中" : "EN"}</span></button></aside><nav className="mobile-drawer">{mobileNav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon size={18} /><span>{label}</span></button>)}</nav><header className="top-status-bar"><button className="mobile-menu icon-button" onClick={() => setView("command")}><Menu size={18} /></button><span className={`system-signal ${health}`}><i />API {health}</span><span>STATE {ruleState.state === "shenyao_active" ? "SHENYAO" : "INDEPENDENT"}</span><span>MODEL {model?.enabled && model?.last_test_status === "success" ? "LINKED" : "STANDBY"}</span><span>RULES {activeRules}</span><span>TOKEN SAVE {tokenMetrics.estimated_tokens_avoided || 0}</span><span>CITATIONS {citations}</span><button className="locale-button" onClick={switchLocale}><Globe2 size={14} />{locale}</button><em>{notice}</em></header><div className="desktop-stage">{!isMobile && (standalonePage || desktopCommand)}</div><div className="mobile-stage">{isMobile && (standalonePage || mobileContent)}</div>{dataDock}</main>;
 }

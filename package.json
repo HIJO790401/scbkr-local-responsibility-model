@@ -1,7 +1,7 @@
 {
   "name": "scbkr-local-responsibility-model",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "SCBKR Local Responsibility Chain and Rule-Driven AI Control System",
   "scripts": {
     "setup": "sh scripts/setup.sh",

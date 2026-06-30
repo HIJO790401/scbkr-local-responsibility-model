@@ -83,7 +83,10 @@ from core.workflow.review_flow import apply_review_decision
 from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
 from core.retrieval.vector_store import get_vector_store_status
 from core.rules.registry import RuleRegistry
+from core.rule_state.runtime import RuleStateRuntime
 from core.tools.registry import ToolGateEngine, list_tool_definitions
+from core.tools.web_runtime import WebRuntime
+from core.launch.readiness import launch_readiness, load_launch_settings, public_launch_settings, save_launch_settings
 from core.storage.runtime_paths import current_data_dir
 from core.runtime_settings import load_runtime_section, save_runtime_section
 
@@ -902,10 +905,12 @@ def _try_model_storage_suggestion(task: dict[str, Any]) -> dict[str, Any] | None
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    rule_state = _rule_state_runtime().status() if "_rule_state_runtime" in globals() else {"state": "independent"}
     return {
         "ok": True,
         "runtime": os.environ.get("SCBKR_DESKTOP_RUNTIME", "api"),
         "lan_companion_enabled": lan_companion_enabled(),
+        "rule_state": rule_state.get("state"),
     }
 
 
@@ -935,6 +940,44 @@ def _rule_registry() -> RuleRegistry:
     return RuleRegistry(current_data_dir() / "rule_registry")
 
 
+def _rule_state_runtime() -> RuleStateRuntime:
+    return RuleStateRuntime()
+
+
+@app.get("/api/rule-state/catalog")
+def rule_state_catalog() -> dict[str, Any]:
+    catalog = _rule_state_runtime().catalog()
+    return {"runtimes": catalog, "count": len(catalog)}
+
+
+@app.get("/api/rule-state/status")
+def rule_state_status() -> dict[str, Any]:
+    return _rule_state_runtime().status()
+
+
+@app.post("/api/rule-state/select")
+def select_rule_state(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _rule_state_runtime().select(payload)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/rule-state/deactivate")
+def deactivate_rule_state(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    return _rule_state_runtime().deactivate(str((payload or {}).get("reason") or "user_selected_independent"))
+
+
+@app.post("/api/rule-state/validate-overlay")
+def validate_rule_overlay(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _rule_state_runtime().validate_overlay(str(payload.get("rule_text") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/rules")
 def list_rules() -> dict[str, Any]:
     rules = _rule_registry().list_rules()
@@ -961,6 +1004,7 @@ def create_rule_draft_from_text(payload: dict[str, Any]) -> dict[str, Any]:
     creator = load_product_manifest()["creator"]
     name = instruction.splitlines()[0].strip("。.!！?？ ")[:48]
     keywords = sorted(_keyword_tokens(instruction))[:12]
+    validation = _rule_state_runtime().validate_overlay(instruction)
     draft_payload = {
         "rule_name": name or "自然語言規則草案",
         "rule_text": instruction,
@@ -973,10 +1017,12 @@ def create_rule_draft_from_text(payload: dict[str, Any]) -> dict[str, Any]:
         "automation_level": "manual",
         "risk_level": "medium",
         "changelog": ["由自然語言建立，等待使用者檢查與簽名。"],
+        "rule_state_receipt": validation["rule_state"].get("receipt_hash"),
+        "validation_status": validation["status"],
     }
     try:
         rule = _rule_registry().create_draft(draft_payload)
-        return {"rule": rule, "compiled_from": "natural_language", "model_signed": False, "next_required_action": "owner_review_and_signature"}
+        return {"rule": rule, "validation": validation, "compiled_from": "natural_language", "model_signed": False, "next_required_action": "owner_review_and_signature"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1096,6 +1142,65 @@ def evaluate_tool_call(payload: dict[str, Any]) -> dict[str, Any]:
 def list_tool_traces(limit: int = 100) -> dict[str, Any]:
     traces = _tool_gate_engine().list_traces(limit)
     return {"traces": traces, "count": len(traces)}
+
+
+@app.post("/api/tools/web-search")
+def execute_web_search(payload: dict[str, Any]) -> dict[str, Any]:
+    engine = _tool_gate_engine()
+    gate = engine.evaluate({
+        "tool_id": "web_search",
+        "action": "search",
+        "workflow": "natural_language_web_search",
+        "text": str(payload.get("query") or ""),
+        "user_confirmation": payload.get("user_confirmation") is True,
+        "task_id": payload.get("task_id"),
+    })
+    if gate["allowed"] is not True:
+        raise HTTPException(status_code=403, detail={"message": "web search blocked by SCBKR gates", "gate": gate})
+    try:
+        result = WebRuntime(load_launch_settings()).search(str(payload.get("query") or ""), int(payload.get("limit") or 5))
+        execution = engine.record_execution(gate, "execution_succeeded", {"provider": result["provider"], "result_count": result["count"], "rule_state": _rule_state_runtime().status().get("state")})
+        return {**result, "authorization": gate, "execution_trace": execution}
+    except Exception as exc:
+        execution = engine.record_execution(gate, "execution_failed", {"error": str(exc)[:300]})
+        raise HTTPException(status_code=502, detail={"message": str(exc), "authorization": gate, "execution_trace": execution}) from exc
+
+
+@app.post("/api/tools/read-page")
+def execute_page_reader(payload: dict[str, Any]) -> dict[str, Any]:
+    engine = _tool_gate_engine()
+    gate = engine.evaluate({
+        "tool_id": "web_search",
+        "action": "observe",
+        "workflow": "page_reader",
+        "text": str(payload.get("url") or ""),
+        "user_confirmation": payload.get("user_confirmation") is True,
+        "task_id": payload.get("task_id"),
+    })
+    if gate["allowed"] is not True:
+        raise HTTPException(status_code=403, detail={"message": "page reader blocked by SCBKR gates", "gate": gate})
+    try:
+        result = WebRuntime(load_launch_settings()).read_page(str(payload.get("url") or ""), int(payload.get("max_chars") or 12000))
+        execution = engine.record_execution(gate, "execution_succeeded", {"url": result["url"], "characters": len(result["text"]), "rule_state": _rule_state_runtime().status().get("state")})
+        return {**result, "authorization": gate, "execution_trace": execution}
+    except Exception as exc:
+        execution = engine.record_execution(gate, "execution_failed", {"error": str(exc)[:300]})
+        raise HTTPException(status_code=502, detail={"message": str(exc), "authorization": gate, "execution_trace": execution}) from exc
+
+
+@app.get("/api/launch/settings")
+def get_launch_settings() -> dict[str, Any]:
+    return public_launch_settings()
+
+
+@app.post("/api/launch/settings")
+def update_launch_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    return public_launch_settings(save_launch_settings(payload))
+
+
+@app.get("/api/launch/readiness")
+def get_launch_readiness() -> dict[str, Any]:
+    return launch_readiness()
 
 
 @app.get("/api/metrics/token-efficiency")

@@ -5,7 +5,13 @@ async function openSection(page: Page, testInfo: TestInfo, label: string) {
   if (testInfo.project.name === "mobile-chromium") {
     const drawer = page.locator(".mobile-drawer");
     await expect(drawer).toBeVisible();
-    await drawer.locator("button").filter({ hasText: label }).click();
+    const primary = drawer.locator("button").filter({ hasText: label });
+    if (await primary.count()) {
+      await primary.click();
+    } else {
+      await drawer.locator("button").filter({ hasText: "更多" }).click();
+      await page.locator(".more-grid button").filter({ hasText: label }).click();
+    }
     return;
   }
 
@@ -46,7 +52,8 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   }
   await expect(page.getByLabel("一般聊天主視窗")).toBeVisible();
   await expect(page.getByRole("heading", { name: "自然語言控制台" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "搜尋閱讀四庫", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "網路搜尋", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "搜尋四庫", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "建立規則", exact: true })).toBeVisible();
   await expect(page.getByLabel("自然語言輸入", { exact: true })).toBeVisible();
   const canvas = page.locator('[data-testid="scbkr-canvas"]');
@@ -82,6 +89,12 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await openSection(page, testInfo, "模型設定");
   await expect(page.getByRole("heading", { name: "模型設定" })).toBeVisible();
   await attachScreen(page, testInfo, "03-model-settings");
+
+  await openSection(page, testInfo, "規則狀態");
+  await expect(page.getByRole("heading", { name: "規則狀態", exact: true })).toBeVisible();
+
+  await openSection(page, testInfo, "上線中心");
+  await expect(page.getByRole("heading", { name: "上線中心", exact: true })).toBeVisible();
 
   await openSection(page, testInfo, "資料中心");
   await expect(page.getByRole("heading", { name: "四庫搜尋與閱讀區", exact: true })).toBeVisible();

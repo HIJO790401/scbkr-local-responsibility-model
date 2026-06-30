@@ -144,7 +144,8 @@ def test_readme_final_rc_contract_and_images_exist():
     assert "one-time six-digit code" in readme
     assert "127.0.0.1:8000" not in readme and ":8000/health" not in readme
     assert "README_EN.md" not in readme
-    assert "2.0 已包含 Rule Registry" in readme
+    assert "2.0 基礎能力仍包含 Rule Registry" in readme
+    assert "2.1 加入受保護的沈耀規則狀態 Runtime" in readme
     assert "嚴格 JSON 編譯器" in readme
     for image in [
         "docs/images/scbkr-hero.png",
@@ -163,10 +164,10 @@ def test_readme_final_rc_contract_and_images_exist():
 
 
 def test_release_metadata_contracts():
-    assert '"version": "2.0.0"' in Path("package.json").read_text(encoding="utf-8")
-    assert '"version": "2.0.0"' in Path("apps/desktop/package.json").read_text(encoding="utf-8")
-    assert '"version": "2.0.0"' in Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
-    assert 'version = "2.0.0"' in Path("apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
+    assert '"version": "2.1.0"' in Path("package.json").read_text(encoding="utf-8")
+    assert '"version": "2.1.0"' in Path("apps/desktop/package.json").read_text(encoding="utf-8")
+    assert '"version": "2.1.0"' in Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+    assert 'version = "2.1.0"' in Path("apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
     build = Path("scripts/build_desktop_release_windows.ps1").read_text(encoding="utf-8")
     assert 'lan_companion_supported = $true' in build
     assert 'lan_companion_default_enabled = $false' in build

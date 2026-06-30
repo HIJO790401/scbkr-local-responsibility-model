@@ -39,7 +39,7 @@ def test_frontend_clears_owner_signature_after_draft_changes():
 
 
 def test_release_candidate_metadata_and_readme_contracts():
-    assert '"version": "2.0.0"' in Path("package.json").read_text(encoding="utf-8")
+    assert '"version": "2.1.0"' in Path("package.json").read_text(encoding="utf-8")
     desktop_package = Path("apps/desktop/package.json").read_text(encoding="utf-8")
     assert '"name": "scbkr-desktop"' in desktop_package
     assert '"check:release"' in desktop_package
@@ -50,7 +50,7 @@ def test_release_candidate_metadata_and_readme_contracts():
     assert "not a production installer" not in tauri_conf
     assert "SCBKR_DESKTOP_PREVIEW" not in Path("apps/desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
     readme = Path("README.md").read_text(encoding="utf-8")
-    assert "2.0.0" in readme
+    assert "2.1.0" in readme
     assert "準備進入 P15-H" not in readme
 
 

@@ -27,8 +27,8 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 
 ## 2. 目前版本｜Current Version
 
-- 中文：目前版本為 `2.0.0`，階段為 `2.0-local-release`。
-- English: Current version is `2.0.0`, stage `2.0-local-release`.
+- 中文：目前版本為 `2.1.0`，階段為 `2.1-launch-candidate`。
+- English: Current version is `2.1.0`, stage `2.1-launch-candidate`.
 - 中文：這是可在本機運行的 2.0 公開版；安裝檔程式碼簽章、自動更新與商店封裝仍未提供，也不內建模型或 API key。
 - English: This is the locally runnable 2.0 public release. Installer code signing, auto-update, and store packaging are not yet provided; no model or API key is bundled.
 
@@ -139,14 +139,16 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 - 中文：Chatbot 重點是對話；Agent 重點是自動行動；RAG 重點是檢索增強。SCBKR 重點是責任鏈、簽名、驗收、入庫與未來引用邊界。
 - English: Chatbots focus on conversation; agents focus on autonomous action; RAG focuses on retrieval augmentation. SCBKR focuses on responsibility chain, signature, review, storage, and future reuse boundaries.
 
-## 13. 2.0 規則與工具層｜2.0 Rules and Tools
+## 13. 2.1 規則狀態與上線層｜2.1 Rule State and Launch Layer
 
 ![2.0 Roadmap](docs/images/roadmap-2.0-en.png)
 
-- 中文：2.0 已包含 Rule Registry、RulePack 匯入與訂閱狀態、規則命中 Gate、工具註冊與五道權限 Gate、執行回放、嚴格 JSON 編譯器與 token 效率統計。
-- English: 2.0 includes the Rule Registry, RulePack import and subscription state, rule-match gates, tool registration and five permission gates, execution replay, a strict JSON compiler, and token-efficiency metrics.
-- 中文：工具層目前負責授權與回放，不會把「允許執行」謊稱為「已完成外部操作」。原生 Android/iOS、雲端帳號、Rule Marketplace 與安裝檔簽章仍不在本版。
-- English: The tool layer currently authorizes and records calls; it never reports an authorized external action as completed. Native Android/iOS apps, cloud accounts, a Rule Marketplace, and installer signing remain outside this release.
+- 中文：2.0 基礎能力仍包含 Rule Registry、使用者自有 RulePack 匯入、規則命中 Gate、五道工具權限 Gate、執行回放、嚴格 JSON 編譯器與 token 效率統計。
+- English: The 2.0 foundation still includes the Rule Registry, user-owned RulePack import, rule-match gates, five tool permission gates, execution replay, a strict JSON compiler, and token-efficiency metrics.
+- 中文：2.1 加入受保護的沈耀規則狀態 Runtime、版本／模式選擇、使用者規則覆寫驗算、真實網頁搜尋與閱讀、訂閱介面及上線準備中心。
+- English: 2.1 adds the protected ShenYao Rule State Runtime, version and mode selection, user-overlay validation, real web search and page reading, subscription surfaces, and a launch readiness center.
+- 中文：訂閱提供 Runtime 執行資格，不散布私有規則原始碼。使用者仍可匯入自己擁有的規則；未啟用沈耀狀態時會明確顯示為獨立規則狀態。
+- English: Subscriptions grant runtime execution entitlement without distributing private rule source. Users may still import rules they own; without ShenYao state, the product clearly reports an independent rule state.
 
 ## 14. 開發者快速啟動｜Developer Quick Start
 
@@ -174,10 +176,10 @@ npm --prefix apps/desktop run check:release
 - 中文：Windows 上可執行 release build / smoke / LAN Companion smoke PowerShell 腳本。
 - English: On Windows, run the release build / smoke / LAN Companion smoke PowerShell scripts.
 
-## 16. 2.0 發布狀態｜2.0 Release Readiness
+## 16. 2.1 發布狀態｜2.1 Release Readiness
 
-- 中文：`2.0.0` 為本機公開版；程式碼簽章、自動更新與商店封裝仍待後續發布工程。
-- English: `2.0.0` is the local public release; code signing, auto-update, and store packaging remain future release engineering work.
+- 中文：`2.1.0` 為上線候選版。產品內已提供上線中心與準備度檢查；正式送審仍需作者提供網域、Supabase、Stripe、搜尋服務、Partner Center、簽章及法律頁面資料。
+- English: `2.1.0` is a launch candidate. The app includes a launch center and readiness checks; store submission still requires owner-provided domain, Supabase, Stripe, search, Partner Center, signing, and legal configuration.
 - 中文：Desktop Mode 預設 local-only；LAN Companion Mode 需手動啟動並以一次性配對碼授權手機。
 - English: Desktop Mode is local-only by default; LAN Companion Mode requires manual launch and one-time code pairing.
 

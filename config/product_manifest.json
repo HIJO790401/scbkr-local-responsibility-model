@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0",
   "product_id": "scbkr",
-  "version": "2.0.0",
-  "target_version": "2.0.0",
-  "release_stage": "2.0-local-release",
+  "version": "2.1.0",
+  "target_version": "2.1.0",
+  "release_stage": "2.1-launch-candidate",
   "name": {
     "zh-TW": "SCBKR 本地責任鏈系統",
     "en": "SCBKR Local Responsibility Chain System"
@@ -65,6 +65,18 @@
       "phase": "2.0",
       "title": {"zh-TW": "規則驅動 AI Runtime", "en": "Rule-driven AI runtime"},
       "description": {"zh-TW": "以具名、版本化、簽名規則控制模型與工具權限。", "en": "Control models and tool permissions with attributed, versioned, signed rules."}
+    },
+    {
+      "id": "protected_rule_state_runtime",
+      "phase": "2.1",
+      "title": {"zh-TW": "受保護規則狀態", "en": "Protected Rule State Runtime"},
+      "description": {"zh-TW": "訂閱取得版本化 Runtime 執行資格；使用者可在該狀態建立自訂規則，但不取得私有規則原始碼。", "en": "A subscription grants access to a versioned runtime. Users may create custom rules under that state without receiving the private rule source."}
+    },
+    {
+      "id": "launch_control_plane",
+      "phase": "2.1",
+      "title": {"zh-TW": "上線控制中心", "en": "Launch control plane"},
+      "description": {"zh-TW": "集中管理登入、訂閱、搜尋、Windows 發布、更新與法律資料的上架準備度。", "en": "Track launch readiness for identity, billing, search, Windows distribution, updates, and legal materials."}
     }
   ],
   "hard_limits": [
@@ -75,12 +87,17 @@
   "collaboration": {
     "status": "open",
     "email": "ken0963521@gmail.com",
-    "topics": ["rule-pack licensing", "custom rule design", "local AI integration", "enterprise proof of concept"]
+    "topics": ["protected runtime licensing", "custom rule design", "local AI integration", "enterprise proof of concept"]
+  },
+  "distribution_policy": {
+    "private_rule_source_distributed": false,
+    "subscription_product": "ShenYao Rule State Runtime entitlement",
+    "user_owned_rule_import_supported": true
   },
   "rule_import": {
     "current_status": "signed-versioned-rulepack",
-    "target_status": "signed-versioned-rulepack",
-    "flow": ["import", "parse", "attribute", "scope", "preview", "owner_signature", "activate", "audit", "rollback"]
+    "target_status": "protected-rule-state-runtime",
+    "flow": ["entitlement", "select_version", "select_mode", "activate_runtime", "create_user_overlay", "validate", "owner_signature", "audit", "rollback"]
   },
   "stores": ["vector", "corpus", "logic", "memory"],
   "master_plan": "docs/SCBKR_MASTER_PLAN_FINAL.md"
