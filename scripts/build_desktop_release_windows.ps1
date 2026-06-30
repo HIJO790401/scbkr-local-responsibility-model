@@ -125,9 +125,9 @@ Expected Sandbox output:
 
 If the API is offline, confirm that the desktop release candidate package launched the scbkr-api.exe sidecar. Normal users should not need to run Python, Node, npm, uvicorn, PowerShell, LM Studio, Ollama, or provide an API key for Sandbox Mode.
 "@ | Set-Content -Encoding UTF8 (Join-Path $PreviewDir "README_PREVIEW.md")
-"0.15.0-rc.2" | Set-Content -Encoding UTF8 (Join-Path $PreviewDir "VERSION")
+"2.0.0" | Set-Content -Encoding UTF8 (Join-Path $PreviewDir "VERSION")
 @{
-  version = "0.15.0-rc.2"
+  version = "2.0.0"
   desktop_stage = "P15-S-1.0-final-rc"
   built_at_utc = (Get-Date).ToUniversalTime().ToString("o")
   api_base_url = "http://127.0.0.1:8787"

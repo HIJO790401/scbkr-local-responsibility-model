@@ -17,6 +17,7 @@ if (-not $Ip) { $Ip = "192.168.x.x" }
 Write-Host "SCBKR LAN Companion Mode"
 Write-Host "Use only on trusted Wi-Fi. Do not share this URL publicly."
 Write-Host "Phone is only an operation entry; owner signature, review, second confirmation, and Data Center gates still apply."
-Write-Host "URL: http://$Ip`:$Port/?companion_token=$Token"
+Write-Host "Phone URL: http://$Ip`:$Port/"
+Write-Host "On the desktop, open Model Settings and select Get Pairing Code. Enter that six-digit code on the phone."
 if ($SmokeOnly) { return }
 if (Test-Path ".\scbkr-api.exe") { & ".\scbkr-api.exe" } else { python -m apps.api.sidecar }

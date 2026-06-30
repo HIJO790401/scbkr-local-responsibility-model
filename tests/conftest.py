@@ -7,6 +7,10 @@ missing Starlette's httpx/httpx2 test dependency.
 
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("SCBKR_PERSIST_RUNTIME_SETTINGS", "0")
+
 try:
     from fastapi.testclient import TestClient as _RealTestClient  # noqa: F401
 except Exception:

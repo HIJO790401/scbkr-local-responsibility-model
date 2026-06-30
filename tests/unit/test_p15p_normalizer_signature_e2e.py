@@ -112,4 +112,4 @@ def test_signed_storage_e2e_then_followup_adopts(monkeypatch, tmp_path):
     hit = context["hits"][0]
     assert hit["adopted"] is True
     assert hit["signature_status"] == "owner_signed"
-    assert hit["hash"]
+    assert hit["content_hash"]

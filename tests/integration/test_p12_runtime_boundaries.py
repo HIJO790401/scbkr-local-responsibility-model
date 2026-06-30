@@ -25,12 +25,28 @@ def setup_function():
 
 
 def _failed_task():
+    MODEL_SETTINGS.update(
+        {
+            "mode": "sandbox",
+            "provider": "sandbox_mock_model",
+            "model_name": "sandbox_mock_model",
+            "base_url": "",
+            "api_key": "",
+            "enabled": True,
+        }
+    )
+    PERMISSIONS["model_generate"] = True
     response = client.post("/api/tasks/create", json={"raw_input": "draft a plan", "task_type": "general"})
     task = response.json()
-    task["generation_result"] = {"result_status": "generated", "final_output": "bad output"}
+    assert client.post(f"/api/tasks/{task['task_id']}/scbkr").status_code == 200
+    assert client.post(
+        f"/api/tasks/{task['task_id']}/confirm",
+        json={"confirmed_by": "user", "signature": "owner"},
+    ).status_code == 200
+    assert client.post(f"/api/tasks/{task['task_id']}/generate").status_code == 200
     response = client.post(
         f"/api/tasks/{task['task_id']}/review",
-        json={"review_decision": "fail", "review_message": "missing required details"},
+        json={"review_decision": "fail", "review_message": "missing required details", "reviewer_signature": "owner"},
     )
     assert response.status_code == 200
     return response.json()

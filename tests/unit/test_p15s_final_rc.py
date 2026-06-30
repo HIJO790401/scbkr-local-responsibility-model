@@ -140,10 +140,12 @@ def test_readme_final_rc_contract_and_images_exist():
     assert "手機不是直接連本地 LLM" in readme
     assert "手機 → SCBKR 後端 → 本地 LLM" in readme
     assert "手機直接連本地 LLM" not in readme.replace("手機不是直接連本地 LLM", "")
-    assert "LAN Companion Mode requires a companion token and is never enabled by default" in readme
+    assert "LAN Companion Mode is never enabled by default" in readme
+    assert "one-time six-digit code" in readme
     assert "127.0.0.1:8000" not in readme and ":8000/health" not in readme
     assert "README_EN.md" not in readme
-    assert "下一階段才是 P16 / SCBKR 2.0 Rule Design Engine" in readme
+    assert "2.0 已包含 Rule Registry" in readme
+    assert "嚴格 JSON 編譯器" in readme
     for image in [
         "docs/images/scbkr-hero.png",
         "docs/images/responsibility-loop.png",
@@ -161,10 +163,10 @@ def test_readme_final_rc_contract_and_images_exist():
 
 
 def test_release_metadata_contracts():
-    assert '"version": "0.15.0-rc.2"' in Path("package.json").read_text(encoding="utf-8")
-    assert '"version": "0.15.0-rc.2"' in Path("apps/desktop/package.json").read_text(encoding="utf-8")
-    assert '"version": "0.15.0-rc.2"' in Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
-    assert 'version = "0.15.0-rc.2"' in Path("apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
+    assert '"version": "2.0.0"' in Path("package.json").read_text(encoding="utf-8")
+    assert '"version": "2.0.0"' in Path("apps/desktop/package.json").read_text(encoding="utf-8")
+    assert '"version": "2.0.0"' in Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+    assert 'version = "2.0.0"' in Path("apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
     build = Path("scripts/build_desktop_release_windows.ps1").read_text(encoding="utf-8")
     assert 'lan_companion_supported = $true' in build
     assert 'lan_companion_default_enabled = $false' in build

@@ -64,7 +64,13 @@ def test_external_api_permission_disabled_skips_remote_draft_call_and_falls_back
 def test_external_api_permission_enabled_allows_valid_remote_draft_call(tmp_path, monkeypatch):
     main = load_runtime(tmp_path, monkeypatch)
     main.PERMISSIONS["external_api"] = True
-    expected = make_draft(main)
+    expected = {
+        "task_domain": "testing", "task_subject": "請建立一個測試任務", "user_original_judgement": "",
+        "user_goal": "建立可驗收的測試任務", "output_format": ["SCBKR draft"], "core_claim": "先建立草案再由使用者確認",
+        "causal_chain": ["輸入", "草案", "確認"], "boundary_rules": ["模型不得簽名"], "forbidden_dilutions": [],
+        "basis_sources": ["使用者原始指令"], "evidence_relation_notes": [], "acceptance_criteria": ["五維完整"],
+        "storage_candidates": ["logic"], "owner_signature_required": True, "model_role": "describe_compile_only",
+    }
 
     def model_response(settings, messages):
         assert "請建立一個測試任務" in json.dumps(messages, ensure_ascii=False)

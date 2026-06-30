@@ -39,9 +39,9 @@ def test_scbkr_product_definition_lock(monkeypatch):
     response = TestClient(app).post("/api/chat/general", json={"message": "什麼是 SCBKR"})
     assert response.status_code == 200
     reply = response.json()["reply"]
-    assert "本地責任鏈 AI 工作流系統" in reply
+    assert "本地責任鏈與規則驅動 AI 控制系統" in reply
     assert "許文耀／沈耀888pi" in reply
-    assert "向量庫、語料庫、程式邏輯庫、記憶庫、回放帳本" in reply
+    assert "模型在生成、引用、入庫與工具執行前先通過可審計的責任鏈" in reply
     assert "中科大" not in reply
     assert "中國科學技術大學" not in reply
 

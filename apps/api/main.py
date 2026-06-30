@@ -14,7 +14,11 @@ from urllib.error import URLError, HTTPError
 from urllib.request import Request as UrlRequest, urlopen
 import json
 import os
+import hashlib
+import secrets
+import socket
 import sys
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -27,6 +31,7 @@ from core.model_gateway.connection_test import make_test_status
 from core.model_gateway.openai_compatible import build_chat_completion_payload, build_headers
 from core.model_gateway.response_parser import parse_chat_completion_response
 from core.model_gateway.settings import DEFAULT_MODEL_SETTINGS, mask_api_key, validate_model_settings
+from core.metrics.token_efficiency import build_token_efficiency_metrics, summarize_metrics
 from core.permissions.permission_checker import assert_permission_allowed, validate_permission_settings
 from core.permissions.permission_flags import DEFAULT_PERMISSION_SETTINGS
 from core.product_manifest import (
@@ -80,6 +85,7 @@ from core.retrieval.vector_store import get_vector_store_status
 from core.rules.registry import RuleRegistry
 from core.tools.registry import ToolGateEngine, list_tool_definitions
 from core.storage.runtime_paths import current_data_dir
+from core.runtime_settings import load_runtime_section, save_runtime_section
 
 LOCAL_DESKTOP_API_BASE_URL = "http://127.0.0.1:8787"
 LOCAL_DESKTOP_CORS_ORIGINS = [
@@ -102,7 +108,7 @@ SCBKR_CONFIRMATION_REQUIRED_FIELDS = {
     "R": ["expected_outputs", "acceptance_criteria", "ledger_requirements", "storage_options", "signature_status", "review_status", "replay_requirements"],
 }
 
-app = FastAPI(title="SCBKR Local Responsibility Model API", version="0.15.0-rc.2")
+app = FastAPI(title="SCBKR Local Responsibility Model API", version="2.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=LOCAL_DESKTOP_CORS_ORIGINS,
@@ -113,8 +119,10 @@ app.add_middleware(
 
 _TASK_COUNTER = count(1)
 TASKS: dict[str, dict[str, Any]] = {}
-MODEL_SETTINGS: dict[str, Any] = dict(DEFAULT_MODEL_SETTINGS)
-PERMISSIONS: dict[str, Any] = dict(DEFAULT_PERMISSION_SETTINGS)
+MODEL_SETTINGS: dict[str, Any] = load_runtime_section("model", DEFAULT_MODEL_SETTINGS)
+PERMISSIONS: dict[str, Any] = load_runtime_section("permissions", DEFAULT_PERMISSION_SETTINGS)
+COMPANION_PAIRINGS: dict[str, dict[str, Any]] = {}
+COMPANION_TOKENS: dict[str, dict[str, Any]] = {}
 
 
 def lan_companion_enabled() -> bool:
@@ -129,7 +137,13 @@ def _client_is_loopback(request: Request) -> bool:
 def _companion_token_valid(request: Request) -> bool:
     expected = os.environ.get("SCBKR_COMPANION_TOKEN", "")
     supplied = request.headers.get("X-SCBKR-Companion-Token") or request.query_params.get("companion_token")
-    return bool(expected) and supplied == expected
+    if bool(expected) and supplied == expected:
+        return True
+    if not supplied:
+        return False
+    token_hash = hashlib.sha256(supplied.encode("utf-8")).hexdigest()
+    record = COMPANION_TOKENS.get(token_hash)
+    return bool(record and record.get("revoked") is not True and float(record.get("expires_at", 0)) > time.time())
 
 
 def _is_public_companion_asset_path(path: str) -> bool:
@@ -143,6 +157,7 @@ def _is_public_companion_asset_path(path: str) -> bool:
             "/manifest.json",
             "/robots.txt",
             "/vite.svg",
+            "/api/companion/pairing/redeem",
         }
         or path.startswith("/assets/")
     )
@@ -156,6 +171,95 @@ async def require_companion_token_for_lan_requests(request: Request, call_next):
         if not _companion_token_valid(request):
             return JSONResponse(status_code=401, content={"detail": "LAN Companion Mode requires a valid companion token"})
     return await call_next(request)
+
+
+def _lan_ipv4() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return str(sock.getsockname()[0])
+    except OSError:
+        return "127.0.0.1"
+
+
+def _pairing_cleanup() -> None:
+    now = time.time()
+    for code_hash, record in list(COMPANION_PAIRINGS.items()):
+        if float(record.get("expires_at", 0)) <= now or record.get("used") is True:
+            COMPANION_PAIRINGS.pop(code_hash, None)
+    for token_hash, record in list(COMPANION_TOKENS.items()):
+        if float(record.get("expires_at", 0)) <= now:
+            COMPANION_TOKENS.pop(token_hash, None)
+
+
+@app.get("/api/companion/status")
+def companion_status(request: Request) -> dict[str, Any]:
+    desktop_request = _client_is_loopback(request)
+    if not desktop_request and not _companion_token_valid(request):
+        raise HTTPException(status_code=403, detail="valid companion token required")
+    _pairing_cleanup()
+    host = _lan_ipv4()
+    port = int(os.environ.get("SCBKR_API_PORT") or os.environ.get("SCBKR_SIDECAR_PORT", "8787"))
+    return {
+        "lan_companion_enabled": lan_companion_enabled(),
+        "lan_host": host,
+        "port": port,
+        "base_url": f"http://{host}:{port}",
+        "active_devices": sum(1 for item in COMPANION_TOKENS.values() if item.get("revoked") is not True) if desktop_request else None,
+        "pairing_ttl_seconds": 600,
+    }
+
+
+@app.post("/api/companion/pairing/start")
+def companion_pairing_start(request: Request) -> dict[str, Any]:
+    if not _client_is_loopback(request):
+        raise HTTPException(status_code=403, detail="pairing can only be started on the desktop")
+    if not lan_companion_enabled():
+        raise HTTPException(status_code=400, detail="LAN Companion Mode is disabled")
+    _pairing_cleanup()
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    expires_at = time.time() + 600
+    code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    COMPANION_PAIRINGS[code_hash] = {"expires_at": expires_at, "used": False, "created_at": _now() if "_now" in globals() else datetime.now(UTC).isoformat()}
+    status = companion_status(request)
+    return {
+        "pairing_code": code,
+        "expires_at": datetime.fromtimestamp(expires_at, UTC).isoformat(),
+        "base_url": status["base_url"],
+        "redeem_url": f"{status['base_url']}/api/companion/pairing/redeem",
+    }
+
+
+@app.post("/api/companion/pairing/redeem")
+def companion_pairing_redeem(payload: dict[str, Any]) -> dict[str, Any]:
+    if not lan_companion_enabled():
+        raise HTTPException(status_code=400, detail="LAN Companion Mode is disabled")
+    _pairing_cleanup()
+    code = str(payload.get("pairing_code") or "").strip()
+    code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+    pairing = COMPANION_PAIRINGS.get(code_hash)
+    if not pairing or pairing.get("used") is True or float(pairing.get("expires_at", 0)) <= time.time():
+        raise HTTPException(status_code=401, detail="invalid or expired pairing code")
+    pairing["used"] = True
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    expires_at = time.time() + 30 * 24 * 60 * 60
+    COMPANION_TOKENS[token_hash] = {
+        "device_name": str(payload.get("device_name") or "mobile companion")[:80],
+        "created_at": datetime.now(UTC).isoformat(),
+        "expires_at": expires_at,
+        "revoked": False,
+    }
+    return {"companion_token": token, "expires_at": datetime.fromtimestamp(expires_at, UTC).isoformat()}
+
+
+@app.post("/api/companion/pairing/revoke-all")
+def companion_pairing_revoke_all(request: Request) -> dict[str, Any]:
+    if not _client_is_loopback(request):
+        raise HTTPException(status_code=403, detail="device revocation is available on the desktop only")
+    for record in COMPANION_TOKENS.values():
+        record["revoked"] = True
+    return {"revoked": True, "device_count": len(COMPANION_TOKENS)}
 
 
 
@@ -187,6 +291,8 @@ def _is_workbench_capability_question(text: str) -> bool:
 
 
 def _looks_english(text: str) -> bool:
+    if any("\u3400" <= ch <= "\u9fff" for ch in text):
+        return False
     letters = sum(ch.isascii() and ch.isalpha() for ch in text)
     non_ascii = sum(not ch.isascii() for ch in text)
     return letters > 0 and letters >= non_ascii
@@ -432,6 +538,8 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
     compiler_errors: list[str] = []
     compiler_attempts = 0
     compiler_repairs = 0
+    messages: list[dict[str, Any]] = []
+    provider_usages: list[dict[str, Any]] = []
     if MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("mode") != "sandbox":
         try:
             if _model_draft_requires_external_api_permission(MODEL_SETTINGS) and PERMISSIONS.get("external_api") is not True:
@@ -446,6 +554,8 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
                     raise
                 response = _post_openai_compatible(MODEL_SETTINGS, messages)
             model_raw = parse_chat_completion_response(response)
+            if isinstance(response.get("usage"), dict):
+                provider_usages.append(response["usage"])
             try:
                 understanding = _validate_task_understanding(_extract_json_object(model_raw))
             except Exception as first_error:
@@ -461,6 +571,8 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
                             raise
                         repaired_response = _post_openai_compatible(MODEL_SETTINGS, repair_messages)
                     repaired_raw = parse_chat_completion_response(repaired_response)
+                    if isinstance(repaired_response.get("usage"), dict):
+                        provider_usages.append(repaired_response["usage"])
                     understanding = _validate_task_understanding(_extract_json_object(repaired_raw))
                 except Exception as repair_error:
                     compiler_errors.append(str(repair_error))
@@ -480,6 +592,14 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
         repairs=compiler_repairs,
         errors=compiler_errors,
         model_used=understanding is not None,
+    )
+    draft["token_metrics"] = build_token_efficiency_metrics(
+        raw_input=raw_input,
+        messages=messages,
+        retrieval_context=retrieval_context,
+        full_rule_registry=_rule_registry().list_rules(),
+        provider_usages=provider_usages,
+        attempts=compiler_attempts,
     )
     if skipped_reason:
         draft["draft_model_call_skipped_reason"] = skipped_reason
@@ -946,6 +1066,11 @@ def list_tool_traces(limit: int = 100) -> dict[str, Any]:
     return {"traces": traces, "count": len(traces)}
 
 
+@app.get("/api/metrics/token-efficiency")
+def token_efficiency_metrics() -> dict[str, Any]:
+    return summarize_metrics(list_persisted_tasks(limit=1000))
+
+
 @app.get("/api/system/status")
 def system_status() -> dict[str, Any]:
     return {
@@ -1031,6 +1156,7 @@ def set_model_settings(payload: dict[str, Any]) -> dict[str, Any]:
     validate_model_settings(next_settings)
     MODEL_SETTINGS.clear()
     MODEL_SETTINGS.update(next_settings)
+    save_runtime_section("model", MODEL_SETTINGS)
     return _public_model_settings()
 
 
@@ -1045,6 +1171,7 @@ def set_permissions(payload: dict[str, Any]) -> dict[str, Any]:
     validate_permission_settings(next_permissions)
     PERMISSIONS.clear()
     PERMISSIONS.update(next_permissions)
+    save_runtime_section("permissions", PERMISSIONS)
     return PERMISSIONS
 
 
@@ -1082,6 +1209,7 @@ def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         status = {**make_test_status(False, _friendly_model_error(MODEL_SETTINGS, str(exc))), "raw_error": str(exc), "test_result_kind": "local_model_unreachable" if MODEL_SETTINGS.get("mode") == "local" else "external_model_unreachable"}
     MODEL_SETTINGS.update(status)
     MODEL_SETTINGS["enabled"] = status["last_test_status"] == "success"
+    save_runtime_section("model", MODEL_SETTINGS)
     result = _public_model_settings()
     if MODEL_SETTINGS.get("mode") == "sandbox":
         result.update({"ok": True, "provider": SANDBOX_PROVIDER, "sandbox": True, "external_call_performed": False})
@@ -1307,8 +1435,6 @@ def apply_scbkr_patch(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     _reset_owner_signature_status(candidate_scbkr)
     try:
         validate_scbkr_draft_for_confirmation(candidate_scbkr)
-        if _contains_forbidden_draft_state(candidate_scbkr):
-            raise ValueError("forbidden confirmed/high-privilege state")
     except HTTPException:
         raise HTTPException(status_code=400, detail=SCBKR_INVALID_PATCH_MESSAGE)
     except Exception as exc:
@@ -1424,8 +1550,18 @@ def generate(task_id: str) -> dict[str, Any]:
                 result.update(sandbox_output)
                 result.update({"source": "sandbox_mock_model", "next_required_action": "user_review_required"})
                 return result
-            response = _post_openai_compatible(MODEL_SETTINGS, build_generation_messages(task, task["scbkr"]))
-            return build_generation_result(task, task["scbkr"], parse_chat_completion_response(response))
+            generation_messages = build_generation_messages(task, task["scbkr"])
+            response = _post_openai_compatible(MODEL_SETTINGS, generation_messages)
+            result = build_generation_result(task, task["scbkr"], parse_chat_completion_response(response))
+            result["token_metrics"] = build_token_efficiency_metrics(
+                raw_input=str(task.get("raw_input") or ""),
+                messages=generation_messages,
+                retrieval_context=task.get("data_center_context"),
+                full_rule_registry=_rule_registry().list_rules(),
+                provider_usages=[response.get("usage")] if isinstance(response.get("usage"), dict) else [],
+                attempts=1,
+            )
+            return result
 
         first_result = call_generation_model()
         first_text = str(first_result.get("content") or first_result.get("generated_text") or "")

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { PNG } from "pngjs";
 
 async function openSection(page: Page, testInfo: TestInfo, label: string) {
   if (testInfo.project.name === "mobile-chromium") {
@@ -41,9 +42,30 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   const healthResponse = await page.request.get("http://127.0.0.1:8787/health");
   expect(healthResponse.ok(), "本機 FastAPI health 必須可連線").toBe(true);
   if (testInfo.project.name === "desktop-chromium") {
-    await expect(page.getByText("後端 API：online", { exact: false })).toBeVisible();
+    await expect(page.getByText("API online", { exact: true })).toBeVisible();
   }
   await expect(page.getByLabel("一般聊天主視窗")).toBeVisible();
+  const canvas = page.locator('[data-testid="scbkr-canvas"]');
+  await expect(canvas).toHaveCount(1);
+  await expect(canvas).toBeVisible();
+  const canvasBox = await canvas.boundingBox();
+  expect(canvasBox?.width).toBeGreaterThan(280);
+  expect(canvasBox?.height).toBeGreaterThan(220);
+  const pixels = PNG.sync.read(await canvas.screenshot());
+  const sampledColors = new Set<string>();
+  let luminousSamples = 0;
+  for (let y = 0; y < pixels.height; y += 8) {
+    for (let x = 0; x < pixels.width; x += 8) {
+      const offset = (pixels.width * y + x) * 4;
+      const r = pixels.data[offset];
+      const g = pixels.data[offset + 1];
+      const b = pixels.data[offset + 2];
+      sampledColors.add(`${Math.floor(r / 16)}:${Math.floor(g / 16)}:${Math.floor(b / 16)}`);
+      if (r + g + b > 420) luminousSamples += 1;
+    }
+  }
+  expect(sampledColors.size, "Three.js canvas must contain a rendered multi-color scene").toBeGreaterThan(12);
+  expect(luminousSamples, "Three.js nodes and stars must produce visible pixels").toBeGreaterThan(20);
   await attachScreen(page, testInfo, "01-chat-home");
 
   await openSection(page, testInfo, "工作台");

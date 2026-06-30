@@ -63,6 +63,7 @@ def _citation_from_hit(hit: dict[str, Any]) -> dict[str, Any]:
         "signature_status": signature_status,
         "review_passed": review_passed,
         "adoption_scope": str(hit.get("adoption_scope") or "none"),
+        "adopted": authoritative,
         "authority": authoritative,
         "must_cite": bool(hit.get("must_cite")),
         "excerpt": excerpt,

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/token_efficiency.schema.json",
+  "title": "SCBKR 2.0 Token Efficiency Metrics",
+  "type": "object",
+  "required": ["metrics_version", "baseline_context_tokens_estimate", "compiled_context_tokens_estimate", "estimated_tokens_avoided", "estimated_reduction_percent", "model_attempts", "authoritative_citations_loaded", "candidate_evidence_excluded"],
+  "properties": {
+    "metrics_version": {"const": "scbkr.token-efficiency.v2"},
+    "baseline_context_tokens_estimate": {"type": "integer", "minimum": 1},
+    "compiled_context_tokens_estimate": {"type": "integer", "minimum": 1},
+    "estimated_tokens_avoided": {"type": "integer", "minimum": 0},
+    "estimated_reduction_percent": {"type": "number", "minimum": 0, "maximum": 100},
+    "provider_prompt_tokens": {"type": ["integer", "null"]},
+    "provider_completion_tokens": {"type": ["integer", "null"]},
+    "provider_total_tokens": {"type": ["integer", "null"]},
+    "model_attempts": {"type": "integer", "minimum": 0},
+    "authoritative_citations_loaded": {"type": "integer", "minimum": 0},
+    "candidate_evidence_excluded": {"type": "integer", "minimum": 0}
+  }
+}

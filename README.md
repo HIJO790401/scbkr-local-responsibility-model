@@ -7,8 +7,8 @@
 
 The authoritative product identity is defined in [`config/product_manifest.json`](config/product_manifest.json), while [`docs/SCBKR_MASTER_PLAN_FINAL.md`](docs/SCBKR_MASTER_PLAN_FINAL.md) is the master engineering and 2.0 roadmap contract. SCBKR is the control and compilation layer; the user-connected LM Studio, Ollama, or OpenAI-compatible model is a replaceable runtime.
 
-本地 AI 責任鏈工作台｜使用者簽名 Gate｜Data Center｜四庫引用｜Release Candidate  
-Local AI responsibility-chain workbench | Owner Signature Gate | Data Center | Four-store evidence reuse | Release Candidate
+本地 AI 責任鏈工作台｜規則驅動 Runtime｜工具 Gate｜四庫引用｜手機配對
+Local AI responsibility-chain workbench | Rule-driven runtime | Tool gates | Four-store evidence | Mobile pairing
 
 SCBKR 不是一般聊天機器人。SCBKR 是一套本地 AI 責任鏈工作台。模型可以協助，但不能越權。使用者簽名後，責任鏈才成立。驗收後才可入庫。二次確認後才可寫入四庫。
 
@@ -22,22 +22,24 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 
 - 中文：SCBKR 把「任務、流程、邊界、依據、驗收」整理成 S/C/B/K/R 確認單，要求使用者簽名後才允許模型生成。
 - English: SCBKR turns task, causal flow, boundaries, knowledge basis, and review criteria into an S/C/B/K/R confirmation sheet that must be owner-signed before generation.
-- 中文：它不是自動代理，也不是雲端帳號服務；1.0 是本機責任鏈 Workbench。
-- English: It is not an autonomous agent or cloud account service; 1.0 is a local responsibility-chain workbench.
+- 中文：它不是無條件自動代理，也不是雲端帳號服務；2.0 是規則驅動的本機 AI 控制層。
+- English: It is not an unrestricted autonomous agent or cloud account service; 2.0 is a rule-driven local AI control layer.
 
 ## 2. 目前版本｜Current Version
 
-- 中文：目前版本為 `0.15.0-rc.2`，階段為 `P15-S-1.0-final-rc`。
-- English: Current version is `0.15.0-rc.2`, stage `P15-S-1.0-final-rc`.
-- 中文：這是 Release Candidate，不是正式 production release；預設無自動更新、無簽章、無內建模型、無內建 API key。
-- English: This is a release candidate, not a production release; it has no auto-update, no code signing by default, no bundled model, and no bundled API key.
+- 中文：目前版本為 `2.0.0`，階段為 `2.0-local-release`。
+- English: Current version is `2.0.0`, stage `2.0-local-release`.
+- 中文：這是可在本機運行的 2.0 公開版；安裝檔程式碼簽章、自動更新與商店封裝仍未提供，也不內建模型或 API key。
+- English: This is the locally runnable 2.0 public release. Installer code signing, auto-update, and store packaging are not yet provided; no model or API key is bundled.
 
-## 3. 1.0 目前能做什麼｜What 1.0 Can Do
+## 3. 2.0 目前能做什麼｜What 2.0 Can Do
 
 - 中文：建立 S/C/B/K/R 任務確認單、使用者簽名、生成、驗收、入庫請求、二次確認、Data Center 檢視與四庫引用。
 - English: It supports S/C/B/K/R task confirmation, owner signature, generation, review, storage request, second confirmation, Data Center viewing, and four-store evidence reuse.
 - 中文：模型只能提出草案或建議，不能自行簽名、驗收、入庫或修改已寫入資料。
 - English: The model may draft or suggest, but it cannot sign, review, store, or rewrite committed evidence by itself.
+- 中文：具名、版本化、簽名的規則可控制模型與工具；向量檢索只能找候選，不能取代正式引用。
+- English: Attributed, versioned, signed rules control models and tools; vector retrieval may find candidates but cannot replace authoritative citations.
 
 ## 4. Desktop Mode 與 LAN Companion Mode｜Desktop Mode and LAN Companion Mode
 
@@ -52,10 +54,10 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 
 - 中文：使用者手動啟動 LAN Companion Mode 後，sidecar 才可綁定 `0.0.0.0:8787`。
 - English: Only after the user manually starts LAN Companion Mode may the sidecar bind to `0.0.0.0:8787`.
-- 中文：手機可在同 Wi‑Fi / LAN 以 `http://192.168.x.x:8787/?companion_token=<token>` 開啟 Web UI。
-- English: A phone on the same Wi‑Fi / LAN may open the Web UI at `http://192.168.x.x:8787/?companion_token=<token>`.
-- 中文：LAN Companion Mode 需要 companion token，不會預設開啟。
-- English: LAN Companion Mode requires a companion token and is never enabled by default.
+- 中文：手機可在同 Wi-Fi / LAN 開啟 `http://192.168.x.x:8787/`，再輸入桌機產生的 6 位數一次性配對碼。
+- English: A phone on the same Wi-Fi / LAN opens `http://192.168.x.x:8787/` and enters the one-time six-digit code generated on the desktop.
+- 中文：LAN Companion Mode 不會預設開啟；配對碼 10 分鐘失效且只能使用一次，桌機可撤銷已配對裝置。
+- English: LAN Companion Mode is never enabled by default. Pairing codes expire after ten minutes, are one-time use, and paired devices can be revoked from the desktop.
 
 ## 5. 完整責任鏈流程｜Responsibility Chain Flow
 
@@ -92,8 +94,8 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 ![本地模型架構](docs/images/architecture.png)
 ![Local model architecture](docs/images/local-model-architecture-en.png)
 
-- 中文：1.0 支援 sandbox、本地 LLM、LM Studio、Ollama 或 OpenAI-compatible endpoint 設定。
-- English: 1.0 supports sandbox, local LLM, LM Studio, Ollama, or an OpenAI-compatible endpoint.
+- 中文：2.0 支援 sandbox、本地 LLM、LM Studio、Ollama 或 OpenAI-compatible endpoint 設定。
+- English: 2.0 supports sandbox, local LLM, LM Studio, Ollama, or an OpenAI-compatible endpoint.
 - 中文：外部 API 權限預設關閉；非 loopback 模型網址需要使用者開啟 external API guard。
 - English: External API permission is off by default; non-loopback model URLs require the user to enable the external API guard.
 
@@ -129,22 +131,22 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 
 - 中文：預設 Desktop Mode 僅本機可連，LAN Companion Mode 只適合可信任 Wi‑Fi。
 - English: Default Desktop Mode is local-only; LAN Companion Mode should only be used on trusted Wi‑Fi.
-- 中文：不要把含 token 的 URL 貼到公開地方；token 由 launcher 或使用者設定產生，不寫入 Git，也不固定寫死。
-- English: Do not publish URLs containing tokens; tokens are generated by the launcher or user config, not committed to Git or hard-coded.
+- 中文：不要公開手機配對碼或已配對憑證；憑證不寫入 Git，也不固定寫死。
+- English: Do not publish pairing codes or paired-device credentials; credentials are never committed to Git or hard-coded.
 
 ## 12. 與 Chatbot / Agent / RAG 的差異｜Difference from Chatbot / Agent / RAG
 
 - 中文：Chatbot 重點是對話；Agent 重點是自動行動；RAG 重點是檢索增強。SCBKR 重點是責任鏈、簽名、驗收、入庫與未來引用邊界。
 - English: Chatbots focus on conversation; agents focus on autonomous action; RAG focuses on retrieval augmentation. SCBKR focuses on responsibility chain, signature, review, storage, and future reuse boundaries.
 
-## 13. 2.0 Roadmap｜2.0 Roadmap
+## 13. 2.0 規則與工具層｜2.0 Rules and Tools
 
 ![2.0 Roadmap](docs/images/roadmap-2.0-en.png)
 
-- 中文：下一階段才是 P16 / SCBKR 2.0 Rule Design Engine 與 Store Packaging。
-- English: The next phase is P16 / SCBKR 2.0 Rule Design Engine and Store Packaging.
-- 中文：1.0 不包含 RulePack、Semantic Legality Gate、Web Search、Email Tool、Code Workspace、Voice I/O、Image Generation、Rule Marketplace、subscription、原生 Android/iOS app、cloud account 或 team account。
-- English: 1.0 does not include RulePack, Semantic Legality Gate, Web Search, Email Tool, Code Workspace, Voice I/O, Image Generation, Rule Marketplace, subscriptions, native Android/iOS apps, cloud accounts, or team accounts.
+- 中文：2.0 已包含 Rule Registry、RulePack 匯入與訂閱狀態、規則命中 Gate、工具註冊與五道權限 Gate、執行回放、嚴格 JSON 編譯器與 token 效率統計。
+- English: 2.0 includes the Rule Registry, RulePack import and subscription state, rule-match gates, tool registration and five permission gates, execution replay, a strict JSON compiler, and token-efficiency metrics.
+- 中文：工具層目前負責授權與回放，不會把「允許執行」謊稱為「已完成外部操作」。原生 Android/iOS、雲端帳號、Rule Marketplace 與安裝檔簽章仍不在本版。
+- English: The tool layer currently authorizes and records calls; it never reports an authorized external action as completed. Native Android/iOS apps, cloud accounts, a Rule Marketplace, and installer signing remain outside this release.
 
 ## 14. 開發者快速啟動｜Developer Quick Start
 
@@ -172,12 +174,12 @@ npm --prefix apps/desktop run check:release
 - 中文：Windows 上可執行 release build / smoke / LAN Companion smoke PowerShell 腳本。
 - English: On Windows, run the release build / smoke / LAN Companion smoke PowerShell scripts.
 
-## 16. 1.0 上架狀態｜1.0 Release Readiness
+## 16. 2.0 發布狀態｜2.0 Release Readiness
 
-- 中文：`0.15.0-rc.2` 可作為 1.0 Final RC；production release、code signing、auto-update、store packaging 仍為 false / 下一階段。
-- English: `0.15.0-rc.2` can serve as the 1.0 Final RC; production release, code signing, auto-update, and store packaging remain false / next phase.
-- 中文：Desktop Mode 預設 local-only；LAN Companion Mode 已支援但需手動啟動與 token。
-- English: Desktop Mode is local-only by default; LAN Companion Mode is supported but requires manual launch and a token.
+- 中文：`2.0.0` 為本機公開版；程式碼簽章、自動更新與商店封裝仍待後續發布工程。
+- English: `2.0.0` is the local public release; code signing, auto-update, and store packaging remain future release engineering work.
+- 中文：Desktop Mode 預設 local-only；LAN Companion Mode 需手動啟動並以一次性配對碼授權手機。
+- English: Desktop Mode is local-only by default; LAN Companion Mode requires manual launch and one-time code pairing.
 
 ## 17. License / Author
 

@@ -19,7 +19,7 @@
     "citation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["citation_id", "source_store", "source_id", "content_hash", "author_id", "version", "status", "signature_status", "review_passed", "adoption_scope", "authority", "must_cite", "excerpt"],
+      "required": ["citation_id", "source_store", "source_id", "content_hash", "author_id", "version", "status", "signature_status", "review_passed", "adoption_scope", "adopted", "authority", "must_cite", "excerpt"],
       "properties": {
         "citation_id": { "type": "string", "minLength": 1 },
         "source_store": { "enum": ["vector", "corpus", "logic", "memory"] },
@@ -31,6 +31,7 @@
         "signature_status": { "type": "string", "minLength": 1 },
         "review_passed": { "type": "boolean" },
         "adoption_scope": { "type": "string" },
+        "adopted": { "type": "boolean" },
         "authority": { "type": "boolean" },
         "must_cite": { "type": "boolean" },
         "excerpt": { "type": "string", "minLength": 1 }

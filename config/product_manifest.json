@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0",
   "product_id": "scbkr",
-  "version": "0.15.0-rc.2",
+  "version": "2.0.0",
   "target_version": "2.0.0",
-  "release_stage": "1.0-final-rc-and-2.0-development",
+  "release_stage": "2.0-local-release",
   "name": {
     "zh-TW": "SCBKR 本地責任鏈系統",
     "en": "SCBKR Local Responsibility Chain System"
@@ -44,19 +44,19 @@
   "capabilities": [
     {
       "id": "responsibility_draft",
-      "phase": "1.0",
+      "phase": "2.0",
       "title": {"zh-TW": "責任鏈草案", "en": "Responsibility-chain drafts"},
       "description": {"zh-TW": "將使用者任務編譯為 S/C/B/K/R 草案，等待使用者修改與簽名。", "en": "Compile user tasks into S/C/B/K/R drafts for user review and signature."}
     },
     {
       "id": "owner_signature",
-      "phase": "1.0",
+      "phase": "2.0",
       "title": {"zh-TW": "使用者簽名 Gate", "en": "Owner signature gate"},
       "description": {"zh-TW": "模型不能簽名；草案修改後必須重新簽名。", "en": "Models cannot sign, and edited drafts must be signed again."}
     },
     {
       "id": "review_storage_replay",
-      "phase": "1.0",
+      "phase": "2.0",
       "title": {"zh-TW": "驗收、四庫與回放", "en": "Review, four stores, and replay"},
       "description": {"zh-TW": "驗收與二次確認後才能寫入 vector、corpus、logic、memory。", "en": "Data may enter vector, corpus, logic, or memory only after review and second confirmation."}
     },
@@ -78,7 +78,7 @@
     "topics": ["rule-pack licensing", "custom rule design", "local AI integration", "enterprise proof of concept"]
   },
   "rule_import": {
-    "current_status": "draft-to-workbench",
+    "current_status": "signed-versioned-rulepack",
     "target_status": "signed-versioned-rulepack",
     "flow": ["import", "parse", "attribute", "scope", "preview", "owner_signature", "activate", "audit", "rollback"]
   },
