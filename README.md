@@ -151,6 +151,11 @@ npm --prefix apps/desktop run check:skeleton
 npm --prefix apps/desktop run check:release
 ```
 
+- Windows 一鍵開啟完整本機 UI：`powershell -ExecutionPolicy Bypass -File scripts/start_ui_review_windows.ps1`
+- 桌機與手機版實機驗收：`powershell -ExecutionPolicy Bypass -File scripts/run_ui_acceptance_windows.ps1`
+- UI 驗收會啟動真實 FastAPI 與 Web UI、操作主要頁面、檢查瀏覽器錯誤與畫面溢出，並將各頁截圖附在 HTML 報告中。
+- UI acceptance starts the real FastAPI and Web UI, exercises primary pages, checks browser errors and viewport overflow, and attaches screenshots to an HTML report.
+
 - 中文：本機 API 預設：`http://127.0.0.1:8787`。
 - English: Default local API: `http://127.0.0.1:8787`.
 - 中文：API base 會依 runtime matrix 判斷：LAN Companion 頁面使用目前頁面 origin；localhost dev / preview 頁面仍連回 FastAPI sidecar `http://127.0.0.1:8787`；`VITE_SCBKR_API_URL` 永遠最高優先。

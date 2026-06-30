@@ -1,0 +1,67 @@
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
+
+async function openSection(page: Page, testInfo: TestInfo, label: string) {
+  if (testInfo.project.name === "mobile-chromium") {
+    const drawer = page.locator(".mobile-drawer");
+    await expect(drawer).toBeVisible();
+    await drawer.locator("button").filter({ hasText: label }).click();
+    return;
+  }
+
+  await page.locator(".side-nav button").filter({ hasText: label }).click();
+}
+
+async function attachScreen(page: Page, testInfo: TestInfo, name: string) {
+  await testInfo.attach(name, {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+}
+
+test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page }, testInfo) => {
+  const browserErrors: string[] = [];
+  const failedResponses: string[] = [];
+  page.on("pageerror", (error) => browserErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 400) {
+      failedResponses.push(`${response.status()} ${response.url()}`);
+    }
+  });
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      !message.text().startsWith("Failed to load resource:")
+    ) {
+      browserErrors.push(message.text());
+    }
+  });
+
+  await page.goto("/");
+  await expect(page.locator(".app-shell")).toBeVisible();
+  const healthResponse = await page.request.get("http://127.0.0.1:8787/health");
+  expect(healthResponse.ok(), "本機 FastAPI health 必須可連線").toBe(true);
+  if (testInfo.project.name === "desktop-chromium") {
+    await expect(page.getByText("後端 API：online", { exact: false })).toBeVisible();
+  }
+  await expect(page.getByLabel("一般聊天主視窗")).toBeVisible();
+  await attachScreen(page, testInfo, "01-chat-home");
+
+  await openSection(page, testInfo, "工作台");
+  await expect(page.getByRole("heading", { name: "建立責任鏈確認單" })).toBeVisible();
+  await attachScreen(page, testInfo, "02-workbench");
+
+  await openSection(page, testInfo, "模型設定");
+  await expect(page.getByRole("heading", { name: "模型設定" })).toBeVisible();
+  await attachScreen(page, testInfo, "03-model-settings");
+
+  await openSection(page, testInfo, "資料中心");
+  await expect(page.getByRole("heading", { name: "資料中心", exact: true })).toBeVisible();
+  await attachScreen(page, testInfo, "04-data-center");
+
+  const viewportFits = await page.evaluate(() =>
+    document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+  );
+  expect(viewportFits, "頁面不應產生整頁水平溢出").toBe(true);
+  expect(browserErrors, "瀏覽器 console/page 不應出現錯誤").toEqual([]);
+  expect(failedResponses, "頁面資源與 API 不應回傳 4xx/5xx").toEqual([]);
+});
