@@ -144,7 +144,7 @@ def test_get_task_ledger_reads_task_events_from_jsonl():
     assert "scbkr_draft_created" in event_types
 
 
-def test_storage_request_plan_does_not_write_vector_db(isolated_runtime):
+def test_storage_request_plan_does_not_write_vector_store(isolated_runtime):
     task = create_task()
     task = TASKS[task["task_id"]]
     task["generation_result"] = {"status": "waiting_review", "review_passed": False, "storage_confirmed": False, "content": "ok"}
@@ -155,7 +155,7 @@ def test_storage_request_plan_does_not_write_vector_db(isolated_runtime):
     request_response = client.post(f"/api/tasks/{task['task_id']}/storage-request")
 
     assert request_response.status_code == 200
-    assert forbidden_runtime_files(isolated_runtime / "vector_db") == []
+    assert forbidden_runtime_files(isolated_runtime / "vector") == []
 
 
 def test_memory_rule_confirm_writes_signed_memory_rule(isolated_runtime):

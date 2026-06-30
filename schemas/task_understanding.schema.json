@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/task_understanding.schema.json",
+  "title": "SCBKR Task Understanding Draft v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["acceptance_criteria", "basis_sources", "boundary_rules", "causal_chain", "core_claim", "evidence_relation_notes", "forbidden_dilutions", "model_role", "output_format", "owner_signature_required", "storage_candidates", "task_domain", "task_subject", "user_goal", "user_original_judgement"],
+  "properties": {
+    "task_domain": { "type": "string" },
+    "task_subject": { "type": "string" },
+    "user_original_judgement": { "type": "string" },
+    "user_goal": { "type": "string" },
+    "core_claim": { "type": "string" },
+    "output_format": { "type": "array", "items": { "type": "string" } },
+    "causal_chain": { "type": "array", "items": { "type": "string" } },
+    "boundary_rules": { "type": "array", "items": { "type": "string" } },
+    "forbidden_dilutions": { "type": "array", "items": { "type": "string" } },
+    "basis_sources": { "type": "array", "items": { "type": "string" } },
+    "evidence_relation_notes": { "type": "array", "items": { "type": "string" } },
+    "acceptance_criteria": { "type": "array", "items": { "type": "string" } },
+    "storage_candidates": { "type": "array", "items": { "type": "string" } },
+    "owner_signature_required": { "const": true },
+    "model_role": { "const": "describe_compile_only" }
+  }
+}

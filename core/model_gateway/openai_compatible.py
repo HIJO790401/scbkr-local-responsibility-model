@@ -4,19 +4,22 @@ These helpers only build dictionaries. They do not perform network calls.
 """
 
 
-def build_chat_completion_payload(messages, settings):
+def build_chat_completion_payload(messages, settings, response_format=None):
     """Build an OpenAI-compatible chat completion payload without sending it."""
     if not isinstance(messages, list):
         raise ValueError("messages must be a list")
     model_name = settings.get("model_name", "")
     if not isinstance(model_name, str) or not model_name.strip():
         raise ValueError("model_name must be a non-empty string")
-    return {
+    payload = {
         "model": model_name,
         "messages": messages,
         "temperature": settings.get("temperature"),
         "max_tokens": settings.get("max_tokens"),
     }
+    if response_format is not None:
+        payload["response_format"] = response_format
+    return payload
 
 
 def build_headers(settings):

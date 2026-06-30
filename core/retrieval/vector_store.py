@@ -40,7 +40,7 @@ def _fallback_unavailable(exc: BaseException | None = None) -> dict[str, Any]:
 def _vector_dir() -> Path:
     import os
 
-    return Path(os.environ.get("SCBKR_DATA_DIR", REPO_ROOT / "data")).expanduser() / "vector_db" / "chroma"
+    return Path(os.environ.get("SCBKR_DATA_DIR", REPO_ROOT / "data")).expanduser() / "vector" / "chroma"
 
 
 def _local_fingerprint_embedding(text: str, dimensions: int = 32) -> list[float]:

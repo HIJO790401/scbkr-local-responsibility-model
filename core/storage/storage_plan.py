@@ -39,10 +39,10 @@ def build_storage_items(task, review_result, selected_targets, storage_signature
     validate_memory_signature(selected_targets, storage_signature)
     items = []
     for target in selected_targets:
-        if target == "vector_db":
+        if target == "vector":
             items.append(
                 {
-                    "target": "vector_db",
+                    "target": "vector",
                     "item_type": "confirmed_case_summary",
                     "task_id": task.get("task_id"),
                     "task_type": task.get("task_type"),

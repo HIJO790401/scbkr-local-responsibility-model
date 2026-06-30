@@ -1,9 +1,9 @@
 """Pure P8 storage target constants and validation helpers."""
 
-STORAGE_TARGETS = ("vector_db", "corpus", "logic", "memory")
+STORAGE_TARGETS = ("vector", "corpus", "logic", "memory")
 MEMORY_REQUIRES_SIGNATURE = True
 TARGET_DESCRIPTIONS = {
-    "vector_db": "保存已驗收通過的任務案例與 SCBKR 責任鏈摘要，不保存失敗輸出。",
+    "vector": "保存已驗收通過的任務案例與 SCBKR 責任鏈摘要，不保存失敗輸出；檢索結果只作候選。",
     "corpus": "保存材料來源，不代表判定成立。",
     "logic": "保存可重用流程、工程邏輯、測試規則、API 流程。",
     "memory": "保存使用者確認過的偏好、判定規則、禁用規則、驗收標準；必須使用者簽名。",
@@ -13,7 +13,7 @@ TARGET_DESCRIPTIONS = {
 def validate_storage_target(target):
     """Validate one storage target."""
     if target not in STORAGE_TARGETS:
-        raise ValueError("storage target must be one of: vector_db, corpus, logic, memory")
+        raise ValueError("storage target must be one of: vector, corpus, logic, memory")
     return True
 
 

@@ -14,14 +14,15 @@ LEDGER_DIR = DATA_DIR / "ledger"
 LEDGER_JSONL_PATH = LEDGER_DIR / "audit-log.jsonl"
 CORPUS_DIR = DATA_DIR / "corpus"
 LOGIC_DIR = DATA_DIR / "logic"
-EXPORTS_DIR = DATA_DIR / "exports"
 MEMORY_DIR = DATA_DIR / "memory"
-VECTOR_DB_DIR = DATA_DIR / "vector_db"
+VECTOR_DIR = DATA_DIR / "vector"
+# Read-only migration locator for installations created before SCBKR 2.0.
+LEGACY_VECTOR_DB_DIR = DATA_DIR / "vector_db"
 
 
 def ensure_runtime_dirs() -> None:
-    """Create P13-A/B runtime directories; vector_db is lazy-created by retrieval runtime only."""
-    for directory in (DATA_DIR, LEDGER_DIR, CORPUS_DIR, LOGIC_DIR, EXPORTS_DIR, MEMORY_DIR, VECTOR_DB_DIR):
+    """Create the four canonical stores and replay ledger directories."""
+    for directory in (DATA_DIR, LEDGER_DIR, VECTOR_DIR, CORPUS_DIR, LOGIC_DIR, MEMORY_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 

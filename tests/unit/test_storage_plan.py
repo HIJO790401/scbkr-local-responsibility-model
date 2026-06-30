@@ -63,7 +63,7 @@ def test_review_result_must_be_passed_for_storage():
 def test_build_storage_request_defaults_do_not_include_memory():
     request = build_storage_request(make_task(), make_review_result())
 
-    assert request["candidate_targets"] == ["vector_db", "corpus", "logic"]
+    assert request["candidate_targets"] == ["vector", "corpus", "logic"]
     assert "memory" not in request["candidate_targets"]
     assert request["selected_targets"] == []
     assert request["storage_confirmed"] is False
@@ -75,7 +75,7 @@ def test_invalid_storage_target_is_rejected():
         validate_storage_target("archive")
 
     with pytest.raises(ValueError):
-        build_storage_request(make_task(), make_review_result(), candidate_targets=["vector_db", "archive"])
+        build_storage_request(make_task(), make_review_result(), candidate_targets=["vector", "archive"])
 
     with pytest.raises(ValueError):
         build_storage_commit_plan(make_task(), make_review_result(), ["archive"])
@@ -99,20 +99,20 @@ def test_memory_target_requires_storage_signature():
 
 def test_failed_or_memory_rule_content_cannot_build_storage_plan():
     with pytest.raises(ValueError):
-        build_storage_commit_plan(make_task(), make_review_result(status="review_failed"), ["vector_db"])
+        build_storage_commit_plan(make_task(), make_review_result(status="review_failed"), ["vector"])
 
     with pytest.raises(ValueError):
         build_storage_commit_plan(
             make_task(),
             make_review_result(failure_report_draft={"rule_candidate_status": "draft_only"}),
-            ["vector_db"],
+            ["vector"],
         )
 
     with pytest.raises(ValueError):
         build_storage_commit_plan(
             make_task(),
             make_review_result(memory_rule_status="not_created"),
-            ["vector_db"],
+            ["vector"],
         )
 
 
@@ -120,7 +120,7 @@ def test_storage_commit_plan_is_confirmed_plan_without_physical_writes():
     plan = build_storage_commit_plan(
         make_task(),
         make_review_result(),
-        ["vector_db", "corpus", "logic", "memory"],
+        ["vector", "corpus", "logic", "memory"],
         storage_signature="user-signature",
         storage_notes="二次確認",
     )
@@ -131,7 +131,7 @@ def test_storage_commit_plan_is_confirmed_plan_without_physical_writes():
     assert plan["next_required_action"] == "storage_runtime_pending"
     assert all(item["physical_write_performed"] is False for item in plan["storage_items"])
 
-    vector_item = next(item for item in plan["storage_items"] if item["target"] == "vector_db")
+    vector_item = next(item for item in plan["storage_items"] if item["target"] == "vector")
     assert vector_item["embedding_status"] == "not_created"
 
     memory_item = next(item for item in plan["storage_items"] if item["target"] == "memory")

@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 UI_TARGETS = ("vector", "corpus", "logic", "memory")
-PLAN_TARGET_ALIASES = {"vector": "vector_db", "corpus": "corpus", "logic": "logic", "memory": "memory", "vector_db": "vector_db"}
+PLAN_TARGET_ALIASES = {"vector": "vector", "corpus": "corpus", "logic": "logic", "memory": "memory"}
 
 
 def to_plan_target(target: str) -> str:
@@ -18,6 +18,7 @@ def to_plan_target(target: str) -> str:
 
 
 def to_ui_target(target: str) -> str:
+    # Read compatibility for records written before the 2.0 canonical target migration.
     return "vector" if target == "vector_db" else target
 
 

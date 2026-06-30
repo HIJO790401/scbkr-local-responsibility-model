@@ -30,7 +30,7 @@ def make_passed_task():
         },
         "generation_result": {"status": "waiting_review", "content": "success", "api_key": "secret"},
         "review_result": {"status": "review_passed", "review_passed": True, "review_message": "ok"},
-        "storage_plan": {"selected_targets": ["corpus", "logic", "exports", "vector_db"], "storage_items": []},
+        "storage_plan": {"selected_targets": ["corpus", "logic", "vector"], "storage_items": []},
     }
 
 
@@ -69,21 +69,21 @@ def test_build_success_corpus_payload_redacts_api_key():
     assert payload["generation_result"]["api_key"] == "***REDACTED***"
 
 
-def test_commit_storage_items_writes_corpus_logic_exports_without_vector_db(tmp_path, monkeypatch):
+def test_commit_storage_items_writes_corpus_logic_without_unapproved_vector(tmp_path, monkeypatch):
     monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
     task = make_passed_task()
 
     items = commit_storage_items(task, task["storage_plan"])
 
-    assert {item["target"] for item in items} == {"corpus", "logic", "exports"}
+    assert {item["target"] for item in items} == {"corpus", "logic"}
     for item in items:
         assert item["relative_path"].startswith(f"{item['target']}/")
         assert "\\" not in item["relative_path"]
         assert (tmp_path / item["relative_path"]).exists()
     assert (tmp_path / "corpus").is_dir()
     assert (tmp_path / "logic").is_dir()
-    assert (tmp_path / "exports").is_dir()
-    assert not (tmp_path / "vector_db").exists()
+    assert not (tmp_path / "exports").exists()
+    assert not (tmp_path / "vector").exists()
 
 
 def test_commit_storage_items_idempotent_for_same_content(tmp_path, monkeypatch):

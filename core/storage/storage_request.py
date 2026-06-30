@@ -2,7 +2,7 @@
 
 from core.storage.targets import validate_storage_targets
 
-DEFAULT_CANDIDATE_TARGETS = ["vector_db", "corpus", "logic"]
+DEFAULT_CANDIDATE_TARGETS = ["vector", "corpus", "logic"]
 
 
 def assert_review_passed_for_storage(review_result):

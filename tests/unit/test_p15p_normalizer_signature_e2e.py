@@ -106,7 +106,7 @@ def test_signed_storage_e2e_then_followup_adopts(monkeypatch, tmp_path):
     task = main.storage_confirm(task["task_id"], {"storage_confirmed": True, "second_confirm": True, "confirmed_by": "user", "signature": "owner-trade", "selected_targets": ["vector", "logic", "memory"]})
     assert set(task["storage_result"]["written_targets"]) == {"vector", "logic", "memory"}
     stored = list_persisted_storage_items(limit=20)
-    assert {item["target"] for item in stored} >= {"vector_db", "logic", "memory"}
+    assert {item["target"] for item in stored} >= {"vector", "logic", "memory"}
     context = main._build_four_store_context("幫我看這段二手手機交易對話有沒有風險")
     assert context["hits"]
     hit = context["hits"][0]

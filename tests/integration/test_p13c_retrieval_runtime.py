@@ -10,13 +10,13 @@ def test_p13c_retrieval_runtime_api_flow(tmp_path, monkeypatch):
     main = importlib.reload(main); ledger = importlib.reload(ledger)
     main.MODEL_SETTINGS.update({"mode":"local","enabled":True})
     t=main.create_task({"raw_input":"build local retrieval API", "task_type":"coding"})
-    assert not (tmp_path/"vector_db").exists()
+    assert not (tmp_path/"vector").exists()
     t=main.create_scbkr(t["task_id"]); t=main.confirm_task(t["task_id"], {"signature":"sig"})
     t["generation_result"]={"status":"waiting_review","review_passed":False,"storage_confirmed":False,"output":"local retrieval API implementation"}; t["status"]="waiting_review"; main.save_task(t)
     t=main.review(t["task_id"], {"review_decision":"pass","reviewer_signature":"sig"})
     t=main.storage_request(t["task_id"])
     t=main.storage_confirm(t["task_id"], {"storage_confirmed":True,"second_confirm":True,"confirmed_by":"user","signature":"sig","selected_targets":["vector","corpus","logic","memory"]})
-    assert (tmp_path/"vector_db").exists()
+    assert (tmp_path/"vector").exists()
     indexed=main.index_task_retrieval(t["task_id"])
     assert indexed["indexed_cases"]
     with sqlite3.connect(tmp_path/"scbkr.sqlite3") as conn:

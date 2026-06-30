@@ -35,6 +35,7 @@ from core.product_manifest import (
     localized_product_manifest,
     load_product_manifest,
 )
+from core.evidence.contracts import build_evidence_packet
 from core.ledger.ledger_event import build_ledger_event
 from core.ledger.jsonl_ledger import append_ledger_event, read_ledger_events, rebuild_ledger_index_from_jsonl
 from core.review_rules.rule_confirmation import confirm_memory_rule_plan
@@ -47,6 +48,12 @@ from core.scbkr.draft_grammar import (
     classify_evidence_relation,
     normalize_task_understanding,
     ADOPTABLE_RELATIONS,
+)
+from core.scbkr.compiler import (
+    build_compiler_report,
+    build_repair_messages,
+    task_understanding_response_format,
+    validate_task_understanding_strict,
 )
 from core.storage.physical_store import commit_memory_rule, commit_storage_items, hash_payload
 from core.storage.sqlite_runtime import (
@@ -362,17 +369,18 @@ def _build_four_store_context(raw_input: str, task_id: str | None = None) -> dic
         retrieval = {"backend": "unavailable", "candidates": [], "error": str(exc)}
     for candidate in retrieval.get("candidates", []) or []:
         case_type = str(candidate.get("case_type") or candidate.get("target") or "vector")
-        source_store = "memory" if "memory" in case_type else "vector"
+        source_target = str(candidate.get("source_target") or candidate.get("case_json", {}).get("source_target") or "")
+        source_store = "memory" if "memory" in case_type else source_target if source_target in ("corpus", "logic") else "vector"
         text_value = str(candidate.get("retrieval_text", ""))
         relation = classify_evidence_relation(raw_input, text_value, score=candidate.get("score"), source_store=source_store)
         ok, reason = bool(relation["adopted"]), relation["relation_reason"]
-        hit = {"source_store": source_store, "rule": text_value[:800], "case_id": candidate.get("case_id"), "status": "沿用" if ok else "未採用：相關性不足", "adopted": ok, "reason": reason, "rule_confirmed": ok, "score": candidate.get("score"), **relation}
+        hit = {"source_store": source_store, "rule": text_value[:800], "case_id": candidate.get("case_id"), "status": "沿用" if ok else "未採用：相關性不足", "governance_status": candidate.get("governance_status") or candidate.get("status") or "active", "adopted": ok, "reason": reason, "rule_confirmed": ok, "score": candidate.get("score"), "signature_status": candidate.get("signature_status") or "unsigned", "review_passed": candidate.get("review_passed") is True, "content_hash": candidate.get("content_hash") or candidate.get("rule_hash") or candidate.get("retrieval_text_hash"), "author_id": candidate.get("author_id"), "version": candidate.get("version"), **relation}
         if any(token in text_value for token in ("不得", "禁止", "不准", "must not")):
             hit["must_cite"] = True
         (adopted if ok else rejected).append(hit)
     for item in list_persisted_storage_items(limit=50):
         target = item.get("target")
-        if target in ("corpus", "logic", "memory", "vector_db"):
+        if target in ("corpus", "logic", "memory", "vector", "vector_db"):
             payload = item.get("payload") or item
             text_value = str(payload.get("summary") or payload.get("content") or payload.get("purpose") or payload.get("raw_input") or item.get("relative_path") or item.get("hash"))
             source_store = "vector" if target == "vector_db" else target
@@ -389,15 +397,21 @@ def _build_four_store_context(raw_input: str, task_id: str | None = None) -> dic
             elif relation.get("relation") == "similar_grammar":
                 relation.update({"adopted": False, "adoption_scope": "grammar"})
             ok, reason = bool(relation["adopted"]), relation["relation_reason"]
-            hit = {"source_store": source_store, "rule": text_value[:800], "status": "沿用" if ok else "未採用：相關性不足", "adopted": ok, "reason": reason, "rule_confirmed": ok, "storage_item_id": item.get("item_id"), "signature_status": signature_status, "review_passed": review_passed, "hash": item.get("hash") or item.get("content_hash"), **relation}
+            hit = {"source_store": source_store, "rule": text_value[:800], "status": "沿用" if ok else "未採用：相關性不足", "governance_status": item.get("status") or payload.get("status") or "active", "adopted": ok, "reason": reason, "rule_confirmed": ok, "storage_item_id": item.get("item_id"), "signature_status": signature_status, "review_passed": review_passed, "hash": item.get("hash") or item.get("content_hash"), "author_id": (payload.get("owner_signature") or {}).get("confirmed_by") or payload.get("confirmed_by"), "version": item.get("version") or payload.get("version") or 1, **relation}
             (adopted if ok else rejected).append(hit)
     for rule in list_persisted_memory_rules(limit=20):
         text_value = str(rule.get("rule_text") or rule.get("memory_rule") or rule.get("payload") or rule)
         relation = classify_evidence_relation(raw_input, text_value, source_store="memory")
         ok, reason = bool(relation["adopted"]), relation["relation_reason"]
-        hit = {"source_store": "memory", "rule": text_value[:800], "status": "沿用" if ok else "未採用：相關性不足", "adopted": ok, "reason": reason, "rule_confirmed": ok, "must_cite": any(t in text_value for t in ("不得", "禁止", "不准", "must not")), "memory_rule_id": rule.get("rule_id"), **relation}
+        signature_status = "owner_signed" if str(rule.get("reviewer_signature") or "").strip() else "unsigned"
+        if signature_status != "owner_signed":
+            relation.update({"adopted": False, "adoption_scope": "none", "relation_reason": "記憶規則未完成使用者簽名"})
+            ok, reason = False, relation["relation_reason"]
+        hit = {"source_store": "memory", "rule": text_value[:800], "status": "沿用" if ok else "未採用：相關性不足", "governance_status": rule.get("status") or "active", "adopted": ok, "reason": reason, "rule_confirmed": ok, "must_cite": any(t in text_value for t in ("不得", "禁止", "不准", "must not")), "memory_rule_id": rule.get("rule_id"), "signature_status": signature_status, "review_passed": True, "content_hash": rule.get("rule_hash"), "author_id": "owner", "version": rule.get("version") or 1, **relation}
         (adopted if ok else rejected).append(hit)
-    return {"retrieval_first": True, "query": raw_input, "retrieval_result": retrieval, "hits": adopted, "adopted_hits": adopted, "rejected_hits": rejected, "conflicts": conflicts, "no_confirmed_rules": not adopted, "must_cite_confirmed_rules": [h for h in adopted if h.get("must_cite")]}
+    evidence_packet = build_evidence_packet({"adopted_hits": adopted})
+    citations = evidence_packet["citations"]
+    return {"retrieval_first": True, "query": raw_input, "retrieval_result": retrieval, "hits": citations, "adopted_hits": citations, "candidate_hits": evidence_packet["candidates"], "rejected_hits": rejected, "conflicts": conflicts, "no_confirmed_rules": not citations, "must_cite_confirmed_rules": [h for h in citations if h.get("must_cite")], "evidence_packet": evidence_packet}
 
 
 def _validate_task_understanding(candidate: Any) -> dict[str, Any]:
@@ -407,26 +421,49 @@ def _validate_task_understanding(candidate: Any) -> dict[str, Any]:
         raise ValueError("task understanding contains forbidden confirmed/high-privilege state")
     if candidate.get("signature_status") in ("confirmed", "owner_signed"):
         raise ValueError("model cannot set signature_status")
-    if str(candidate.get("model_role", "describe_compile_only")) != "describe_compile_only":
-        raise ValueError("model_role must be describe_compile_only")
-    return normalize_task_understanding(candidate)
+    return validate_task_understanding_strict(candidate)
 
 
 def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_context: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool, str | None]:
     understanding = None
     skipped_reason = None
+    compiler_errors: list[str] = []
+    compiler_attempts = 0
+    compiler_repairs = 0
     if MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("mode") != "sandbox":
         try:
             if _model_draft_requires_external_api_permission(MODEL_SETTINGS) and PERMISSIONS.get("external_api") is not True:
                 skipped_reason = "external_api_permission_disabled"
                 raise PermissionError(skipped_reason)
-            response = _post_openai_compatible(MODEL_SETTINGS, build_task_understanding_messages(raw_input, task_type, retrieval_context))
+            messages = build_task_understanding_messages(raw_input, task_type, retrieval_context)
+            compiler_attempts = 1
+            try:
+                response = _post_openai_compatible(MODEL_SETTINGS, messages, response_format=task_understanding_response_format())
+            except TypeError as exc:
+                if "response_format" not in str(exc):
+                    raise
+                response = _post_openai_compatible(MODEL_SETTINGS, messages)
             model_raw = parse_chat_completion_response(response)
             try:
                 understanding = _validate_task_understanding(_extract_json_object(model_raw))
-            except Exception:
-                understanding = None
-                skipped_reason = "model_raw_understanding_unstructured" if model_raw.strip() else "model_unavailable_or_invalid_json"
+            except Exception as first_error:
+                compiler_errors.append(str(first_error))
+                compiler_repairs = 1
+                compiler_attempts = 2
+                repair_messages = build_repair_messages(messages, model_raw, first_error)
+                try:
+                    try:
+                        repaired_response = _post_openai_compatible(MODEL_SETTINGS, repair_messages, response_format=task_understanding_response_format())
+                    except TypeError as exc:
+                        if "response_format" not in str(exc):
+                            raise
+                        repaired_response = _post_openai_compatible(MODEL_SETTINGS, repair_messages)
+                    repaired_raw = parse_chat_completion_response(repaired_response)
+                    understanding = _validate_task_understanding(_extract_json_object(repaired_raw))
+                except Exception as repair_error:
+                    compiler_errors.append(str(repair_error))
+                    understanding = None
+                    skipped_reason = "model_compiler_repair_failed"
         except PermissionError:
             understanding = None
         except Exception as exc:
@@ -435,6 +472,13 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
     else:
         skipped_reason = "model_not_connected"
     draft = build_scbkr_from_understanding(raw_input, task_type, understanding, retrieval_context)
+    draft["compiler_report"] = build_compiler_report(
+        status="model_compiled" if understanding is not None else "base_logic" if compiler_attempts == 0 else "repair_failed",
+        attempts=compiler_attempts,
+        repairs=compiler_repairs,
+        errors=compiler_errors,
+        model_used=understanding is not None,
+    )
     if skipped_reason:
         draft["draft_model_call_skipped_reason"] = skipped_reason
     return draft, False, skipped_reason
@@ -686,8 +730,8 @@ def save_task(task: dict[str, Any]) -> dict[str, Any]:
     return persisted
 
 
-def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, str]]) -> dict[str, Any]:
-    payload = build_chat_completion_payload(messages, settings)
+def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, str]], response_format: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = build_chat_completion_payload(messages, settings, response_format=response_format)
     url = settings["base_url"].rstrip("/") + "/chat/completions"
     request = UrlRequest(
         url,
@@ -1384,7 +1428,7 @@ def storage_request(task_id: str, payload: dict[str, Any] | None = None) -> dict
         selected_ui = validate_ui_targets(raw_selected) if raw_selected is not None else (["corpus", "logic"] if payload_was_none else [])
         if not selected_ui and user_decision not in ("temporary_only", "do_not_store"):
             raise ValueError("尚未選擇寫入目標。請先選擇至少一個寫入目標，或選擇「只暫存 / 不寫入」。")
-        task["storage_request"] = build_storage_request(task, task.get("review_result", {}), candidate_targets=["vector_db", "corpus", "logic", "memory"])
+        task["storage_request"] = build_storage_request(task, task.get("review_result", {}), candidate_targets=["vector", "corpus", "logic", "memory"])
         task["storage_request"].update({"selected_targets": selected_ui, "user_decision": user_decision, "signature": payload.get("signature")})
         task["selected_targets"] = selected_ui
         task["user_decision"] = user_decision
@@ -1456,7 +1500,7 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("signature is required")
 
         plan_targets = [to_plan_target(target) for target in selected_targets]
-        physical_targets = [target for target in plan_targets if target in ("vector_db", "corpus", "logic", "memory")]
+        physical_targets = [target for target in plan_targets if target in ("vector", "corpus", "logic", "memory")]
         proposed_plan = build_storage_commit_plan(task, task.get("review_result", {}), plan_targets, storage_signature=signature if "memory" in plan_targets else None, storage_notes=payload.get("storage_notes", "P15-C user second-confirmed storage commit."))
         proposed_plan["selected_targets"] = selected_targets
         proposed_plan["physical_write_performed"] = False
@@ -1470,7 +1514,7 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         task["storage_plan"]["storage_commit_key"] = storage_commit_key
         physical_plan = dict(task["storage_plan"])
         physical_plan["selected_targets"] = physical_targets
-        physical_plan["allow_vector_metadata"] = "vector_db" in physical_targets
+        physical_plan["allow_vector_metadata"] = "vector" in physical_targets
         physical_plan["p15d_structured_payloads"] = True
         items = commit_storage_items(task, physical_plan, source_event_id=requested_event["event_id"]) if physical_targets else []
         for item in items:
@@ -1688,7 +1732,7 @@ def data_center_overview(task_id: str | None = None) -> dict[str, Any]:
     def counts(prefix: str, items: list[dict[str, Any]], events: list[dict[str, Any]]) -> dict[str, int]:
         return {
             f"{prefix}storage_records_count": len(items),
-            f"{prefix}vector_count": sum(1 for i in items if i.get("target") == "vector_db"),
+            f"{prefix}vector_count": sum(1 for i in items if i.get("target") in ("vector", "vector_db")),
             f"{prefix}corpus_count": sum(1 for i in items if i.get("target") == "corpus"),
             f"{prefix}logic_count": sum(1 for i in items if i.get("target") == "logic"),
             f"{prefix}memory_count": sum(1 for i in items if i.get("target") == "memory"),
@@ -1721,7 +1765,7 @@ def data_center_section(section: str, task_id: str | None = None) -> dict[str, A
     elif section == "generations": items = [_dc_item_from_task(t, "generation_result") for t in tasks if t.get("generation_result")]
     elif section == "reviews": items = [_dc_item_from_task(t, "review_result") for t in tasks if t.get("review_result")]
     elif section == "storage": items = [{**_dc_item_from_task(t, "storage_result"), "storage_confirmed": t.get("storage_confirmed"), "physical_write_performed": t.get("physical_write_performed"), **(t.get("storage_result") or {})} for t in tasks if t.get("storage_result")]
-    elif section == "vector": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "vector_db"]
+    elif section == "vector": items = [_dc_item_from_storage(i) for i in storage if i.get("target") in ("vector", "vector_db")]
     elif section == "corpus": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "corpus"]
     elif section == "logic": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "logic"]
     elif section == "memory": items = [_dc_item_from_storage(i) for i in storage if i.get("target") == "memory"]

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/evidence_packet.schema.json",
+  "title": "SCBKR Evidence Packet v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "formal_stores", "citations", "candidates", "must_cite_ids", "authority_count", "candidate_count", "vector_is_discovery_only"],
+  "properties": {
+    "contract_version": { "const": "scbkr.evidence.v2" },
+    "formal_stores": { "const": ["vector", "corpus", "logic", "memory"] },
+    "citations": { "type": "array", "items": { "$ref": "#/$defs/citation" } },
+    "candidates": { "type": "array", "items": { "$ref": "#/$defs/citation" } },
+    "must_cite_ids": { "type": "array", "items": { "type": "string" } },
+    "authority_count": { "type": "integer", "minimum": 0 },
+    "candidate_count": { "type": "integer", "minimum": 0 },
+    "vector_is_discovery_only": { "const": true }
+  },
+  "$defs": {
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["citation_id", "source_store", "source_id", "content_hash", "author_id", "version", "status", "signature_status", "review_passed", "adoption_scope", "authority", "must_cite", "excerpt"],
+      "properties": {
+        "citation_id": { "type": "string", "minLength": 1 },
+        "source_store": { "enum": ["vector", "corpus", "logic", "memory"] },
+        "source_id": { "type": "string", "minLength": 1 },
+        "content_hash": { "type": "string", "minLength": 1 },
+        "author_id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "signature_status": { "type": "string", "minLength": 1 },
+        "review_passed": { "type": "boolean" },
+        "adoption_scope": { "type": "string" },
+        "authority": { "type": "boolean" },
+        "must_cite": { "type": "boolean" },
+        "excerpt": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

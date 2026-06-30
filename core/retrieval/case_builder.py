@@ -21,8 +21,8 @@ def build_retrieval_text(case: dict[str, Any]) -> str:
 def build_success_case_from_storage_item(task: dict[str, Any], storage_item: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     if task.get("status") not in ("storage_committed", "completed") or task.get("review_passed") is not True or task.get("storage_confirmed") is not True or task.get("physical_write_performed") is not True:
         raise ValueError("success_case requires storage_committed or completed task with review_passed, storage_confirmed, and physical writes")
-    if storage_item.get("target") not in ("corpus", "logic", "exports"):
-        raise ValueError("success_case only supports corpus/logic/exports")
+    if storage_item.get("target") not in ("corpus", "logic"):
+        raise ValueError("success_case only supports corpus/logic")
     review = payload.get("review_result") or task.get("review_result") or {}
     if review.get("review_passed") is not True:
         raise ValueError("review_failed output cannot become success_case")
@@ -35,7 +35,13 @@ def build_success_case_from_storage_item(task: dict[str, Any], storage_item: dic
         "sealed_scbkr_payload": scbkr, "task_type": task.get("task_type"), "raw_input": task.get("raw_input"),
         "generation_summary": generation.get("summary") or generation.get("output") or generation.get("content"),
         "review_summary": review.get("review_message") or review.get("message") or review.get("status"),
-        "acceptance_criteria": task.get("scbkr", {}).get("R", {}).get("acceptance_criteria"), "created_at": _now(),
+        "acceptance_criteria": task.get("scbkr", {}).get("R", {}).get("acceptance_criteria"),
+        "signature_status": payload.get("signature_status") or scbkr.get("signature_status") or "unsigned",
+        "review_passed": review.get("review_passed") is True,
+        "governance_status": payload.get("status") or storage_item.get("status") or "active",
+        "author_id": (payload.get("owner_signature") or {}).get("confirmed_by") or "owner",
+        "version": payload.get("version") or storage_item.get("version") or 1,
+        "created_at": _now(),
     })
     case["retrieval_text"] = build_retrieval_text(case); case["retrieval_text_hash"] = hash_retrieval_text(case["retrieval_text"])
     return case
@@ -50,6 +56,6 @@ def build_memory_rule_case(memory_rule: dict[str, Any]) -> dict[str, Any]:
     if not memory_rule.get("relative_path") or not memory_rule.get("rule_hash"):
         raise ValueError("relative_path and rule_hash are required")
     scope = payload.get("scope") or plan.get("scope") or {"applies_to_task_types": plan.get("applies_to_task_types", []), "trigger_conditions": plan.get("trigger_conditions", []), "forbidden_patterns": plan.get("forbidden_patterns", []), "required_behavior": plan.get("required_behavior", [])}
-    case = sanitize_payload({"case_id": f"case:memory:{memory_rule.get('task_id')}:{memory_rule.get('rule_hash')[:12]}", "case_type": "signed_memory_rule", "task_id": memory_rule.get("task_id"), "rule_hash": memory_rule.get("rule_hash"), "relative_path": memory_rule.get("relative_path"), "scope": scope, "rule_statement": plan.get("rule_statement") or payload.get("rule_statement"), "user_failure_judgment": plan.get("user_failure_judgement") or payload.get("user_failure_judgment"), "required_behavior": scope.get("required_behavior"), "forbidden_patterns": scope.get("forbidden_patterns"), "created_at": memory_rule.get("created_at") or _now()})
+    case = sanitize_payload({"case_id": f"case:memory:{memory_rule.get('task_id')}:{memory_rule.get('rule_hash')[:12]}", "case_type": "signed_memory_rule", "task_id": memory_rule.get("task_id"), "rule_hash": memory_rule.get("rule_hash"), "relative_path": memory_rule.get("relative_path"), "scope": scope, "rule_statement": plan.get("rule_statement") or payload.get("rule_statement"), "user_failure_judgment": plan.get("user_failure_judgement") or payload.get("user_failure_judgment"), "required_behavior": scope.get("required_behavior"), "forbidden_patterns": scope.get("forbidden_patterns"), "signature_status": "owner_signed", "review_passed": True, "governance_status": memory_rule.get("status") or "active", "author_id": "owner", "version": memory_rule.get("version") or 1, "created_at": memory_rule.get("created_at") or _now()})
     case["retrieval_text"] = build_retrieval_text(case); case["retrieval_text_hash"] = hash_retrieval_text(case["retrieval_text"])
     return case

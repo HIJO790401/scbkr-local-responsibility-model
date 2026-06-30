@@ -28,12 +28,12 @@
     "storage_confirmed": { "type": "boolean", "default": false },
     "candidate_targets": {
       "type": "array",
-      "items": { "type": "string", "enum": ["vector_db", "corpus", "logic", "memory"] },
+      "items": { "type": "string", "enum": ["vector", "corpus", "logic", "memory"] },
       "default": []
     },
     "selected_targets": {
       "type": "array",
-      "items": { "type": "string", "enum": ["vector_db", "corpus", "logic", "memory"] },
+      "items": { "type": "string", "enum": ["vector", "corpus", "logic", "memory"] },
       "default": []
     },
     "blocked_targets": {

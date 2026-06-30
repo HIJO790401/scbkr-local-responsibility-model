@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from core.storage.runtime_paths import CORPUS_DIR, EXPORTS_DIR, LOGIC_DIR, MEMORY_DIR, VECTOR_DB_DIR, REPO_ROOT
+from core.storage.runtime_paths import REPO_ROOT
 from core.storage.storage_manifest import SUCCESS_STORAGE_TARGETS
 
 SENSITIVE_KEYS = {"api_key", "apikey", "authorization", "access_token", "refresh_token", "token", "secret"}
@@ -31,11 +31,9 @@ def _active_data_dir() -> Path:
 def _target_dir(target: str) -> Path:
     base = _active_data_dir()
     return {
-        "vector_db": base / "vector_db",
-        "vector": base / "vector_db",
+        "vector": base / "vector",
         "corpus": base / "corpus",
         "logic": base / "logic",
-        "exports": base / "exports",
         "memory": base / "memory",
     }[target]
 
@@ -159,8 +157,8 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
         "created_at": now,
     }
     payloads: dict[str, dict[str, Any]] = {}
-    if "vector" in selected_targets or "vector_db" in selected_targets:
-        payloads["vector_db"] = {**base, "target": "vector", "case_id": f"vector:{task.get('task_id')}", "S": scbkr.get("S"), "C": scbkr.get("C"), "B": scbkr.get("B"), "K": scbkr.get("K"), "R": scbkr.get("R"), "embedding_status": "pending", "embedding": None, "status": "metadata_saved_embedding_pending"}
+    if "vector" in selected_targets:
+        payloads["vector"] = {**base, "target": "vector", "case_id": f"vector:{task.get('task_id')}", "S": scbkr.get("S"), "C": scbkr.get("C"), "B": scbkr.get("B"), "K": scbkr.get("K"), "R": scbkr.get("R"), "embedding_status": "pending", "embedding": None, "status": "metadata_saved_embedding_pending"}
     if "corpus" in selected_targets:
         payloads["corpus"] = {**base, "target": "corpus", "source_id": f"corpus:{task.get('task_id')}", "type": "review_passed_generation", "tags": [str(task.get("task_type") or "general"), "corpus"], "source_origin": "user_confirmed_storage"}
     if "logic" in selected_targets:
@@ -223,16 +221,14 @@ def _payload_for_target(task: dict[str, Any], target: str, prepared: dict[str, d
     prepared = prepared or {}
     if target in prepared:
         return prepared[target]
-    if target == "vector_db":
-        return prepare_storage_payloads(task, ["vector"], task.get("ledger_id"))["vector_db"]
+    if target == "vector":
+        return prepare_storage_payloads(task, ["vector"], task.get("ledger_id"))["vector"]
     if target == "corpus":
         return prepared.get("corpus") or build_success_corpus_payload(task)
     if target == "logic":
         return prepared.get("logic") or build_logic_payload(task)
     if target == "memory":
         return prepared.get("memory") or prepare_storage_payloads(task, ["memory"], task.get("ledger_id"))["memory"]
-    if target == "exports":
-        return build_export_payload(task)
     raise ValueError(f"unsupported physical storage target: {target}")
 
 
@@ -254,7 +250,7 @@ def _governance_metadata(now: str) -> dict[str, Any]:
 
 
 def build_storage_item(task: dict[str, Any], target: str, payload: dict[str, Any], source_event_id: str | None = None) -> dict[str, Any]:
-    supported_targets = set(SUCCESS_STORAGE_TARGETS) | {"vector_db", "memory"}
+    supported_targets = set(SUCCESS_STORAGE_TARGETS)
     if target not in supported_targets:
         raise ValueError(f"unsupported physical storage target: {target}")
     now = str(payload.get("created_at") or payload.get("stored_at") or task.get("created_at") or f"system_storage:{task.get('task_id') or 'unknown-task'}")
@@ -280,13 +276,17 @@ def commit_storage_items(task: dict[str, Any], storage_plan: dict[str, Any], sou
     if task.get("review_passed") is not True or task.get("review_result", {}).get("review_passed") is not True:
         raise ValueError("storage commit requires review_passed task")
     requested = set(storage_plan.get("selected_targets") or []) | {item.get("target") for item in storage_plan.get("storage_items", [])}
-    supported_targets = ["vector_db", "corpus", "logic", "memory", "exports"]
+    # Accept old plans as input only; all new records are written with target=vector.
+    if "vector_db" in requested:
+        requested.remove("vector_db")
+        requested.add("vector")
+    supported_targets = ["vector", "corpus", "logic", "memory"]
     targets = [target for target in supported_targets if target in requested]
     if storage_plan.get("allow_vector_metadata") is not True:
-        targets = [target for target in targets if target != "vector_db"]
+        targets = [target for target in targets if target != "vector"]
     if not targets and not requested:
         targets = ["corpus", "logic"]
-    prepared = prepare_storage_payloads(task, ["vector" if t == "vector_db" else t for t in targets], task.get("ledger_id")) if storage_plan.get("p15d_structured_payloads") is True else {}
+    prepared = prepare_storage_payloads(task, targets, task.get("ledger_id")) if storage_plan.get("p15d_structured_payloads") is True else {}
     items: list[dict[str, Any]] = []
     for target in targets:
         payload = _payload_for_target(task, target, prepared)

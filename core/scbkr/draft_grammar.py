@@ -94,10 +94,39 @@ def build_scbkr_grammar_pack() -> str:
 
 
 def build_task_understanding_messages(raw_input: str, task_type: str, evidence_context: dict[str, Any] | None = None) -> list[dict[str, str]]:
-    adopted = (evidence_context or {}).get("adopted_hits", [])
+    from core.scbkr.compiler import TASK_UNDERSTANDING_CONTRACT_VERSION, task_understanding_json_schema
+
+    context = evidence_context or {}
+    packet = context.get("evidence_packet") or {
+        "contract_version": "scbkr.evidence.v2",
+        "citations": [],
+        "candidates": [],
+        "vector_is_discovery_only": True,
+    }
     return [
-        {"role": "system", "content": SCBKR_GRAMMAR_PACK_ZH + "\nReturn JSON only."},
-        {"role": "user", "content": str({"raw_input": raw_input, "task_type": task_type, "adopted_evidence": adopted})},
+        {
+            "role": "system",
+            "content": (
+                SCBKR_GRAMMAR_PACK_ZH
+                + "\nReturn exactly one JSON object. Do not add keys. Contract: "
+                + TASK_UNDERSTANDING_CONTRACT_VERSION
+                + "\nJSON Schema: "
+                + json.dumps(task_understanding_json_schema(), ensure_ascii=False, separators=(",", ":"))
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "raw_input": raw_input,
+                    "task_type": task_type,
+                    "evidence_packet": packet,
+                    "citation_rule": "Only evidence_packet.citations may be used as formal basis. candidates are discovery-only.",
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        },
     ]
 
 
@@ -181,7 +210,7 @@ def build_scbkr_from_understanding(raw_input: str, task_type: str, understanding
         draft["R"]["acceptance_criteria"] = list(draft["R"].get("acceptance_criteria", [])) + acceptance_criteria
     adopted = (evidence_context or {}).get("adopted_hits", []) or []
     if adopted:
-        draft["K"]["references"] = ["使用者原始指令", "SCBKR 基礎責任鏈語法"] + [h.get("rule") or h.get("summary") or h.get("case_id") for h in adopted]
+        draft["K"]["references"] = ["使用者原始指令", "SCBKR 基礎責任鏈語法"] + [h.get("excerpt") or h.get("rule") or h.get("summary") or h.get("citation_id") or h.get("case_id") for h in adopted]
     else:
         draft["K"]["references"] = ["使用者原始指令", "SCBKR 基礎責任鏈語法"]
         draft["K"]["source_credibility"] = ["本次未採用四庫資料", "不得聲稱引用既有資料", "本次未命中相關已確認資料。"]

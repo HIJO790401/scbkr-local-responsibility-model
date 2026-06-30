@@ -98,9 +98,9 @@ def test_storage_confirm_with_signature_writes_formal_four_store_targets_and_ind
     assert (isolated_runtime / "corpus").is_dir()
     assert (isolated_runtime / "logic").is_dir()
     assert not (isolated_runtime / "exports").exists()
-    assert (isolated_runtime / "vector_db").is_dir()
+    assert (isolated_runtime / "vector").is_dir()
     assert (isolated_runtime / "memory").is_dir()
-    assert {item["target"] for item in list_storage_items(task_id=task["task_id"])} == {"vector_db", "corpus", "logic", "memory"}
+    assert {item["target"] for item in list_storage_items(task_id=task["task_id"])} == {"vector", "corpus", "logic", "memory"}
     event_types = [event["event_type"] for event in read_ledger_events(task_id=task["task_id"])]
     assert "storage_physical_write_completed" in event_types
     assert REPO_SQLITE_PATH.exists() is repo_sqlite_existed
