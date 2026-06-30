@@ -17,6 +17,7 @@ const dims: ScbkrDimensionKey[] = ["S", "C", "B", "K", "R"];
 const dimColor: Record<ScbkrDimensionKey, string> = { S: "blue", C: "cyan", B: "yellow", K: "red", R: "green" };
 
 type View = "command" | "rules" | "workbench" | "tools" | "data" | "model" | "about";
+type CommandMode = "chat" | "search" | "rule";
 type Rule = Record<string, any>;
 type Tool = Record<string, any>;
 
@@ -68,6 +69,10 @@ export default function V2App() {
     { role: "assistant", content: en ? "SCBKR local runtime ready." : "SCBKR 本機責任核心已就緒。" },
   ]);
   const [chatInput, setChatInput] = useState("");
+  const [commandMode, setCommandMode] = useState<CommandMode>("chat");
+  const [naturalRuleText, setNaturalRuleText] = useState("");
+  const [dataQuery, setDataQuery] = useState("");
+  const [readResult, setReadResult] = useState<Record<string, any> | null>(null);
   const [taskInput, setTaskInput] = useState("");
   const [task, setTask] = useState<TaskSummary | null>(null);
   const [ownerSignature, setOwnerSignature] = useState("");
@@ -148,16 +153,41 @@ export default function V2App() {
     if (!text) return;
     setMessages((current) => [...current, { role: "user", content: text }]);
     setChatInput("");
+    if (commandMode === "search") {
+      const result = await readFourStores(text);
+      if (result) setMessages((current) => [...current, { role: "assistant", content: result.answer }]);
+      return;
+    }
+    if (commandMode === "rule") {
+      const result = await createNaturalRule(text);
+      if (result) {
+        setMessages((current) => [...current, { role: "assistant", content: en ? "Rule draft created. Review and sign it in Rule Center." : "規則草案已建立。請在規則中心檢查、簽名，再決定是否啟用。" }]);
+        setView("rules");
+      }
+      return;
+    }
     const routed = await run(en ? "Route request" : "判斷任務", () => api<any>("/api/chat/intent", { method: "POST", body: JSON.stringify({ message: text }) }));
     if (!routed) return;
-    if (routed.intent === "create_confirmation" || routed.intent === "create_new_rule_confirmation") {
+    if (routed.intent === "create_new_rule_confirmation") {
+      const drafted = await createNaturalRule(text);
+      if (drafted) setMessages((current) => [...current, { role: "assistant", content: en ? "I created an unsigned rule draft. You remain the only signer and activator." : "我已建立未簽名規則草案。只有你能簽名與啟用。" }]);
+      return;
+    }
+    if (routed.intent === "create_confirmation") {
       setTaskInput(text);
       await createTask(text);
       setMessages((current) => [...current, { role: "assistant", content: en ? "Draft compiled. Review S/C/B/K/R in Workbench." : "草案已編譯，請在工作台檢查 S/C/B/K/R。" }]);
       return;
     }
     const reply = await run(en ? "Chat" : "模型回覆", () => api<any>("/api/chat/general", { method: "POST", body: JSON.stringify({ message: text, locale }) }));
-    if (reply) setMessages((current) => [...current, { role: "assistant", content: reply.reply }]);
+    if (reply) {
+      let ruleNotice = "";
+      if (reply.suggestion) {
+        const drafted = await createNaturalRule(reply.suggestion.suggested_instruction || text);
+        if (drafted) ruleNotice = en ? "\n\nUnsigned rule draft created automatically. Review it in Rule Center before signing." : "\n\n已自動建立未簽名規則草案；請到規則中心檢查後再簽名。";
+      }
+      setMessages((current) => [...current, { role: "assistant", content: `${reply.reply}${ruleNotice}` }]);
+    }
   }
 
   async function createTask(input = taskInput) {
@@ -199,7 +229,8 @@ export default function V2App() {
   async function createRule() {
     const payload = {
       rule_name: ruleForm.name,
-      rule_author: manifest?.author?.name || "Owner",
+      rule_text: ruleForm.name,
+      rule_author: manifest?.creator?.name || "Owner",
       rule_source: "user_defined",
       rule_version: "v1.0.0",
       rule_scope: { task_types: ["*"], tools: ruleForm.tools.split(",").map((x) => x.trim()).filter(Boolean), workflows: ["*"], keywords: ruleForm.keywords.split(",").map((x) => x.trim()).filter(Boolean), actions: [ruleForm.action] },
@@ -207,6 +238,26 @@ export default function V2App() {
     };
     const created = await run(en ? "Create rule draft" : "建立規則草案", () => api<any>("/api/rules/draft", { method: "POST", body: JSON.stringify(payload) }));
     if (created) { setSelectedRule(created.rule.rule_id); await refreshAll(); }
+  }
+
+  async function createNaturalRule(instruction = naturalRuleText) {
+    const text = instruction.trim();
+    if (!text) return null;
+    const created = await run(en ? "Compile natural-language rule" : "編譯自然語言規則", () => api<any>("/api/rules/draft-from-text", { method: "POST", body: JSON.stringify({ instruction: text }) }));
+    if (created) {
+      setSelectedRule(created.rule.rule_id);
+      setNaturalRuleText("");
+      await refreshAll();
+    }
+    return created;
+  }
+
+  async function readFourStores(query = dataQuery) {
+    const text = query.trim();
+    if (!text) return null;
+    const result = await run(en ? "Search and read four stores" : "搜尋並閱讀四庫", () => api<any>("/api/data-center/ask", { method: "POST", body: JSON.stringify({ query: text }) }));
+    if (result) { setReadResult(result); setDataQuery(text); }
+    return result;
   }
 
   async function signRule() {
@@ -294,9 +345,10 @@ export default function V2App() {
     <section className="sovereignty-zone" aria-label={en ? "Rule sovereignty" : "規則主權區"}>
       <div className="zone-title"><div><span>RULE SOVEREIGNTY</span><h2>{copy.navigation.rules}</h2></div><button className="icon-button" onClick={() => void refreshAll()} title={en ? "Refresh" : "更新"}><RefreshCw size={16} /></button></div>
       <div className="metric-line"><span>{en ? "Active" : "啟用"}<b>{activeRules}</b></span><span>{en ? "Signed" : "已簽名"}<b>{rules.filter((r) => ["owner_signed", "active"].includes(r.activation_status)).length}</b></span><span>{en ? "Packs" : "規則包"}<b>{packs.length}</b></span></div>
+      <div className="natural-rule-composer"><label>{en ? "Describe the rule in plain language" : "用一句人話建立規則"}<textarea value={naturalRuleText} onChange={(e) => setNaturalRuleText(e.target.value)} placeholder={en ? "Before publishing anything, require my signature." : "例如：凡是要發布內容，都必須先讓我簽名確認。"} /></label><button disabled={!naturalRuleText.trim()} onClick={() => void createNaturalRule()}><Sparkles size={15} />{en ? "Create unsigned draft" : "建立未簽名草案"}</button></div>
       <div className="rule-stack">
         {rules.length === 0 && <div className="empty-state">{en ? "No local rules" : "尚無本機規則"}</div>}
-        {rules.slice(0, 8).map((rule) => <button key={rule.rule_id} className={`rule-row ${selectedRule === rule.rule_id ? "selected" : ""}`} onClick={() => setSelectedRule(rule.rule_id)}><span className={`state-dot ${rule.activation_status}`} /><span><b>{rule.rule_name}</b><small>{rule.rule_source} · {rule.rule_version}</small></span><em>{rule.activation_status}</em></button>)}
+        {rules.slice(0, 8).map((rule) => <button key={rule.rule_id} className={`rule-row ${selectedRule === rule.rule_id ? "selected" : ""}`} onClick={() => setSelectedRule(rule.rule_id)}><span className={`state-dot ${rule.activation_status}`} /><span><b>{rule.rule_name}</b><small>{rule.rule_text || rule.rule_name}</small><small>{rule.rule_source} · {rule.rule_version}</small></span><em>{rule.activation_status}</em></button>)}
       </div>
       <details className="compact-form" open={view === "rules"}>
         <summary><Sparkles size={15} />{en ? "New user rule" : "新增使用者規則"}</summary>
@@ -313,9 +365,10 @@ export default function V2App() {
   const chatPanel = (
     <section className="command-zone chat-main" aria-label="一般聊天主視窗">
       <ResponsibilityCore status={status} locale={locale} activeRules={activeRules} citations={citations} tokensAvoided={Number(tokenMetrics.estimated_tokens_avoided || task?.scbkr?.token_metrics?.estimated_tokens_avoided || 0)} />
-      <header className="command-header"><div><span>LOCAL AI CONTROL PLANE</span><h1>{en ? "Command Stream" : "指令流"}</h1></div><div className="stage-chip"><Activity size={15} />{status}</div></header>
+      <header className="command-header"><div><span>NATURAL LANGUAGE CONTROL PLANE</span><h1>{en ? "Natural Language Console" : "自然語言控制台"}</h1></div><div className="stage-chip"><Activity size={15} />{status}</div></header>
+      <div className="command-modes" role="tablist" aria-label={en ? "Natural language mode" : "自然語言模式"}><button className={commandMode === "chat" ? "active" : ""} onClick={() => setCommandMode("chat")}><MessageSquare size={15} />{en ? "Chat" : "一般對話"}</button><button className={commandMode === "search" ? "active" : ""} onClick={() => setCommandMode("search")}><Search size={15} />{en ? "Search stores" : "搜尋閱讀四庫"}</button><button className={commandMode === "rule" ? "active" : ""} onClick={() => setCommandMode("rule")}><FileKey size={15} />{en ? "Create rule" : "建立規則"}</button></div>
       <div className="message-list">{messages.map((item, index) => <div key={`${item.role}-${index}`} className={`message ${item.role}`}><span>{item.role === "assistant" ? "SCBKR" : en ? "YOU" : "你"}</span>{item.content}</div>)}</div>
-      <div className="chat-input"><textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={en ? "Describe a task or ask SCBKR..." : "輸入任務、規則或一般問題…"} /><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Send" : "送出"}><Send size={20} /></button></div>
+      <div className="chat-input"><label className="natural-input-label"><span>{commandMode === "chat" ? (en ? "Talk to the local model" : "直接用人話跟本機模型說") : commandMode === "search" ? (en ? "Ask the signed four stores" : "搜尋並閱讀已簽名四庫") : (en ? "Describe the rule you want" : "說出你要建立的規則")}</span><textarea aria-label={en ? "Natural language input" : "自然語言輸入"} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={commandMode === "chat" ? (en ? "Describe a task or ask SCBKR..." : "直接輸入你想做的事或想問的問題…") : commandMode === "search" ? (en ? "What do the signed stores say about..." : "例如：四庫裡有哪些關於發布規則的資料？") : (en ? "Before publishing, require my signature..." : "例如：凡是要發布內容，都必須先讓我簽名。")} /></label><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Run" : "執行"}>{commandMode === "search" ? <Search size={20} /> : commandMode === "rule" ? <FileKey size={20} /> : <Send size={20} />}</button></div>
     </section>
   );
 
@@ -351,11 +404,11 @@ export default function V2App() {
 
   const desktopCommand = <div className="control-grid">{rulePanel}{chatPanel}{rightMode === "workbench" ? workbenchPanel : toolPanel}<div className="right-switch"><button className={rightMode === "workbench" ? "active" : ""} onClick={() => setRightMode("workbench")}><SlidersHorizontal size={15} /></button><button className={rightMode === "tools" ? "active" : ""} onClick={() => setRightMode("tools")}><Wrench size={15} /></button></div></div>;
 
-  const dataPage = <section className="full-panel data-center-panel"><div className="page-head"><div><span>LOCAL EVIDENCE PLANE</span><h1>資料中心</h1></div><button onClick={() => void refreshAll()}><RefreshCw size={15} />{en ? "Refresh" : "讀回資料中心"}</button></div><div className="store-band">{stores.map((store) => { const Icon = store.icon; return <section key={store.id}><Icon /><span>{store.label}</span><strong>{store.count}</strong></section>; })}</div><div className="trace-table"><h2>{en ? "Execution traces" : "執行回放"}</h2>{traces.map((trace) => <div key={trace.trace_id}><span className={`state-dot ${trace.allowed ? "active" : "revoked"}`} /><b>{trace.tool_id}</b><span>{trace.action}</span><span>{trace.reason}</span><time>{trace.timestamp}</time></div>)}</div></section>;
+  const dataPage = <section className="full-panel data-center-panel"><div className="page-head"><div><span>LOCAL EVIDENCE PLANE</span><h1>{en ? "Search & Read Data Center" : "四庫搜尋與閱讀區"}</h1></div><button onClick={() => void refreshAll()}><RefreshCw size={15} />{en ? "Refresh" : "讀回資料中心"}</button></div><div className="data-reader"><div><span>AUTHORITATIVE STORE READER</span><h2>{en ? "Ask your signed knowledge" : "用人話查詢已簽名資料"}</h2><small>{en ? "Vector matches are candidates only. The model reads signed and reviewed citations." : "向量只負責找候選；模型只整理已簽名、已驗收的正式引用。"}</small></div><div className="reader-input"><input aria-label={en ? "Search four stores" : "搜尋四庫"} value={dataQuery} onChange={(e) => setDataQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void readFourStores(); }} placeholder={en ? "Ask a question about your stored rules..." : "例如：我的發布規則要求什麼？"} /><button disabled={!dataQuery.trim()} onClick={() => void readFourStores()}><Search size={16} />{en ? "Search and read" : "搜尋並閱讀"}</button></div>{readResult && <div className={`reader-result ${readResult.citation_count ? "has-evidence" : "empty"}`}><header><b>{readResult.citation_count || 0} {en ? "authoritative citations" : "筆正式引用"}</b><span>{readResult.candidates_excluded || 0} {en ? "candidates excluded" : "筆候選已排除"}</span><em>{readResult.model_called ? (en ? "MODEL READING DRAFT" : "模型閱讀草稿") : (en ? "NO MODEL CLAIM" : "未讓模型無依據作答")}</em></header><p>{readResult.answer}</p>{(readResult.citations || []).map((citation: any, index: number) => <div className="citation-row" key={`${citation.content_hash}-${index}`}><b>{citation.source_store}</b><span>{citation.rule}</span><code>{String(citation.content_hash || "").slice(0, 12)}</code></div>)}</div>}</div><div className="store-band">{stores.map((store) => { const Icon = store.icon; return <section key={store.id}><Icon /><span>{store.label}</span><strong>{store.count}</strong></section>; })}</div><div className="trace-table"><h2>{en ? "Execution traces" : "執行回放"}</h2>{traces.map((trace) => <div key={trace.trace_id}><span className={`state-dot ${trace.allowed ? "active" : "revoked"}`} /><b>{trace.tool_id}</b><span>{trace.action}</span><span>{trace.reason}</span><time>{trace.timestamp}</time></div>)}</div></section>;
 
   const modelPage = <section className="full-panel model-settings"><div className="page-head"><div><span>RUNTIME CONNECTION</span><h1>模型設定</h1></div><Bot /></div><div className="settings-grid"><section><h2>{en ? "Desktop / phone connection" : "桌機 / 手機連線"}</h2><div className={`companion-state ${companion?.lan_companion_enabled ? "on" : "off"}`}><span>LAN COMPANION</span><b>{companion?.lan_companion_enabled ? "ON" : "OFF"}</b><small>{companion?.base_url || backend} · {companion?.active_devices || 0} devices</small></div><label>Backend API URL<input value={backend} onChange={(e) => setBackend(e.target.value)} /></label><label>Companion token<input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} /></label><div className="button-row"><button onClick={saveConnection}><Network size={15} />{en ? "Connect" : "儲存並連線"}</button><button disabled={!companion?.lan_companion_enabled} onClick={() => void startPairing()}><FileKey size={15} />{en ? "Pair code" : "取得配對碼"}</button><button disabled={!companion?.active_devices} onClick={() => void revokeCompanions()}><X size={15} />{en ? "Revoke" : "撤銷裝置"}</button></div>{pairing && <div className="pairing-code"><span>{en ? "PAIRING CODE" : "手機配對碼"}</span><strong>{pairing.pairing_code}</strong><small>{pairing.base_url}</small><time>{pairing.expires_at}</time></div>}</section><section><h2>LLM Runtime</h2><label>Provider<select value={modelForm.provider} onChange={(e) => setModelForm({ ...modelForm, provider: e.target.value })}><option value="lm_studio">LM Studio</option><option value="ollama">Ollama</option><option value="openai_compatible">OpenAI-compatible</option><option value="sandbox_mock_model">Sandbox</option></select></label><label>Base URL<input value={modelForm.base_url} onChange={(e) => setModelForm({ ...modelForm, base_url: e.target.value })} /></label><label>Model name<input value={modelForm.model_name} onChange={(e) => setModelForm({ ...modelForm, model_name: e.target.value })} /></label><label>API Key<input type="password" value={modelForm.api_key} onChange={(e) => setModelForm({ ...modelForm, api_key: e.target.value })} /></label><div className="button-row"><button onClick={() => void saveModel()}><Save size={15} />{en ? "Save" : "儲存設定"}</button><button onClick={() => void testModel()}><Activity size={15} />{en ? "Test" : "測試模型連線"}</button></div></section></div></section>;
 
-  const aboutPage = <section className="full-panel about-panel"><div className="about-mark">SCBKR<span>2.0</span></div><h1>{manifest?.name || copy.product.name}</h1><p className="about-tagline">{manifest?.tagline || copy.product.category}</p><dl><div><dt>{en ? "Author" : "作者"}</dt><dd>{manifest?.author?.name || "許文耀 / 沈耀888π"}</dd></div><div><dt>{en ? "Organization" : "組織"}</dt><dd>{manifest?.organization?.name || "語意防火牆"}</dd></div><div><dt>{en ? "Contact" : "合作聯絡"}</dt><dd>{manifest?.contact?.email || "ken0963521@gmail.com"}</dd></div><div><dt>{en ? "Runtime" : "運行定位"}</dt><dd>{manifest?.runtime?.[locale] || "Local rule-driven AI control layer"}</dd></div></dl></section>;
+  const aboutPage = <section className="full-panel about-panel"><div className="about-mark">SCBKR<span>2.0</span></div><h1>{manifest?.name || copy.product.name}</h1><p className="about-tagline">{manifest?.tagline || copy.product.category}</p><dl><div><dt>{en ? "Author" : "作者"}</dt><dd>{manifest?.creator?.name || "許文耀 / 沈耀888π"}</dd></div><div><dt>{en ? "Organization" : "組織"}</dt><dd>{manifest?.creator?.organization || "語意防火牆"}</dd></div><div><dt>{en ? "Contact" : "合作聯絡"}</dt><dd>{manifest?.creator?.contact_email || "ken0963521@gmail.com"}</dd></div><div><dt>{en ? "Runtime" : "運行定位"}</dt><dd>{manifest?.runtime_relationship || "Local rule-driven AI control layer"}</dd></div></dl></section>;
 
   let mobileContent = chatPanel;
   if (view === "rules") mobileContent = rulePanel;

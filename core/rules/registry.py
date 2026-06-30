@@ -33,6 +33,7 @@ RISK_LEVELS = {"low", "medium", "high", "critical"}
 IMMUTABLE_RULE_FIELDS = (
     "rule_id",
     "rule_name",
+    "rule_text",
     "rule_author",
     "rule_source",
     "rule_version",
@@ -54,7 +55,7 @@ def _canonical(value: Any) -> bytes:
 
 
 def compute_rule_hash(rule: dict[str, Any]) -> str:
-    immutable = {key: rule.get(key) for key in IMMUTABLE_RULE_FIELDS}
+    immutable = {key: rule.get(key) for key in IMMUTABLE_RULE_FIELDS if key in rule}
     return hashlib.sha256(_canonical(immutable)).hexdigest()
 
 
@@ -85,6 +86,7 @@ def normalize_rule(payload: dict[str, Any], *, source_pack_id: str | None = None
     rule = {
         "rule_id": str(payload.get("rule_id") or f"rule:{uuid4().hex}"),
         "rule_name": str(payload.get("rule_name") or "").strip(),
+        "rule_text": str(payload.get("rule_text") or payload.get("rule_name") or "").strip(),
         "rule_author": str(payload.get("rule_author") or "").strip(),
         "rule_source": source,
         "rule_version": str(payload.get("rule_version") or "v0.1.0"),
@@ -112,8 +114,8 @@ def normalize_rule(payload: dict[str, Any], *, source_pack_id: str | None = None
         "changelog": _safe_list(payload.get("changelog")),
         "source_pack_id": source_pack_id or payload.get("source_pack_id"),
     }
-    if not rule["rule_name"] or not rule["rule_author"]:
-        raise ValueError("rule_name and rule_author are required")
+    if not rule["rule_name"] or not rule["rule_text"] or not rule["rule_author"]:
+        raise ValueError("rule_name, rule_text, and rule_author are required")
     if rule["activation_status"] not in RULE_STATUSES:
         raise ValueError("invalid activation_status")
     rule["hash"] = compute_rule_hash(rule)

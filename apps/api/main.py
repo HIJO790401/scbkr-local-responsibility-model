@@ -949,6 +949,38 @@ def create_rule_draft(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/rules/draft-from-text")
+def create_rule_draft_from_text(payload: dict[str, Any]) -> dict[str, Any]:
+    instruction = str(payload.get("instruction") or "").strip()
+    if not instruction:
+        raise HTTPException(status_code=400, detail="instruction is required")
+    lowered = instruction.lower()
+    known_tools = [tool["tool_id"] for tool in list_tool_definitions()]
+    allowed_tools = [tool_id for tool_id in known_tools if tool_id.lower() in lowered]
+    action = "publish" if any(token in lowered for token in ("發布", "publish")) else "execute" if any(token in lowered for token in ("執行", "execute")) else "store" if any(token in lowered for token in ("入庫", "store")) else "draft"
+    creator = load_product_manifest()["creator"]
+    name = instruction.splitlines()[0].strip("。.!！?？ ")[:48]
+    keywords = sorted(_keyword_tokens(instruction))[:12]
+    draft_payload = {
+        "rule_name": name or "自然語言規則草案",
+        "rule_text": instruction,
+        "rule_author": str(payload.get("rule_author") or creator["name"]["zh-TW"]),
+        "rule_source": "user_defined",
+        "rule_version": "v1.0.0",
+        "rule_scope": {"task_types": ["*"], "tools": allowed_tools, "workflows": ["*"], "keywords": keywords, "actions": [action]},
+        "allowed_tools": allowed_tools,
+        "denied_tools": [],
+        "automation_level": "manual",
+        "risk_level": "medium",
+        "changelog": ["由自然語言建立，等待使用者檢查與簽名。"],
+    }
+    try:
+        rule = _rule_registry().create_draft(draft_payload)
+        return {"rule": rule, "compiled_from": "natural_language", "model_signed": False, "next_required_action": "owner_review_and_signature"}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/api/rules/{rule_id:path}/sign")
 def sign_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
@@ -2065,6 +2097,51 @@ def data_center_query(payload: dict[str, Any]) -> dict[str, Any]:
             if not query or any(token and token in haystack for token in _keyword_tokens(query)):
                 items.append(item)
     return {"query": query, "candidates": items[:20], "count": len(items[:20])}
+
+
+@app.post("/api/data-center/ask")
+def data_center_ask(payload: dict[str, Any]) -> dict[str, Any]:
+    query = str(payload.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+    context = _build_four_store_context(query)
+    citations = context.get("evidence_packet", {}).get("citations", [])
+    excluded = len(context.get("candidate_hits", [])) + len(context.get("rejected_hits", []))
+    if not citations:
+        return {
+            "query": query,
+            "answer": "目前四庫沒有與這個問題相符、且已完成簽名與驗收的正式資料。模型沒有可引用依據，因此不生成答案。",
+            "citations": [],
+            "citation_count": 0,
+            "candidates_excluded": excluded,
+            "model_called": False,
+            "status": "no_authoritative_evidence",
+        }
+    citation_payload = [{key: item.get(key) for key in ("source_store", "rule", "content_hash", "author_id", "version")} for item in citations]
+    answer = "\n".join(f"[{item.get('source_store')}] {item.get('rule')}" for item in citation_payload)
+    model_called = False
+    model_error = None
+    if _model_connected():
+        try:
+            _assert_model_gateway_call_allowed(MODEL_SETTINGS)
+            response = _post_openai_compatible(MODEL_SETTINGS, [
+                {"role": "system", "content": "你是 SCBKR 四庫閱讀器。只能整理提供的正式引用，不得加入引用中不存在的事實。輸出繁體中文，並保留來源庫標記。"},
+                {"role": "user", "content": json.dumps({"question": query, "authoritative_citations": citation_payload}, ensure_ascii=False)},
+            ])
+            answer = parse_chat_completion_response(response)
+            model_called = True
+        except Exception as exc:
+            model_error = _friendly_model_error(MODEL_SETTINGS, str(exc))
+    return {
+        "query": query,
+        "answer": answer,
+        "citations": citations,
+        "citation_count": len(citations),
+        "candidates_excluded": excluded,
+        "model_called": model_called,
+        "model_error": model_error,
+        "status": "model_reading_draft" if model_called else "deterministic_citation_readout",
+    }
 
 @app.post("/api/data-center/items/{item_id}/update-confirm")
 def update_data_center_item_confirm(item_id: str, payload: dict[str, Any]) -> dict[str, Any]:
