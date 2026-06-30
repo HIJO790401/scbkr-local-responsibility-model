@@ -1,0 +1,70 @@
+{
+  "pack_id": "rulepack:shenyao:shen-an-black-shield",
+  "name": "Shen-An Black Shield Responsibility Gate",
+  "display_name_zh": "沈暗黑盾責任閘規則包",
+  "author": "許文耀 / 沈耀888π",
+  "publisher": "語意防火牆",
+  "version": "v2.0.0-draft.1",
+  "source_document_sha256": "7E00264117A5D13A917298C29ABEE1F95E3FD5643C34E941D2C567B7841E71A8",
+  "distribution": "public_compiled_draft",
+  "signature_algorithm": "ed25519",
+  "public_key": null,
+  "signature": null,
+  "signed_at": null,
+  "rules": [
+    {
+      "rule_id": "rule:shenyao:black-shield:subject-boundary",
+      "rule_name": "主體資格與決策資格分離",
+      "rule_source": "shenyao_signed_rulepack",
+      "rule_scope": {
+        "task_types": ["*"],
+        "tools": ["*"],
+        "workflows": ["decision", "automation"],
+        "keywords": [],
+        "actions": ["decide", "execute", "send", "publish", "store", "delete", "archive"]
+      },
+      "allowed_tools": ["search", "organize", "draft"],
+      "denied_tools": ["payment"],
+      "automation_level": "semi_auto",
+      "risk_level": "high",
+      "supersedes": null,
+      "changelog": ["Compiled from the Shen-An Black Shield source into an executable scope gate."]
+    },
+    {
+      "rule_id": "rule:shenyao:black-shield:no-disclaimer-substitution",
+      "rule_name": "免責聲明不得取代責任欄位",
+      "rule_source": "shenyao_signed_rulepack",
+      "rule_scope": {
+        "task_types": ["*"],
+        "tools": ["*"],
+        "workflows": ["generation", "review"],
+        "keywords": ["免責", "disclaimer", "責任"],
+        "actions": ["decide", "publish"]
+      },
+      "allowed_tools": ["draft", "review"],
+      "denied_tools": [],
+      "automation_level": "manual",
+      "risk_level": "medium",
+      "supersedes": null,
+      "changelog": ["Requires explicit S/C/B/K/R responsibility instead of generic disclaimer text."]
+    },
+    {
+      "rule_id": "rule:shenyao:black-shield:fer-yms-gate",
+      "rule_name": "F×E×R 與 YMS 執行資格閘",
+      "rule_source": "shenyao_signed_rulepack",
+      "rule_scope": {
+        "task_types": ["automation", "workflow"],
+        "tools": ["*"],
+        "workflows": ["automation"],
+        "keywords": ["執行", "自動化", "execute"],
+        "actions": ["execute"]
+      },
+      "allowed_tools": ["code_workspace", "data_center_query"],
+      "denied_tools": ["payment", "external_send"],
+      "automation_level": "semi_auto",
+      "risk_level": "critical",
+      "supersedes": null,
+      "changelog": ["Execution requires responsibility, evidence, and repair closure before permission evaluation."]
+    }
+  ]
+}

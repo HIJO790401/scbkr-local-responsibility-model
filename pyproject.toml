@@ -8,6 +8,7 @@ version = "0.15.0rc2"
 description = "SCBKR local responsibility chain model MVP Web App"
 requires-python = ">=3.11"
 dependencies = [
+  "cryptography>=42",
   "fastapi>=0.111",
   "uvicorn>=0.30",
 ]

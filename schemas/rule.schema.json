@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/rule.schema.json",
+  "title": "SCBKR 2.0 Rule",
+  "type": "object",
+  "required": ["rule_id", "rule_name", "rule_author", "rule_source", "rule_version", "rule_scope", "allowed_tools", "denied_tools", "automation_level", "risk_level", "activation_status", "created_at", "updated_at", "signed_at", "signature", "adopted_by", "adoption_scope", "supersedes", "superseded_by", "changelog", "hash"],
+  "properties": {
+    "rule_id": {"type": "string"},
+    "rule_name": {"type": "string"},
+    "rule_author": {"type": "string"},
+    "rule_source": {"enum": ["user_defined", "shenyao_signed_rulepack", "enterprise_internal", "third_party", "model_draft"]},
+    "rule_version": {"type": "string"},
+    "rule_scope": {"type": "object"},
+    "allowed_tools": {"type": "array", "items": {"type": "string"}},
+    "denied_tools": {"type": "array", "items": {"type": "string"}},
+    "automation_level": {"enum": ["draft_only", "manual", "semi_auto", "full_auto"]},
+    "risk_level": {"enum": ["low", "medium", "high", "critical"]},
+    "activation_status": {"enum": ["draft", "waiting_owner_signature", "owner_signed", "active", "disabled", "revoked", "archived", "superseded"]},
+    "created_at": {"type": "string"},
+    "updated_at": {"type": "string"},
+    "signed_at": {"type": ["string", "null"]},
+    "signature": {"type": ["string", "null"]},
+    "adopted_by": {"type": ["string", "null"]},
+    "adoption_scope": {"type": "object"},
+    "supersedes": {"type": ["string", "null"]},
+    "superseded_by": {"type": ["string", "null"]},
+    "changelog": {"type": "array", "items": {"type": "string"}},
+    "hash": {"type": "string"}
+  }
+}

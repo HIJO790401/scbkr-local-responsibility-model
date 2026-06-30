@@ -77,6 +77,7 @@ from core.workflow.generation_result import build_generation_result
 from core.workflow.review_flow import apply_review_decision
 from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
 from core.retrieval.vector_store import get_vector_store_status
+from core.rules.registry import RuleRegistry
 from core.storage.runtime_paths import current_data_dir
 
 LOCAL_DESKTOP_API_BASE_URL = "http://127.0.0.1:8787"
@@ -807,6 +808,113 @@ def product_about(topic: str = "identity", locale: str | None = None) -> dict[st
         "reply": build_product_reply(selected_topic, locale),
         "source": "product_manifest",
     }
+
+
+def _rule_registry() -> RuleRegistry:
+    return RuleRegistry(current_data_dir() / "rule_registry")
+
+
+@app.get("/api/rules")
+def list_rules() -> dict[str, Any]:
+    rules = _rule_registry().list_rules()
+    return {"rules": rules, "count": len(rules), "registry_version": "scbkr.rule-registry.v2"}
+
+
+@app.post("/api/rules/draft")
+def create_rule_draft(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return {"rule": _rule_registry().create_draft(payload), "next_required_action": "owner_signature"}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/rules/{rule_id:path}/sign")
+def sign_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        rule = _rule_registry().sign_user_rule(rule_id, str(payload.get("owner_signature") or ""))
+        return {"rule": rule, "next_required_action": "activate_rule"}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="rule not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/rules/{rule_id:path}/activate")
+def activate_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        rule = _rule_registry().activate(
+            rule_id,
+            str(payload.get("adopted_by") or ""),
+            payload.get("adoption_scope") if isinstance(payload.get("adoption_scope"), dict) else {},
+            str(payload.get("adoption_signature") or ""),
+        )
+        return {"rule": rule, "next_required_action": "rule_match_gate"}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="rule not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/rules/{rule_id:path}/status")
+def change_rule_status(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return {"rule": _rule_registry().set_status(rule_id, str(payload.get("status") or ""))}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="rule not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/rulepacks")
+def list_rulepacks() -> dict[str, Any]:
+    packs = _rule_registry().list_packs()
+    return {"rulepacks": packs, "count": len(packs)}
+
+
+@app.get("/api/rulepacks/subscriptions")
+def list_rulepack_subscriptions() -> dict[str, Any]:
+    subscriptions = _rule_registry().list_subscriptions()
+    return {"subscriptions": subscriptions, "count": len(subscriptions)}
+
+
+@app.post("/api/rulepacks/import")
+def import_rulepack(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        pack = _rule_registry().import_pack(payload)
+        next_action = "owner_adoption" if pack["verification"]["signature_verified"] else "author_signature"
+        return {"rulepack": pack, "next_required_action": next_action}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/rulepacks/{pack_id:path}/subscribe")
+def subscribe_rulepack(pack_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        subscription = _rule_registry().subscribe_pack(
+            pack_id,
+            str(payload.get("version") or ""),
+            str(payload.get("adopted_by") or ""),
+            payload.get("adoption_scope") if isinstance(payload.get("adoption_scope"), dict) else {},
+            str(payload.get("adoption_signature") or ""),
+        )
+        return {"subscription": subscription, "next_required_action": "rule_match_gate"}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="rulepack not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/rulepacks/subscriptions/{subscription_id:path}/disable")
+def disable_rulepack_subscription(subscription_id: str) -> dict[str, Any]:
+    try:
+        return {"subscription": _rule_registry().unsubscribe_pack(subscription_id)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="subscription not found") from exc
+
+
+@app.post("/api/rules/match")
+def match_rules(payload: dict[str, Any]) -> dict[str, Any]:
+    return _rule_registry().match(payload)
 
 
 @app.get("/api/system/status")
