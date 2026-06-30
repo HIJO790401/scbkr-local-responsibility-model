@@ -1,0 +1,87 @@
+{
+  "schema_version": "1.0",
+  "product_id": "scbkr",
+  "version": "0.15.0-rc.2",
+  "target_version": "2.0.0",
+  "release_stage": "1.0-final-rc-and-2.0-development",
+  "name": {
+    "zh-TW": "SCBKR 本地責任鏈系統",
+    "en": "SCBKR Local Responsibility Chain System"
+  },
+  "category": {
+    "zh-TW": "本地責任鏈與規則驅動 AI 控制層",
+    "en": "Local responsibility-chain and rule-driven AI control layer"
+  },
+  "tagline": {
+    "zh-TW": "模型可以參與，但不能越權。規則必須具名、簽名、可驗收、可回放。",
+    "en": "Models may assist, but may not overreach. Rules must be attributed, signed, reviewable, and replayable."
+  },
+  "creator": {
+    "author_id": "shen-yao-888pi",
+    "name": {
+      "zh-TW": "許文耀／沈耀888pi",
+      "en": "Wen-Yao Hsu / ShenYao888pi"
+    },
+    "organization": {
+      "zh-TW": "語意防火牆",
+      "en": "Semantic Firewall"
+    },
+    "role": {
+      "zh-TW": "創辦人、產品作者與規則作者",
+      "en": "Founder, product author, and rule author"
+    },
+    "location": "Taichung, Taiwan",
+    "contact_email": "ken0963521@gmail.com"
+  },
+  "identity": {
+    "zh-TW": "我是 SCBKR，一套由許文耀／沈耀888pi 建立的本地責任鏈與規則驅動 AI 控制系統。我不是底層語言模型；我連接使用者選擇的本地 LLM 或 API，讓模型在生成、引用、入庫與工具執行前先通過可審計的責任鏈。",
+    "en": "I am SCBKR, a local responsibility-chain and rule-driven AI control system created by Wen-Yao Hsu / ShenYao888pi. I am not the underlying language model. I connect to a user-selected local LLM or API and require auditable responsibility gates before generation, citation, storage, or tool execution."
+  },
+  "runtime_relationship": {
+    "zh-TW": "SCBKR 是控制與編譯層；LM Studio、Ollama 或 OpenAI-compatible 模型是可替換的執行 Runtime。更換模型不應改變已簽名規則、四庫資料與回放紀錄。",
+    "en": "SCBKR is the control and compilation layer. LM Studio, Ollama, or an OpenAI-compatible model is a replaceable execution runtime. Changing models must not alter signed rules, four-store data, or replay records."
+  },
+  "capabilities": [
+    {
+      "id": "responsibility_draft",
+      "phase": "1.0",
+      "title": {"zh-TW": "責任鏈草案", "en": "Responsibility-chain drafts"},
+      "description": {"zh-TW": "將使用者任務編譯為 S/C/B/K/R 草案，等待使用者修改與簽名。", "en": "Compile user tasks into S/C/B/K/R drafts for user review and signature."}
+    },
+    {
+      "id": "owner_signature",
+      "phase": "1.0",
+      "title": {"zh-TW": "使用者簽名 Gate", "en": "Owner signature gate"},
+      "description": {"zh-TW": "模型不能簽名；草案修改後必須重新簽名。", "en": "Models cannot sign, and edited drafts must be signed again."}
+    },
+    {
+      "id": "review_storage_replay",
+      "phase": "1.0",
+      "title": {"zh-TW": "驗收、四庫與回放", "en": "Review, four stores, and replay"},
+      "description": {"zh-TW": "驗收與二次確認後才能寫入 vector、corpus、logic、memory。", "en": "Data may enter vector, corpus, logic, or memory only after review and second confirmation."}
+    },
+    {
+      "id": "rule_driven_runtime",
+      "phase": "2.0",
+      "title": {"zh-TW": "規則驅動 AI Runtime", "en": "Rule-driven AI runtime"},
+      "description": {"zh-TW": "以具名、版本化、簽名規則控制模型與工具權限。", "en": "Control models and tool permissions with attributed, versioned, signed rules."}
+    }
+  ],
+  "hard_limits": [
+    {"zh-TW": "模型不得替使用者簽名、驗收或二次確認入庫。", "en": "The model may not sign, review, or second-confirm storage for the user."},
+    {"zh-TW": "未命中有效規則或引用時，不得聲稱該判定已成立。", "en": "A decision may not be presented as established without a valid matched rule or citation."},
+    {"zh-TW": "向量相似度只能提出候選，不能成為最終判準。", "en": "Vector similarity may propose candidates but may not become the final authority."}
+  ],
+  "collaboration": {
+    "status": "open",
+    "email": "ken0963521@gmail.com",
+    "topics": ["rule-pack licensing", "custom rule design", "local AI integration", "enterprise proof of concept"]
+  },
+  "rule_import": {
+    "current_status": "draft-to-workbench",
+    "target_status": "signed-versioned-rulepack",
+    "flow": ["import", "parse", "attribute", "scope", "preview", "owner_signature", "activate", "audit", "rollback"]
+  },
+  "stores": ["vector", "corpus", "logic", "memory"],
+  "master_plan": "docs/SCBKR_MASTER_PLAN_FINAL.md"
+}

@@ -3,6 +3,10 @@
 
 ![SCBKR 本地責任鏈模型](docs/images/scbkr-hero.png)
 
+正式產品身分由 [`config/product_manifest.json`](config/product_manifest.json) 定義；工程與 2.0 路線以 [`docs/SCBKR_MASTER_PLAN_FINAL.md`](docs/SCBKR_MASTER_PLAN_FINAL.md) 為母規格。SCBKR 是控制與編譯層，使用者連接的 LM Studio、Ollama 或 OpenAI-compatible 模型是可替換 Runtime。
+
+The authoritative product identity is defined in [`config/product_manifest.json`](config/product_manifest.json), while [`docs/SCBKR_MASTER_PLAN_FINAL.md`](docs/SCBKR_MASTER_PLAN_FINAL.md) is the master engineering and 2.0 roadmap contract. SCBKR is the control and compilation layer; the user-connected LM Studio, Ollama, or OpenAI-compatible model is a replaceable runtime.
+
 本地 AI 責任鏈工作台｜使用者簽名 Gate｜Data Center｜四庫引用｜Release Candidate  
 Local AI responsibility-chain workbench | Owner Signature Gate | Data Center | Four-store evidence reuse | Release Candidate
 

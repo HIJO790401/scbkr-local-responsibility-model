@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/product_manifest.schema.json",
+  "title": "SCBKRProductManifest",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "product_id", "version", "name", "creator", "identity", "capabilities", "hard_limits", "stores"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "product_id": {"const": "scbkr"},
+    "version": {"type": "string"},
+    "name": {"$ref": "#/$defs/localizedText"},
+    "identity": {"$ref": "#/$defs/localizedText"},
+    "creator": {
+      "type": "object",
+      "required": ["author_id", "name", "organization", "contact_email"],
+      "properties": {
+        "author_id": {"type": "string"},
+        "name": {"$ref": "#/$defs/localizedText"},
+        "organization": {"$ref": "#/$defs/localizedText"},
+        "contact_email": {"type": "string"}
+      }
+    },
+    "capabilities": {"type": "array", "items": {"type": "object"}},
+    "hard_limits": {"type": "array", "items": {"$ref": "#/$defs/localizedText"}},
+    "stores": {"const": ["vector", "corpus", "logic", "memory"]}
+  },
+  "$defs": {
+    "localizedText": {
+      "type": "object",
+      "required": ["zh-TW", "en"],
+      "properties": {"zh-TW": {"type": "string"}, "en": {"type": "string"}},
+      "additionalProperties": false
+    }
+  }
+}

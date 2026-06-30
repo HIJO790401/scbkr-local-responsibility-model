@@ -67,6 +67,16 @@ except Exception:
                 return self.post(path, json=json)
             return _Response(405, {"detail": "method not allowed"})
 
+        def get(self, path: str) -> _Response:
+            from apps.api import main
+
+            if path.startswith("/api/product/manifest"):
+                locale = "en" if "locale=en" in path else "zh-TW"
+                return _Response(200, main.product_manifest(locale))
+            if path.startswith("/api/product/about"):
+                return _Response(200, main.product_about())
+            return _Response(404, {"detail": "not found"})
+
         def post(self, path: str, json: dict[str, Any] | None = None) -> _Response:
             from fastapi import HTTPException
             from apps.api import main

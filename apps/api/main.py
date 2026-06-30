@@ -29,6 +29,12 @@ from core.model_gateway.response_parser import parse_chat_completion_response
 from core.model_gateway.settings import DEFAULT_MODEL_SETTINGS, mask_api_key, validate_model_settings
 from core.permissions.permission_checker import assert_permission_allowed, validate_permission_settings
 from core.permissions.permission_flags import DEFAULT_PERMISSION_SETTINGS
+from core.product_manifest import (
+    build_product_reply,
+    detect_product_topic,
+    localized_product_manifest,
+    load_product_manifest,
+)
 from core.ledger.ledger_event import build_ledger_event
 from core.ledger.jsonl_ledger import append_ledger_event, read_ledger_events, rebuild_ledger_index_from_jsonl
 from core.review_rules.rule_confirmation import confirm_memory_rule_plan
@@ -144,14 +150,11 @@ async def require_companion_token_for_lan_requests(request: Request, call_next):
 
 
 
-IDENTITY_ZH = "我是 SCBKR 責任鏈語言模型，由台灣台中「語意防火牆」創辦人許文耀／沈耀888pi 研發，透過使用者自接的本地 LLM 或 API 運作。我的目標是讓模型在生成前先交代任務、邊界、依據與責任，協助降低 token、算力與重複推理消耗。使用者可以自訂規則、建立閉環、審計模型輸出，降低模型幻覺風險。若需要規則庫、合作或相關資訊，可寄信至 [ken0963521@gmail.com](mailto:ken0963521@gmail.com) 聯繫。"
-IDENTITY_EN = "I am the SCBKR Responsibility-Chain Language Model, developed by Wen-Yao Hsu / ShenYao888pi, founder of Semantic Firewall in Taichung, Taiwan. I run through a user-connected local LLM or API. My goal is to make models declare the task, boundary, basis, and responsibility before generation, helping reduce token usage, compute cost, and repeated reasoning. Users can customize rules and build closed-loop workflows to reduce hallucination risk. For rule libraries or collaboration, contact [ken0963521@gmail.com](mailto:ken0963521@gmail.com)."
 SUGGESTION_TRIGGERS = ("我覺得", "不該", "不得", "必須", "驗收", "判準", "規則", "偏好", "流程", "邊界", "入庫")
 HIGH_PRIVILEGE_DRAFT_KEYS = {"review_passed", "storage_confirmed", "physical_write_performed", "confirmed"}
 SCBKR_COMMITTED_EDIT_MESSAGE = "本任務已寫入資料中心或記憶庫規則，不能直接改寫原 SCBKR。請建立新版本或新任務。已入庫或已完成 / 已寫入記憶庫規則的任務不可直接改寫 SCBKR。"
 SCBKR_INVALID_PATCH_MESSAGE = "模型提出的修改草案不完整，未套用到任務。原本的 SCBKR 已保留，請重新產生修改草案或手動修改欄位。"
 
-SCBKR_PRODUCT_ZH = """SCBKR 是本地責任鏈 AI 工作流系統，由許文耀／沈耀888pi，語意防火牆創辦人建立。它可透過 API、本地 LLM、LM Studio、Ollama、OpenAI-compatible endpoint 連線。目的，是在生成前先確認任務、邊界、依據、驗收與責任鏈，降低無效生成、GPU 浪費、算力成本與反覆修正成本。SCBKR 支援任務紀錄、確認單、生成結果、驗收紀錄、入庫資料，也支援向量庫、語料庫、程式邏輯庫、記憶庫、回放帳本。模型只能建議，不能自動入庫；使用者確認前不得生成，驗收前不得入庫。"""
 SCBKR_WORKBENCH_CAPABILITY_ZH = """可以，我可以協助編輯 SCBKR 工作台。
 
 但我不能繞過使用者直接改寫，也不能自動套用修改。正確流程是：使用者在 Workbench 選擇 S / C / B / K / R 層級，輸入自然語言修改指令，按「產生修改草案」，系統只產生人話摘要與欄位差異，不會自動套用。使用者按「套用修改」後，才會寫回 task.scbkr。套用後 confirmed=false，舊 generation / review / storage plan 會作廢，必須重新確認責任鏈後，才能再次生成。
@@ -181,8 +184,7 @@ def _looks_english(text: str) -> bool:
 
 
 def _is_identity_question(text: str) -> bool:
-    lowered = text.lower()
-    return any(token in lowered for token in ("who are you", "what model are you", "introduce yourself")) or any(token in text for token in ("你是誰", "你是什么模型", "你是什麼模型", "介紹你自己"))
+    return detect_product_topic(text) == "identity"
 
 
 def _build_chat_suggestion(user_text: str) -> dict[str, Any]:
@@ -741,6 +743,28 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/api/product/manifest")
+def product_manifest(locale: str | None = None) -> dict[str, Any]:
+    return localized_product_manifest(locale)
+
+
+@app.get("/api/product/manifest/raw")
+def raw_product_manifest() -> dict[str, Any]:
+    return deepcopy(load_product_manifest())
+
+
+@app.get("/api/product/about")
+def product_about(topic: str = "identity", locale: str | None = None) -> dict[str, Any]:
+    allowed_topics = {"identity", "author", "capabilities", "collaboration", "rule_import"}
+    selected_topic = topic if topic in allowed_topics else "identity"
+    return {
+        "topic": selected_topic,
+        "locale": "en" if (locale or "").lower().startswith("en") else "zh-TW",
+        "reply": build_product_reply(selected_topic, locale),
+        "source": "product_manifest",
+    }
+
+
 @app.get("/api/system/status")
 def system_status() -> dict[str, Any]:
     return {
@@ -900,15 +924,17 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     user_text = str(payload.get("message", "")).strip()
     if not user_text:
         raise HTTPException(status_code=400, detail="message is required")
-    if _is_identity_question(user_text):
-        reply = IDENTITY_EN if _looks_english(user_text) else IDENTITY_ZH
-        source = "identity"
-    elif _is_workbench_capability_question(user_text):
+    product_topic = detect_product_topic(user_text)
+    locale = "en" if _looks_english(user_text) else "zh-TW"
+    if _is_workbench_capability_question(user_text):
         reply = SCBKR_WORKBENCH_CAPABILITY_ZH
         source = "scbkr_workbench_capability_lock"
+    elif product_topic:
+        reply = build_product_reply(product_topic, locale)
+        source = f"product_manifest:{product_topic}"
     elif _is_scbkr_product_question(user_text):
-        reply = SCBKR_PRODUCT_ZH
-        source = "scbkr_product_lock"
+        reply = build_product_reply("identity", locale)
+        source = "product_manifest:identity"
     elif not _model_connected():
         reply = "模型尚未連線。請先到連線設定儲存並測試模型連線；未 connected 時不會假裝模型回覆。"
         source = "not_connected"

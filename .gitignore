@@ -10,6 +10,11 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/scbkr.sqlite3
+
 .env
 .env.*
 !.env.example
