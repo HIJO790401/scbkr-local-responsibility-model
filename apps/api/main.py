@@ -78,6 +78,7 @@ from core.workflow.review_flow import apply_review_decision
 from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
 from core.retrieval.vector_store import get_vector_store_status
 from core.rules.registry import RuleRegistry
+from core.tools.registry import ToolGateEngine, list_tool_definitions
 from core.storage.runtime_paths import current_data_dir
 
 LOCAL_DESKTOP_API_BASE_URL = "http://127.0.0.1:8787"
@@ -915,6 +916,34 @@ def disable_rulepack_subscription(subscription_id: str) -> dict[str, Any]:
 @app.post("/api/rules/match")
 def match_rules(payload: dict[str, Any]) -> dict[str, Any]:
     return _rule_registry().match(payload)
+
+
+def _tool_gate_engine() -> ToolGateEngine:
+    return ToolGateEngine(
+        _rule_registry(),
+        PERMISSIONS,
+        current_data_dir() / "execution_traces" / "tool-gates.jsonl",
+    )
+
+
+@app.get("/api/tools")
+def list_tools() -> dict[str, Any]:
+    tools = list_tool_definitions()
+    return {"tools": tools, "count": len(tools), "registry_version": "scbkr.tool-registry.v2"}
+
+
+@app.post("/api/tools/evaluate")
+def evaluate_tool_call(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _tool_gate_engine().evaluate(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/tools/traces")
+def list_tool_traces(limit: int = 100) -> dict[str, Any]:
+    traces = _tool_gate_engine().list_traces(limit)
+    return {"traces": traces, "count": len(traces)}
 
 
 @app.get("/api/system/status")

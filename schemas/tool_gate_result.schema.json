@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/tool_gate_result.schema.json",
+  "title": "SCBKR 2.0 Tool Gate Result",
+  "type": "object",
+  "required": ["trace_id", "timestamp", "tool_id", "action", "rule_match_gate", "rule_allowed", "tool_permission_gate", "risk_gate", "user_confirmation_gate", "allowed", "execution_status", "reason", "trace_hash"],
+  "properties": {
+    "trace_id": {"type": "string"},
+    "timestamp": {"type": "string"},
+    "tool_id": {"type": "string"},
+    "action": {"type": "string"},
+    "rule_match_gate": {"type": "object"},
+    "rule_allowed": {"type": "boolean"},
+    "tool_permission_gate": {"type": "object"},
+    "risk_gate": {"type": "object"},
+    "user_confirmation_gate": {"type": "object"},
+    "allowed": {"type": "boolean"},
+    "execution_status": {"enum": ["authorized_not_executed", "blocked_not_executed"]},
+    "reason": {"type": "string"},
+    "trace_hash": {"type": "string"}
+  }
+}
