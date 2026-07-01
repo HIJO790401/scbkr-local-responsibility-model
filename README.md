@@ -147,6 +147,8 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 - English: The 2.0 foundation still includes the Rule Registry, user-owned RulePack import, rule-match gates, five tool permission gates, execution replay, a strict JSON compiler, and token-efficiency metrics.
 - 中文：2.1 加入受保護的沈耀規則狀態 Runtime、版本／模式選擇、使用者規則覆寫驗算、真實網頁搜尋與閱讀、訂閱介面及上線準備中心。
 - English: 2.1 adds the protected ShenYao Rule State Runtime, version and mode selection, user-overlay validation, real web search and page reading, subscription surfaces, and a launch readiness center.
+- 中文：RuleStateManager 會在每次模型呼叫前注入 `EMPTY / DRAFTING / RULE_ACTIVE / RULEPACK_ACTIVE` 狀態；只有已驗證的沈耀 Runtime 可輸出「沈耀交我判的／主責歸耀／唯真長存」，失效或未授權狀態會自動阻擋。
+- English: RuleStateManager injects `EMPTY / DRAFTING / RULE_ACTIVE / RULEPACK_ACTIVE` before every model call. ShenYao ownership declarations are allowed only under a verified ShenYao runtime and are blocked after expiry or without authorization.
 - 中文：訂閱提供 Runtime 執行資格，不散布私有規則原始碼。使用者仍可匯入自己擁有的規則；未啟用沈耀狀態時會明確顯示為獨立規則狀態。
 - English: Subscriptions grant runtime execution entitlement without distributing private rule source. Users may still import rules they own; without ShenYao state, the product clearly reports an independent rule state.
 

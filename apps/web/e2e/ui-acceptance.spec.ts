@@ -52,6 +52,8 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   }
   await expect(page.getByLabel("一般聊天主視窗")).toBeVisible();
   await expect(page.getByRole("heading", { name: "自然語言控制台" })).toBeVisible();
+  await expect(page.locator(".rule-awareness-strip")).toContainText("EMPTY");
+  await expect(page.locator(".rule-awareness-strip")).toContainText("尚無生效規則");
   await expect(page.getByRole("button", { name: "網路搜尋", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "搜尋四庫", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "建立規則", exact: true })).toBeVisible();

@@ -85,7 +85,22 @@ def _entitlement_is_current(record: dict[str, Any]) -> bool:
 class RuleStateRuntime:
     def status(self) -> dict[str, Any]:
         state = load_runtime_section("rule_state", DEFAULT_RULE_STATE)
+        if state.get("state") == "shenyao_active" and not self._selection_is_authorized(state):
+            state = {**DEFAULT_RULE_STATE, "updated_at": _now(), "deactivation_reason": "entitlement_or_preview_authorization_expired"}
+            save_runtime_section("rule_state", state)
         return {**state, "effective_label": "沈耀規則狀態" if state.get("state") == "shenyao_active" else "獨立使用者規則", "receipt_hash": _hash(state)}
+
+    @staticmethod
+    def _selection_is_authorized(state: dict[str, Any]) -> bool:
+        if state.get("entitlement_status") == "developer_preview":
+            return bool(os.environ.get("SCBKR_OWNER_PREVIEW_TOKEN"))
+        entitlement = load_runtime_section("rule_state_entitlement", DEFAULT_ENTITLEMENT)
+        allowed_versions = entitlement.get("allowed_versions") or []
+        return (
+            _entitlement_is_current(entitlement)
+            and entitlement.get("runtime_id") == state.get("runtime_id")
+            and (not allowed_versions or state.get("runtime_version") in allowed_versions)
+        )
 
     def catalog(self) -> list[dict[str, Any]]:
         return deepcopy(list(RUNTIME_CATALOG))

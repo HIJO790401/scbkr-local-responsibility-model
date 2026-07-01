@@ -77,6 +77,12 @@
       "phase": "2.1",
       "title": {"zh-TW": "上線控制中心", "en": "Launch control plane"},
       "description": {"zh-TW": "集中管理登入、訂閱、搜尋、Windows 發布、更新與法律資料的上架準備度。", "en": "Track launch readiness for identity, billing, search, Windows distribution, updates, and legal materials."}
+    },
+    {
+      "id": "rule_state_awareness",
+      "phase": "2.1",
+      "title": {"zh-TW": "模型規則狀態自述", "en": "Model rule-state declaration"},
+      "description": {"zh-TW": "每次模型呼叫皆注入已驗證狀態，並強制顯示規則、版本與責任歸屬；未授權的沈耀主責聲明會被阻擋。", "en": "Inject verified state into every model call and expose rule, version, and responsibility; unauthorized ShenYao ownership claims are blocked."}
     }
   ],
   "hard_limits": [

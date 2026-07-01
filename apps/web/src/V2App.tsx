@@ -123,6 +123,15 @@ export default function V2App() {
     }
   }
 
+  function assistantEnvelope(content: string, declaration: Record<string, any> = ruleState) {
+    const prefix = String(declaration.declaration_prefix || "").trim();
+    const suffix = String(declaration.declaration_suffix || "").trim();
+    const text = String(content || "").trim();
+    if (!prefix) return text;
+    if (text.startsWith(prefix)) return text;
+    return `${prefix}\n\n${text}${suffix ? `\n\n${suffix}` : ""}`;
+  }
+
   async function refreshAll() {
     if (pairingRequired) return;
     const result = await run(en ? "Refresh runtime" : "更新系統", async () => {
@@ -146,6 +155,9 @@ export default function V2App() {
     setOverview(result.overviewData || {});
     setTokenMetrics(result.tokenData || {});
     setRuleState(result.ruleStateData || {});
+    setMessages((current) => current.length === 1 && (current[0].content.includes("runtime ready") || current[0].content.includes("本機責任核心已就緒"))
+      ? [{ role: "assistant", content: assistantEnvelope(en ? "Local runtime ready." : "本機 Runtime 已就緒。", result.ruleStateData || {}) }]
+      : current);
     setRuntimeCatalog(result.runtimeData.runtimes || []);
     setLaunchSettings(result.launchData || {});
     setReadiness(result.readinessData || { checks: [] });
@@ -172,21 +184,21 @@ export default function V2App() {
       if (result) {
         setWebResult(result);
         const summary = result.results.length ? result.results.map((item: any, index: number) => `${index + 1}. ${item.title}\n${item.url}\n${item.snippet}`).join("\n\n") : (en ? "No web results." : "沒有搜尋結果。");
-        setMessages((current) => [...current, { role: "assistant", content: summary }]);
+        setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(summary, result.response_declaration || ruleState) }]);
       } else {
-        setMessages((current) => [...current, { role: "assistant", content: en ? "Web search is not configured or was blocked. Open Launch Center to configure a provider and enable web_search permission." : "網路搜尋尚未設定或被 Gate 阻擋。請到上線中心設定搜尋服務並開啟 web_search 權限。" }]);
+        setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "Web search is not configured or was blocked. Open Launch Center to configure a provider and enable web_search permission." : "網路搜尋尚未設定或被 Gate 阻擋。請到上線中心設定搜尋服務並開啟 web_search 權限。") }]);
       }
       return;
     }
     if (commandMode === "search") {
       const result = await readFourStores(text);
-      if (result) setMessages((current) => [...current, { role: "assistant", content: result.answer }]);
+      if (result) setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(result.answer, result.rule_state || ruleState) }]);
       return;
     }
     if (commandMode === "rule") {
       const result = await createNaturalRule(text);
       if (result) {
-        setMessages((current) => [...current, { role: "assistant", content: en ? "Rule draft created. Review and sign it in Rule Center." : "規則草案已建立。請在規則中心檢查、簽名，再決定是否啟用。" }]);
+        setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "Rule draft created. Review and sign it in Rule Center." : "規則草案已建立。請在規則中心檢查、簽名，再決定是否啟用。", result.rule_state || ruleState) }]);
         setView("rules");
       }
       return;
@@ -195,13 +207,13 @@ export default function V2App() {
     if (!routed) return;
     if (routed.intent === "create_new_rule_confirmation") {
       const drafted = await createNaturalRule(text);
-      if (drafted) setMessages((current) => [...current, { role: "assistant", content: en ? "I created an unsigned rule draft. You remain the only signer and activator." : "我已建立未簽名規則草案。只有你能簽名與啟用。" }]);
+      if (drafted) setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "I created an unsigned rule draft. You remain the only signer and activator." : "我已建立未簽名規則草案。只有你能簽名與啟用。", drafted.rule_state || ruleState) }]);
       return;
     }
     if (routed.intent === "create_confirmation") {
       setTaskInput(text);
       await createTask(text);
-      setMessages((current) => [...current, { role: "assistant", content: en ? "Draft compiled. Review S/C/B/K/R in Workbench." : "草案已編譯，請在工作台檢查 S/C/B/K/R。" }]);
+      setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "Draft compiled. Review S/C/B/K/R in Workbench." : "草案已編譯，請在工作台檢查 S/C/B/K/R。") }]);
       return;
     }
     const reply = await run(en ? "Chat" : "模型回覆", () => api<any>("/api/chat/general", { method: "POST", body: JSON.stringify({ message: text, locale }) }));
@@ -417,6 +429,7 @@ export default function V2App() {
         <ResponsibilityCore status={status} locale={locale} activeRules={activeRules} citations={citations} tokensAvoided={Number(tokenMetrics.estimated_tokens_avoided || task?.scbkr?.token_metrics?.estimated_tokens_avoided || 0)} />
       </Suspense>
       <header className="command-header"><div><span>NATURAL LANGUAGE CONTROL PLANE</span><h1>{en ? "Natural Language Console" : "自然語言控制台"}</h1></div><div className="stage-chip"><Activity size={15} />{status}</div></header>
+      <div className={`rule-awareness-strip ${String(ruleState.awareness_state || "EMPTY").toLowerCase()}`}><span>{ruleState.awareness_state || "EMPTY"}</span><b>{ruleState.active_rulepack_id ? `${ruleState.active_rulepack_id} v${ruleState.active_rulepack_version}` : ruleState.active_rule_id ? `${ruleState.active_rule_id} v${ruleState.active_rule_version}` : (en ? "No active rule" : "尚無生效規則")}</b><em>{ruleState.responsibility_holder ? `${en ? "RESPONSIBILITY" : "責任歸屬"} · ${ruleState.responsibility_holder}` : (en ? "ASSISTANCE ONLY" : "僅供輔助對話")}</em></div>
       <div className="command-modes" role="tablist" aria-label={en ? "Natural language mode" : "自然語言模式"}><button className={commandMode === "chat" ? "active" : ""} onClick={() => setCommandMode("chat")}><MessageSquare size={15} />{en ? "Chat" : "一般對話"}</button><button className={commandMode === "web" ? "active" : ""} onClick={() => setCommandMode("web")}><Globe2 size={15} />{en ? "Web" : "網路搜尋"}</button><button className={commandMode === "search" ? "active" : ""} onClick={() => setCommandMode("search")}><Search size={15} />{en ? "Stores" : "搜尋四庫"}</button><button className={commandMode === "rule" ? "active" : ""} onClick={() => setCommandMode("rule")}><FileKey size={15} />{en ? "Rule" : "建立規則"}</button></div>
       <div className="message-list">{messages.map((item, index) => <div key={`${item.role}-${index}`} className={`message ${item.role}`}><span>{item.role === "assistant" ? "SCBKR" : en ? "YOU" : "你"}</span>{item.content}</div>)}</div>
       <div className="chat-input"><label className="natural-input-label"><span>{commandMode === "chat" ? (en ? "Talk to the local model" : "直接用人話跟本機模型說") : commandMode === "web" ? (en ? "Search the live web through SCBKR gates" : "經過 SCBKR Gate 搜尋即時網路") : commandMode === "search" ? (en ? "Ask the signed four stores" : "搜尋並閱讀已簽名四庫") : (en ? "Describe the rule you want" : "說出你要建立的規則")}</span><textarea aria-label={en ? "Natural language input" : "自然語言輸入"} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={commandMode === "chat" ? (en ? "Describe a task or ask SCBKR..." : "直接輸入你想做的事或想問的問題…") : commandMode === "web" ? (en ? "Search current information on the web..." : "搜尋現在網路上的資料…") : commandMode === "search" ? (en ? "What do the signed stores say about..." : "例如：四庫裡有哪些關於發布規則的資料？") : (en ? "Before publishing, require my signature..." : "例如：凡是要發布內容，都必須先讓我簽名。")} /></label><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Run" : "執行"}>{commandMode === "web" ? <Globe2 size={20} /> : commandMode === "search" ? <Search size={20} /> : commandMode === "rule" ? <FileKey size={20} /> : <Send size={20} />}</button></div>
@@ -477,5 +490,5 @@ export default function V2App() {
 
   if (pairingRequired) return <main className="pair-gate"><div className="pair-stars" /><section><div className="pair-mark"><ShieldCheck size={30} /><span>SCBKR 2.0</span></div><p>SECURE MOBILE COMPANION</p><h1>{en ? "Pair this phone" : "配對這支手機"}</h1><small>{en ? "Enter the one-time code shown on your desktop. The code expires after 10 minutes." : "輸入桌機顯示的一次性配對碼，配對碼 10 分鐘後失效。"}</small><label>{en ? "Pairing code" : "6 位數配對碼"}<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={pairCode} onChange={(event) => setPairCode(event.target.value.replace(/\D/g, "").slice(0, 6))} onKeyDown={(event) => { if (event.key === "Enter") void redeemPairingCode(); }} placeholder="000000" /></label>{pairError && <div className="pair-error">{pairError}</div>}<button disabled={pairCode.length !== 6} onClick={() => void redeemPairingCode()}><FileKey size={17} />{en ? "Pair securely" : "安全配對"}</button><button className="pair-language" onClick={switchLocale}><Languages size={15} />{en ? "繁體中文" : "English"}</button><footer>{backend}</footer></section></main>;
 
-  return <main className="app-shell v2-shell"><aside className="side-nav"><div className="brand-lockup"><Box size={24} /><div><b>SCBKR</b><span>RESPONSIBILITY OS</span></div></div>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)} title={label}><Icon size={18} /><span>{label}</span></button>)}<button onClick={switchLocale} title="Language"><Languages size={18} /><span>{locale === "en" ? "繁中" : "EN"}</span></button></aside><nav className="mobile-drawer">{mobileNav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon size={18} /><span>{label}</span></button>)}</nav><header className="top-status-bar"><button className="mobile-menu icon-button" onClick={() => setView("command")}><Menu size={18} /></button><span className={`system-signal ${health}`}><i />API {health}</span><span>STATE {ruleState.state === "shenyao_active" ? "SHENYAO" : "INDEPENDENT"}</span><span>MODEL {model?.enabled && model?.last_test_status === "success" ? "LINKED" : "STANDBY"}</span><span>RULES {activeRules}</span><span>TOKEN SAVE {tokenMetrics.estimated_tokens_avoided || 0}</span><span>CITATIONS {citations}</span><button className="locale-button" onClick={switchLocale}><Globe2 size={14} />{locale}</button><em>{notice}</em></header><div className="desktop-stage">{!isMobile && (standalonePage || desktopCommand)}</div><div className="mobile-stage">{isMobile && (standalonePage || mobileContent)}</div>{dataDock}</main>;
+  return <main className="app-shell v2-shell"><aside className="side-nav"><div className="brand-lockup"><Box size={24} /><div><b>SCBKR</b><span>RESPONSIBILITY OS</span></div></div>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)} title={label}><Icon size={18} /><span>{label}</span></button>)}<button onClick={switchLocale} title="Language"><Languages size={18} /><span>{locale === "en" ? "繁中" : "EN"}</span></button></aside><nav className="mobile-drawer">{mobileNav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon size={18} /><span>{label}</span></button>)}</nav><header className="top-status-bar"><button className="mobile-menu icon-button" onClick={() => setView("command")}><Menu size={18} /></button><span className={`system-signal ${health}`}><i />API {health}</span><span>STATE {ruleState.awareness_state || "EMPTY"}</span><span>MODEL {model?.enabled && model?.last_test_status === "success" ? "LINKED" : "STANDBY"}</span><span>RULES {activeRules}</span><span>TOKEN SAVE {tokenMetrics.estimated_tokens_avoided || 0}</span><span>CITATIONS {citations}</span><button className="locale-button" onClick={switchLocale}><Globe2 size={14} />{locale}</button><em>{notice}</em></header><div className="desktop-stage">{!isMobile && (standalonePage || desktopCommand)}</div><div className="mobile-stage">{isMobile && (standalonePage || mobileContent)}</div>{dataDock}</main>;
 }

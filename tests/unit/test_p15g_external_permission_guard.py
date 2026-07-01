@@ -39,7 +39,9 @@ def test_remote_chat_calls_model_when_external_api_allowed(monkeypatch):
     response = TestClient(main.app).post("/api/chat/general", json={"message": "hello remote"})
 
     assert response.status_code == 200
-    assert response.json()["reply"] == "remote ok"
+    assert "remote ok" in response.json()["reply"]
+    assert "SCBKR Responsibility Chain Language Model | EMPTY" in response.json()["reply"]
+    assert response.json()["rule_state"]["awareness_state"] == "EMPTY"
     assert calls[0]["messages"][-1]["content"] == "hello remote"
 
 
@@ -65,7 +67,9 @@ def test_loopback_local_model_is_not_blocked_by_external_api_false(monkeypatch):
     response = TestClient(main.app).post("/api/chat/general", json={"message": "local ok"})
 
     assert response.status_code == 200
-    assert response.json()["reply"] == "remote ok"
+    assert "remote ok" in response.json()["reply"]
+    assert "SCBKR Responsibility Chain Language Model | EMPTY" in response.json()["reply"]
+    assert response.json()["rule_state"]["awareness_state"] == "EMPTY"
     assert calls[0]["messages"][-1]["content"] == "local ok"
 
 

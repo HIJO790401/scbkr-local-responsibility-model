@@ -30,6 +30,8 @@ def test_rule_state_requires_entitlement_and_supports_signed_preview(tmp_path, m
     report = runtime.validate_overlay("當使用者發布內容時，只能引用有來源與版本的資料，最後由使用者負責驗收。")
     assert report["checks"] == {"S": True, "C": True, "B": True, "K": True, "R": True}
     assert report["shenyao_verified"] is True
+    monkeypatch.delenv("SCBKR_OWNER_PREVIEW_TOKEN")
+    assert runtime.status()["state"] == "independent"
     assert runtime.deactivate()["state"] == "independent"
 
 
@@ -43,6 +45,7 @@ def test_rule_state_uses_server_entitlement_record(tmp_path, monkeypatch):
     assert selected["subscriber_id"] == "sub_123"
 
     save_runtime_section("rule_state_entitlement", {"status": "active", "runtime_id": "shenyao-rule-state", "allowed_versions": ["1.2.0"], "expires_at": "2000-01-01T00:00:00Z"})
+    assert RuleStateRuntime().status()["state"] == "independent"
     with pytest.raises(PermissionError):
         RuleStateRuntime().select({"runtime_id": "shenyao-rule-state", "version": "1.2.0", "mode": "responsibility_audit"})
 

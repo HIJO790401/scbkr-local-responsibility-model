@@ -83,7 +83,9 @@ from core.workflow.review_flow import apply_review_decision
 from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
 from core.retrieval.vector_store import get_vector_store_status
 from core.rules.registry import RuleRegistry
+from core.rule_state.manager import RuleStateManager
 from core.rule_state.runtime import RuleStateRuntime
+from core.rule_state.schemas import RuleStateEnum
 from core.tools.registry import ToolGateEngine, list_tool_definitions
 from core.tools.web_runtime import WebRuntime
 from core.launch.readiness import launch_readiness, load_launch_settings, public_launch_settings, save_launch_settings
@@ -111,7 +113,7 @@ SCBKR_CONFIRMATION_REQUIRED_FIELDS = {
     "R": ["expected_outputs", "acceptance_criteria", "ledger_requirements", "storage_options", "signature_status", "review_status", "replay_requirements"],
 }
 
-app = FastAPI(title="SCBKR Local Responsibility Model API", version="2.0.0")
+app = FastAPI(title="SCBKR Local Responsibility Model API", version="2.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=LOCAL_DESKTOP_CORS_ORIGINS,
@@ -856,7 +858,8 @@ def save_task(task: dict[str, Any]) -> dict[str, Any]:
 
 
 def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, str]], response_format: dict[str, Any] | None = None) -> dict[str, Any]:
-    payload = build_chat_completion_payload(messages, settings, response_format=response_format)
+    governed_messages = _rule_state_manager().inject_system_context(messages)
+    payload = build_chat_completion_payload(governed_messages, settings, response_format=response_format)
     url = settings["base_url"].rstrip("/") + "/chat/completions"
     request = UrlRequest(
         url,
@@ -905,12 +908,12 @@ def _try_model_storage_suggestion(task: dict[str, Any]) -> dict[str, Any] | None
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    rule_state = _rule_state_runtime().status() if "_rule_state_runtime" in globals() else {"state": "independent"}
+    rule_state = _rule_state_manager().status() if "_rule_state_manager" in globals() else {"awareness_state": "EMPTY"}
     return {
         "ok": True,
         "runtime": os.environ.get("SCBKR_DESKTOP_RUNTIME", "api"),
         "lan_companion_enabled": lan_companion_enabled(),
-        "rule_state": rule_state.get("state"),
+        "rule_state": rule_state.get("awareness_state"),
     }
 
 
@@ -944,6 +947,10 @@ def _rule_state_runtime() -> RuleStateRuntime:
     return RuleStateRuntime()
 
 
+def _rule_state_manager() -> RuleStateManager:
+    return RuleStateManager(_rule_registry(), _rule_state_runtime())
+
+
 @app.get("/api/rule-state/catalog")
 def rule_state_catalog() -> dict[str, Any]:
     catalog = _rule_state_runtime().catalog()
@@ -952,13 +959,23 @@ def rule_state_catalog() -> dict[str, Any]:
 
 @app.get("/api/rule-state/status")
 def rule_state_status() -> dict[str, Any]:
-    return _rule_state_runtime().status()
+    return {**_rule_state_manager().status(), **_rule_state_runtime().status()}
 
 
 @app.post("/api/rule-state/select")
 def select_rule_state(payload: dict[str, Any]) -> dict[str, Any]:
     try:
-        return _rule_state_runtime().select(payload)
+        manager = _rule_state_manager()
+        before = manager.get_current_state().state
+        selected = _rule_state_runtime().select(payload)
+        manager.validate_state_transition(before, RuleStateEnum.RULEPACK_ACTIVE, {
+            "active_rulepack_id": selected.get("runtime_id"),
+            "active_rulepack_version": selected.get("runtime_version"),
+            "active_rulepack_stage": "POC" if selected.get("entitlement_status") == "developer_preview" else "FORMAL",
+            "rule_state_receipt": selected.get("receipt_hash"),
+            "entitlement_status": selected.get("entitlement_status"),
+        })
+        return {**manager.status(), **selected}
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
@@ -967,7 +984,8 @@ def select_rule_state(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/api/rule-state/deactivate")
 def deactivate_rule_state(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    return _rule_state_runtime().deactivate(str((payload or {}).get("reason") or "user_selected_independent"))
+    state = _rule_state_runtime().deactivate(str((payload or {}).get("reason") or "user_selected_independent"))
+    return {**_rule_state_manager().status(), **state}
 
 
 @app.post("/api/rule-state/validate-overlay")
@@ -987,7 +1005,8 @@ def list_rules() -> dict[str, Any]:
 @app.post("/api/rules/draft")
 def create_rule_draft(payload: dict[str, Any]) -> dict[str, Any]:
     try:
-        return {"rule": _rule_registry().create_draft(payload), "next_required_action": "owner_signature"}
+        rule = _rule_registry().create_draft(payload)
+        return {"rule": rule, "rule_state": _rule_state_manager().status(), "next_required_action": "owner_signature"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1022,7 +1041,7 @@ def create_rule_draft_from_text(payload: dict[str, Any]) -> dict[str, Any]:
     }
     try:
         rule = _rule_registry().create_draft(draft_payload)
-        return {"rule": rule, "validation": validation, "compiled_from": "natural_language", "model_signed": False, "next_required_action": "owner_review_and_signature"}
+        return {"rule": rule, "validation": validation, "rule_state": _rule_state_manager().status(), "compiled_from": "natural_language", "model_signed": False, "next_required_action": "owner_review_and_signature"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1031,7 +1050,7 @@ def create_rule_draft_from_text(payload: dict[str, Any]) -> dict[str, Any]:
 def sign_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         rule = _rule_registry().sign_user_rule(rule_id, str(payload.get("owner_signature") or ""))
-        return {"rule": rule, "next_required_action": "activate_rule"}
+        return {"rule": rule, "rule_state": _rule_state_manager().status(), "next_required_action": "activate_rule"}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="rule not found") from exc
     except ValueError as exc:
@@ -1041,13 +1060,25 @@ def sign_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/rules/{rule_id:path}/activate")
 def activate_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
+        manager = _rule_state_manager()
+        before = manager.get_current_state().state
+        candidate = next((item for item in _rule_registry().list_rules() if item.get("rule_id") == rule_id), None)
+        if not candidate:
+            raise KeyError(rule_id)
+        if before != RuleStateEnum.RULEPACK_ACTIVE:
+            manager.validate_state_transition(before, RuleStateEnum.RULE_ACTIVE, {
+                "active_rule_id": candidate.get("rule_id"),
+                "active_rule_version": candidate.get("rule_version"),
+                "owner_signature": candidate.get("signature"),
+                "signed_at": candidate.get("signed_at"),
+            })
         rule = _rule_registry().activate(
             rule_id,
             str(payload.get("adopted_by") or ""),
             payload.get("adoption_scope") if isinstance(payload.get("adoption_scope"), dict) else {},
             str(payload.get("adoption_signature") or ""),
         )
-        return {"rule": rule, "next_required_action": "rule_match_gate"}
+        return {"rule": rule, "rule_state": manager.status(), "next_required_action": "rule_match_gate"}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="rule not found") from exc
     except ValueError as exc:
@@ -1057,7 +1088,8 @@ def activate_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/rules/{rule_id:path}/status")
 def change_rule_status(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
-        return {"rule": _rule_registry().set_status(rule_id, str(payload.get("status") or ""))}
+        rule = _rule_registry().set_status(rule_id, str(payload.get("status") or ""))
+        return {"rule": rule, "rule_state": _rule_state_manager().status()}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="rule not found") from exc
     except ValueError as exc:
@@ -1160,7 +1192,7 @@ def execute_web_search(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         result = WebRuntime(load_launch_settings()).search(str(payload.get("query") or ""), int(payload.get("limit") or 5))
         execution = engine.record_execution(gate, "execution_succeeded", {"provider": result["provider"], "result_count": result["count"], "rule_state": _rule_state_runtime().status().get("state")})
-        return {**result, "authorization": gate, "execution_trace": execution}
+        return {**result, "response_declaration": _rule_state_manager().status(), "authorization": gate, "execution_trace": execution}
     except Exception as exc:
         execution = engine.record_execution(gate, "execution_failed", {"error": str(exc)[:300]})
         raise HTTPException(status_code=502, detail={"message": str(exc), "authorization": gate, "execution_trace": execution}) from exc
@@ -1399,8 +1431,9 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(status_code=403, detail="目前未允許模型生成，聊天內容不會送出。請開啟 model_generate 權限或改用 Sandbox。") from exc
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"模型呼叫失敗：{_friendly_model_error(MODEL_SETTINGS, str(exc))}") from exc
+    reply = _rule_state_manager().decorate_reply(reply, locale)
     suggestion = _build_chat_suggestion(user_text) if any(trigger in user_text for trigger in SUGGESTION_TRIGGERS) else None
-    return {"mode": "general_chat", "reply": reply, "reply_source": source, "model_connected": _model_connected(), "suggestion": suggestion, "task_created": False, "data_center_written": False, "auto_workbench": False}
+    return {"mode": "general_chat", "reply": reply, "reply_source": source, "rule_state": _rule_state_manager().status(locale), "model_connected": _model_connected(), "suggestion": suggestion, "task_created": False, "data_center_written": False, "auto_workbench": False}
 
 
 @app.post("/api/chat/suggestions/accept")
@@ -1685,11 +1718,15 @@ def generate(task_id: str) -> dict[str, Any]:
                 sandbox_output = generate_with_sandbox_model(task, task["scbkr"])
                 result = build_generation_result(task, task["scbkr"], sandbox_output.get("generated_text") or sandbox_output.get("content") or "")
                 result.update(sandbox_output)
+                decorated = _rule_state_manager().decorate_reply(str(result.get("content") or result.get("generated_text") or ""))
+                result["content"] = decorated
+                result["generated_text"] = decorated
                 result.update({"source": "sandbox_mock_model", "next_required_action": "user_review_required"})
                 return result
             generation_messages = build_generation_messages(task, task["scbkr"])
             response = _post_openai_compatible(MODEL_SETTINGS, generation_messages)
             result = build_generation_result(task, task["scbkr"], parse_chat_completion_response(response))
+            result["content"] = _rule_state_manager().decorate_reply(str(result.get("content") or ""))
             result["token_metrics"] = build_token_efficiency_metrics(
                 raw_input=str(task.get("raw_input") or ""),
                 messages=generation_messages,
@@ -2213,9 +2250,11 @@ def data_center_ask(payload: dict[str, Any]) -> dict[str, Any]:
     citations = context.get("evidence_packet", {}).get("citations", [])
     excluded = len(context.get("candidate_hits", [])) + len(context.get("rejected_hits", []))
     if not citations:
+        answer = _rule_state_manager().decorate_reply("目前四庫沒有與這個問題相符、且已完成簽名與驗收的正式資料。模型沒有可引用依據，因此不生成答案。", "en" if _looks_english(query) else "zh-TW")
         return {
             "query": query,
-            "answer": "目前四庫沒有與這個問題相符、且已完成簽名與驗收的正式資料。模型沒有可引用依據，因此不生成答案。",
+            "answer": answer,
+            "rule_state": _rule_state_manager().status("en" if _looks_english(query) else "zh-TW"),
             "citations": [],
             "citation_count": 0,
             "candidates_excluded": excluded,
@@ -2237,9 +2276,11 @@ def data_center_ask(payload: dict[str, Any]) -> dict[str, Any]:
             model_called = True
         except Exception as exc:
             model_error = _friendly_model_error(MODEL_SETTINGS, str(exc))
+    answer = _rule_state_manager().decorate_reply(answer, "en" if _looks_english(query) else "zh-TW")
     return {
         "query": query,
         "answer": answer,
+        "rule_state": _rule_state_manager().status("en" if _looks_english(query) else "zh-TW"),
         "citations": citations,
         "citation_count": len(citations),
         "candidates_excluded": excluded,
