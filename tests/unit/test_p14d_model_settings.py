@@ -115,6 +115,36 @@ def test_openai_compatible_model_test_blank_api_key_preserves_saved_key(tmp_path
     assert "last_test_status" in data
 
 
+def test_model_connection_check_uses_short_reply_budget_and_clears_old_error(tmp_path, monkeypatch):
+    main = fresh_main(tmp_path, monkeypatch)
+    captured = {}
+
+    def fake_model_call(settings, messages):
+        captured.update(settings)
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(main, "_post_openai_compatible", fake_model_call)
+    main.MODEL_SETTINGS["raw_error"] = "old failure"
+    client = TestClient(main.app)
+
+    data = client.post(
+        "/api/model/test",
+        json={
+            "provider": "lm_studio",
+            "mode": "local",
+            "base_url": "http://127.0.0.1:1234/v1",
+            "api_key": "",
+            "model_name": "qwen2.5-0.5b-instruct",
+            "max_tokens": 4096,
+        },
+    ).json()
+
+    assert captured["max_tokens"] == 64
+    assert main.MODEL_SETTINGS["max_tokens"] == 4096
+    assert data["last_test_status"] == "success"
+    assert "raw_error" not in main.MODEL_SETTINGS
+
+
 def test_openai_compatible_new_api_key_updates_saved_key(tmp_path, monkeypatch):
     main = fresh_main(tmp_path, monkeypatch)
     client = TestClient(main.app)

@@ -1364,8 +1364,15 @@ def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
         else:
             if _model_call_requires_external_api_permission(MODEL_SETTINGS):
                 assert_permission_allowed(PERMISSIONS, "external_api_call")
+            test_settings = {
+                **MODEL_SETTINGS,
+                # A connection check only needs a short reply. Keeping this
+                # small prevents lightweight local models from rejecting the
+                # request when their loaded context window is limited.
+                "max_tokens": min(MODEL_SETTINGS["max_tokens"], 64),
+            }
             response = _post_openai_compatible(
-                MODEL_SETTINGS,
+                test_settings,
                 [{"role": "user", "content": "請回覆 SCBKR model gateway test。"}],
             )
             status = {**make_test_status(True, parse_chat_completion_response(response)), "test_result_kind": "local_model_success" if MODEL_SETTINGS["mode"] == "local" else "external_model_success"}
@@ -1377,6 +1384,8 @@ def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     except Exception as exc:
         status = {**make_test_status(False, _friendly_model_error(MODEL_SETTINGS, str(exc))), "raw_error": str(exc), "test_result_kind": "local_model_unreachable" if MODEL_SETTINGS.get("mode") == "local" else "external_model_unreachable"}
     MODEL_SETTINGS.update(status)
+    if status["last_test_status"] == "success":
+        MODEL_SETTINGS.pop("raw_error", None)
     MODEL_SETTINGS["enabled"] = status["last_test_status"] == "success"
     save_runtime_section("model", MODEL_SETTINGS)
     result = _public_model_settings()

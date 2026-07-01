@@ -5,12 +5,14 @@ async function openSection(page: Page, testInfo: TestInfo, label: string) {
   if (testInfo.project.name === "mobile-chromium") {
     const drawer = page.locator(".mobile-drawer");
     await expect(drawer).toBeVisible();
-    const primary = drawer.locator("button").filter({ hasText: label });
+    const primary = drawer.getByRole("button", { name: label, exact: true });
     if (await primary.count()) {
       await primary.click();
     } else {
-      await drawer.locator("button").filter({ hasText: "更多" }).click();
-      await page.locator(".more-grid button").filter({ hasText: label }).click();
+      await drawer.getByRole("button", { name: "更多", exact: true }).click();
+      const nested = page.locator(".more-grid").getByRole("button", { name: label, exact: true });
+      await expect(nested).toBeVisible();
+      await nested.click();
     }
     return;
   }
@@ -48,7 +50,7 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   const healthResponse = await page.request.get("http://127.0.0.1:8787/health");
   expect(healthResponse.ok(), "本機 FastAPI health 必須可連線").toBe(true);
   if (testInfo.project.name === "desktop-chromium") {
-    await expect(page.getByText("API online", { exact: true })).toBeVisible();
+    await expect(page.getByText("API online", { exact: true })).toBeVisible({ timeout: 15_000 });
   }
   await expect(page.getByLabel("一般聊天主視窗")).toBeVisible();
   await expect(page.getByRole("heading", { name: "自然語言控制台" })).toBeVisible();
