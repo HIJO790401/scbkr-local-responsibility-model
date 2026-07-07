@@ -63,18 +63,18 @@ def test_sandbox_model_test_does_not_call_external_model(tmp_path, monkeypatch):
 
 
 def test_model_settings_page_contract_exists():
-    source = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
+    source = Path("apps/web/src/V2App.tsx").read_text(encoding="utf-8")
     for phrase in (
-        "模型設定 / Model Settings",
-        "模式 / Mode",
+        "模型設定",
+        "Provider",
         "Base URL",
         "API Key",
-        "Model Name",
+        "Model name",
         "儲存設定",
-        "測試連線",
-        "切回沙盒模式",
-        "前往模型設定",
-        "目前模型尚未連線，請先到「模型設定」完成測試連線，或切回沙盒模式。",
+        "測試模型連線",
+        "切回 Sandbox",
+        "開啟模型生成權限",
+        "先測試模型，再開啟生成權限。",
         "http://127.0.0.1:1234/v1",
         "http://127.0.0.1:11434/v1",
     ):
@@ -167,9 +167,9 @@ def test_openai_compatible_explicit_clear_api_key_clears_saved_key(tmp_path, mon
 
 
 def test_model_settings_page_documents_blank_key_preservation_and_explicit_clear():
-    source = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
-    assert 'if (!form.api_key && form.provider === "openai_compatible") delete payload.api_key;' in source
+    source = Path("apps/web/src/V2App.tsx").read_text(encoding="utf-8")
+    assert "if (!payload.api_key) delete payload.api_key;" in source
     assert 'clear_api_key: true' in source
     assert "清除 API Key" in source
     assert "Leave blank to keep the saved API key." in source
-    assert "Use “Clear API Key” to remove it." in source
+    assert "留白會保留已儲存金鑰" in source

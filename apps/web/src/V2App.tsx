@@ -126,6 +126,10 @@ function RuleFlowSurface({
   citations,
   tokensAvoided,
   planLevel,
+  onChat,
+  onRule,
+  onDraft,
+  onData,
 }: {
   en: boolean;
   status: string;
@@ -133,12 +137,16 @@ function RuleFlowSurface({
   citations: number;
   tokensAvoided: number;
   planLevel: string;
+  onChat: () => void;
+  onRule: () => void;
+  onDraft: () => void;
+  onData: () => void;
 }) {
   const steps = [
-    { icon: MessageSquare, label: en ? "Chat" : "一般聊天", value: en ? "Ready" : "就緒", state: "active" },
-    { icon: Search, label: en ? "Assist" : "規則輔助", value: en ? "Chat first" : "聊天優先", state: "active" },
-    { icon: FileKey, label: en ? "Draft" : "待簽名草案", value: readableStatus(status, en), state: status === "draft" ? "wait" : "active" },
-    { icon: Database, label: en ? "Citations" : "四庫引用", value: String(citations), state: citations > 0 ? "active" : "wait" },
+    { icon: MessageSquare, label: en ? "Chat" : "一般聊天", value: en ? "Ready" : "就緒", state: "active", action: onChat, aria: en ? "Open chat" : "開啟一般聊天" },
+    { icon: Search, label: en ? "Rule assist" : "規則輔助", value: en ? "Chat first" : "聊天優先", state: "active", action: onRule, aria: en ? "Open rule assist" : "開啟規則輔助" },
+    { icon: FileKey, label: en ? "Pending drafts" : "待簽名草案", value: readableStatus(status, en), state: status === "draft" ? "wait" : "active", action: onDraft, aria: en ? "Open pending drafts" : "開啟待簽名草案" },
+    { icon: Database, label: en ? "Four stores" : "四庫引用", value: String(citations), state: citations > 0 ? "active" : "wait", action: onData, aria: en ? "Open four stores" : "開啟四庫引用" },
   ];
   return (
     <section className="plain-rule-surface" aria-label={en ? "Natural language routing" : "自然語言納編狀態"}>
@@ -152,12 +160,12 @@ function RuleFlowSurface({
         </div>
       </div>
       <div className="flow-steps">
-        {steps.map(({ icon: Icon, label, value, state }) => (
-          <span key={label} className={state}>
+        {steps.map(({ icon: Icon, label, value, state, action, aria }) => (
+          <button key={label} className={state} onClick={action} aria-label={aria}>
             <Icon size={16} />
             <b>{label}</b>
             <small>{value}</small>
-          </span>
+          </button>
         ))}
       </div>
       <div className="flow-metrics">
@@ -543,8 +551,8 @@ export default function V2App() {
   }
 
   async function review(decision: "pass" | "fail") {
-    if (!task) return;
-    const reviewed = await run(en ? "Review output" : "驗收輸出", () => api<TaskSummary>(`/api/tasks/${task.task_id}/review`, { method: "POST", body: JSON.stringify({ review_decision: decision, review_message: decision === "pass" ? "Owner accepted" : "Owner rejected", reviewer_signature: ownerSignature || "owner" }) }));
+    if (!task || !ownerSignature.trim()) return;
+    const reviewed = await run(en ? "Review output" : "驗收輸出", () => api<TaskSummary>(`/api/tasks/${task.task_id}/review`, { method: "POST", body: JSON.stringify({ review_decision: decision, review_message: decision === "pass" ? "Owner accepted" : "Owner rejected", reviewer_signature: ownerSignature.trim() }) }));
     if (reviewed) syncTask(reviewed);
   }
 
@@ -552,11 +560,11 @@ export default function V2App() {
     if (!task || !ownerSignature.trim()) return;
     let current = task;
     if (!current.storage_plan) {
-      const requested = await run(en ? "Create storage plan" : "建立入庫計畫", () => api<TaskSummary>(`/api/tasks/${current.task_id}/storage-request`, { method: "POST", body: JSON.stringify({ selected_targets: selectedStores, user_decision: "custom", signature: ownerSignature }) }));
+      const requested = await run(en ? "Create storage plan" : "建立入庫計畫", () => api<TaskSummary>(`/api/tasks/${current.task_id}/storage-request`, { method: "POST", body: JSON.stringify({ selected_targets: selectedStores, user_decision: "custom", signature: ownerSignature.trim() }) }));
       if (!requested) return;
       current = requested;
     }
-    const committed = await run(en ? "Commit four stores" : "二次確認入庫", () => api<TaskSummary>(`/api/tasks/${current.task_id}/storage-confirm`, { method: "POST", body: JSON.stringify({ storage_confirmed: true, second_confirm: true, confirmed_by: "user", signature: ownerSignature, selected_targets: selectedStores }) }));
+    const committed = await run(en ? "Commit four stores" : "二次確認入庫", () => api<TaskSummary>(`/api/tasks/${current.task_id}/storage-confirm`, { method: "POST", body: JSON.stringify({ storage_confirmed: true, second_confirm: true, confirmed_by: "user", signature: ownerSignature.trim(), selected_targets: selectedStores }) }));
     if (committed) { syncTask(committed); void refreshAll(); }
   }
 
@@ -645,6 +653,11 @@ export default function V2App() {
     if (saved) setPermissions(saved);
   }
 
+  async function setModelGeneratePermission(enabled: boolean) {
+    const saved = await run(en ? "Update model permission" : "更新模型生成權限", () => api<any>("/api/settings/permissions", { method: "POST", body: JSON.stringify({ model_generate: enabled }) }));
+    if (saved) setPermissions(saved);
+  }
+
   async function activateRuntimePreview() {
     if (!runtimeSignature.trim()) return;
     const selected = await run(en ? "Activate runtime preview" : "啟用規則狀態預覽", () => api<any>("/api/rule-state/select", { method: "POST", body: JSON.stringify({ runtime_id: "shenyao-rule-state", version: "1.2.0", mode: runtimeMode, update_channel: "stable", developer_preview: true, preview_token: runtimeSignature }) }));
@@ -696,6 +709,30 @@ export default function V2App() {
     if (tested) setModel(tested);
   }
 
+  async function clearModelApiKey() {
+    const cleared = await run(en ? "Clear API key" : "清除 API Key", () => api<ModelSettings>("/api/settings/model", { method: "POST", body: JSON.stringify({ provider: modelForm.provider, api_key: "", clear_api_key: true }) }));
+    if (cleared) { setModel(cleared); setModelForm((current) => ({ ...current, api_key: "" })); }
+  }
+
+  async function switchSandboxModel() {
+    const sandbox = { ...modelForm, provider: "sandbox_mock_model", mode: "sandbox", base_url: "", api_key: "", model_name: "sandbox_mock_model" };
+    setModelForm(sandbox);
+    const saved = await run(en ? "Use Sandbox" : "切回 Sandbox", () => api<ModelSettings>("/api/settings/model", { method: "POST", body: JSON.stringify(sandbox) }));
+    if (saved) setModel(saved);
+  }
+
+  function updateModelProvider(provider: string) {
+    const mode = provider === "sandbox_mock_model" ? "sandbox" : provider === "openai_compatible" ? "external" : "local";
+    const base_url = provider === "lm_studio"
+      ? "http://127.0.0.1:1234/v1"
+      : provider === "ollama"
+        ? "http://127.0.0.1:11434/v1"
+        : provider === "sandbox_mock_model"
+          ? ""
+          : modelForm.base_url;
+    setModelForm({ ...modelForm, provider, mode, base_url, api_key: provider === "sandbox_mock_model" ? "" : modelForm.api_key, model_name: provider === "sandbox_mock_model" ? "sandbox_mock_model" : modelForm.model_name });
+  }
+
   async function startPairing() {
     const result = await run(en ? "Create pairing code" : "產生手機配對碼", () => api<any>("/api/companion/pairing/start", { method: "POST", body: "{}" }));
     if (result) setPairing(result);
@@ -739,16 +776,16 @@ export default function V2App() {
 
   const nav = [
     { id: "command" as View, label: copy.navigation.chat, icon: MessageSquare },
-    { id: "rules" as View, label: copy.navigation.rules, icon: FileKey },
     { id: "workbench" as View, label: copy.navigation.workbench, icon: SlidersHorizontal },
-    { id: "tools" as View, label: en ? "Tools" : "工具", icon: Wrench },
+    { id: "rules" as View, label: copy.navigation.rules, icon: FileKey },
     { id: "data" as View, label: copy.navigation.dataCenter, icon: Database },
-    { id: "runtime" as View, label: en ? "Rule State" : "規則狀態", icon: ShieldCheck },
+    { id: "tools" as View, label: en ? "Tools & Search" : "工具與搜尋", icon: Wrench },
     { id: "model" as View, label: copy.navigation.modelSettings, icon: Settings },
+    { id: "runtime" as View, label: en ? "Rule State" : "規則狀態", icon: ShieldCheck },
     { id: "launch" as View, label: en ? "Launch" : "上線中心", icon: Rocket },
     { id: "about" as View, label: copy.navigation.about, icon: Info },
   ];
-  const mobileNav = [nav[0], nav[1], nav[2], nav[4], { id: "more" as View, label: en ? "More" : "更多", icon: Menu }];
+  const mobileNav = [nav[0], nav[1], nav[2], nav[3], { id: "more" as View, label: en ? "More" : "更多", icon: Menu }];
 
   const stores = [
     { id: "vector", label: copy.stores.vector, count: overview.vector_count || 0, icon: Network },
@@ -878,7 +915,7 @@ export default function V2App() {
     <section className="command-zone chat-main" aria-label="一般聊天主視窗">
       <header className="command-header"><div><span>SCBKR 2.3 CHAT-FIRST</span><h1>{en ? "SCBKR Chat" : "SCBKR 聊天"}</h1></div><div className="stage-chip"><Activity size={15} />{readableStatus(status, en)}</div></header>
       <div className={`rule-awareness-strip ${String(ruleState.awareness_state || "EMPTY").toLowerCase()}`}><span>{ruleState.awareness_state || "EMPTY"}</span><b>{ruleState.active_rulepack_id ? `${ruleState.active_rulepack_id} v${ruleState.active_rulepack_version}` : ruleState.active_rule_id ? `${ruleState.active_rule_id} v${ruleState.active_rule_version}` : (en ? "No active rule" : "尚無生效規則")}</b><em>{ruleState.responsibility_holder ? `${en ? "RESPONSIBILITY" : "責任歸屬"} · ${ruleState.responsibility_holder}` : (en ? "ASSISTANCE ONLY" : "僅供輔助對話")}</em></div>
-      <RuleFlowSurface en={en} status={status} activeRules={activeRules} citations={citations} tokensAvoided={Number(tokenMetrics.estimated_tokens_avoided || task?.scbkr?.token_metrics?.estimated_tokens_avoided || 0)} planLevel={planLevel} />
+      <RuleFlowSurface en={en} status={status} activeRules={activeRules} citations={citations} tokensAvoided={Number(tokenMetrics.estimated_tokens_avoided || task?.scbkr?.token_metrics?.estimated_tokens_avoided || 0)} planLevel={planLevel} onChat={() => setCommandMode("chat")} onRule={() => setCommandMode("rule")} onDraft={() => setView("workbench")} onData={() => setView("data")} />
       <div className="command-modes" role="tablist" aria-label={en ? "Quick route" : "自然語言快速路由"}><button className={commandMode === "chat" ? "active" : ""} onClick={() => setCommandMode("chat")}><MessageSquare size={15} />{en ? "Chat" : "一般聊天"}</button><button className={commandMode === "web" ? "active" : ""} onClick={() => setCommandMode("web")}><Globe2 size={15} />{en ? "Verify web" : "上網查證"}</button><button className={commandMode === "search" ? "active" : ""} onClick={() => setCommandMode("search")}><Search size={15} />{en ? "Read stores" : "查四庫"}</button><button className={commandMode === "rule" ? "active" : ""} onClick={() => setCommandMode("rule")}><FileKey size={15} />{en ? "New rule" : "建規則"}</button></div>
       <div className="message-list" ref={messageListRef}>{messages.map((item, index) => <div key={`${item.role}-${index}`} className={`message ${item.role} ${item.card ? "has-card" : ""}`}><span>{item.role === "assistant" ? "SCBKR" : en ? "YOU" : "你"}</span><div>{item.content}</div>{item.card && renderWorkflowCard(item.card)}</div>)}</div>
       <div className="chat-input"><label className="natural-input-label"><span>{commandMode === "chat" ? (en ? "Message" : "訊息") : commandMode === "web" ? (en ? "Verified web query" : "上網查證") : commandMode === "search" ? (en ? "Signed-store question" : "四庫問題") : (en ? "Rule sentence" : "規則句")}</span><textarea aria-label={en ? "Natural language input" : "自然語言輸入"} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={commandMode === "chat" ? (en ? "Ask anything, draft text, summarize a file, or tell me what should become a reusable rule..." : "像一般模型一樣輸入：聊天、寫文案、摘要文件；若要變成規則，我會先問你。") : commandMode === "web" ? (en ? "Verify current information about..." : "例如：查目前某項服務是否可用。") : commandMode === "search" ? (en ? "What do my signed rules say about publishing?" : "例如：四庫裡我對發布有什麼規則？") : (en ? "Before publishing, require my signature." : "例如：凡是要發布內容，都必須先讓我簽名。")} /></label><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Run" : "執行"}>{commandMode === "web" ? <Globe2 size={20} /> : commandMode === "search" ? <Search size={20} /> : commandMode === "rule" ? <FileKey size={20} /> : <Send size={20} />}</button></div>
@@ -911,10 +948,11 @@ export default function V2App() {
         <div className="dimension-grid">{dims.map((dim) => { const content = task.scbkr?.[dim] || {}; const preview = human(content.task_subject || content.core_logic || content.stop_conditions || content.references || content.acceptance_criteria).slice(0, 88); return <details className={`dimension-row ${dimColor[dim]}`} key={dim} open={dim === "S"}><summary><b>{dim}</b><span><strong>{dimensionNames[dim][en ? "en" : "zh"]}</strong>{preview || (en ? "Pending" : "待補")}</span><ChevronRight size={15} /></summary><div className="dimension-readable">{Object.entries(content).filter(([key, value]) => key !== "pending_questions" && human(value).trim()).map(([key, value]) => <div key={key}><b>{fieldTitle(key, en)}</b><p>{human(value)}</p></div>)}</div></details>; })}</div>
         <div className="gate-sequence"><span className={task.confirmed ? "passed" : "current"}>1 {en ? "SIGN" : "簽名"}</span><span className={task.generation_result ? "passed" : task.confirmed ? "current" : ""}>2 {en ? "GENERATE" : "生成"}</span><span className={task.review_passed ? "passed" : task.status === "waiting_review" ? "current" : ""}>3 {en ? "REVIEW" : "驗收"}</span><span className={task.storage_confirmed ? "passed" : task.review_passed ? "current" : ""}>4 {en ? "STORE" : "入庫"}</span></div>
         <label>{en ? "Owner signature" : "使用者簽名"}<input value={ownerSignature} onChange={(e) => setOwnerSignature(e.target.value)} disabled={task.confirmed} /></label>
+        <small>{en ? "The model cannot sign. The user signature unlocks generation, review, and storage." : "模型不能簽名；只有使用者簽名後才能生成、驗收與入庫。"}</small>
         <div className="action-grid">
           {!task.confirmed && <button disabled={!ownerSignature.trim()} onClick={() => void confirmTask()}><ShieldCheck size={15} />{en ? "Confirm" : "確認責任鏈"}</button>}
           {task.status === "confirmed" && <button onClick={() => void generate()}><Bot size={15} />{en ? "Generate" : "開始生成"}</button>}
-          {task.status === "waiting_review" && <><button onClick={() => void review("pass")}><Check size={15} />{en ? "Pass" : "通過驗收"}</button><button className="danger" onClick={() => void review("fail")}><X size={15} />{en ? "Fail" : "驗收失敗"}</button></>}
+          {task.status === "waiting_review" && <><button disabled={!ownerSignature.trim()} onClick={() => void review("pass")}><Check size={15} />{en ? "Pass" : "通過驗收"}</button><button className="danger" disabled={!ownerSignature.trim()} onClick={() => void review("fail")}><X size={15} />{en ? "Fail" : "驗收失敗"}</button></>}
         </div>
         {(task.review_passed || task.storage_plan) && <div className="store-select"><b>{en ? "Second-confirm stores" : "二次確認入庫"}</b>{stores.map((store) => <label key={store.id}><input type="checkbox" checked={selectedStores.includes(store.id)} onChange={() => setSelectedStores((current) => current.includes(store.id) ? current.filter((id) => id !== store.id) : [...current, store.id])} />{store.label}</label>)}<button disabled={!ownerSignature.trim()} onClick={() => void commitStores()}><Database size={15} />{en ? "Commit" : "確認寫入"}</button></div>}
         {task.generation_result && <div className="output-console"><span>MODEL OUTPUT</span>{human(task.generation_result.content || task.generation_result.generated_text || task.generation_result.output)}</div>}
@@ -953,7 +991,7 @@ export default function V2App() {
 
   const launchPage = <section className="full-panel launch-page"><div className="page-head"><div><span>PRODUCTION CONTROL PLANE</span><h1>{en ? "Launch Center" : "上線中心"}</h1></div><Rocket size={25} /></div><div className="readiness-head"><div><span>{en ? "STORE READINESS" : "上架準備度"}</span><strong>{readiness.ready_count || 0}/{readiness.total_count || 8}</strong></div><div className="readiness-track"><i style={{ width: `${((readiness.ready_count || 0) / (readiness.total_count || 8)) * 100}%` }} /></div><small>{en ? "Fill in the services you create. Secret server keys never belong in the desktop client." : "你申請好服務後填在這裡；伺服器私鑰永遠不能放進桌面客戶端。"}</small></div><div className="launch-grid"><section><div className="integration-title"><Cloud /><div><b>Account & Domain</b><span>Supabase / Public URL</span></div></div><label>{en ? "Public domain" : "正式網域"}<input value={launchSettings.public_domain || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, public_domain: e.target.value })} placeholder="https://scbkr.example" /></label><label>Supabase URL<input value={launchSettings.supabase_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, supabase_url: e.target.value })} placeholder="https://project.supabase.co" /></label><label>Supabase publishable key<input type="password" value={launchSettings.supabase_publishable_key || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, supabase_publishable_key: e.target.value })} /></label></section><section><div className="integration-title"><CreditCard /><div><b>Stripe Billing</b><span>Entitlements / Customer Portal</span></div></div><label>Stripe publishable key<input value={launchSettings.stripe_publishable_key || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, stripe_publishable_key: e.target.value })} /></label><label>{en ? "Monthly Price ID" : "月費 Price ID"}<input value={launchSettings.stripe_monthly_price_id || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, stripe_monthly_price_id: e.target.value })} /></label><label>{en ? "Annual Price ID" : "年費 Price ID"}<input value={launchSettings.stripe_annual_price_id || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, stripe_annual_price_id: e.target.value })} /></label></section><section><div className="integration-title"><Globe2 /><div><b>Web Search</b><span>SearXNG / Brave Search</span></div></div><label>{en ? "Provider" : "搜尋服務"}<select value={launchSettings.search_provider || "searxng"} onChange={(e) => setLaunchSettings({ ...launchSettings, search_provider: e.target.value })}><option value="searxng">SearXNG</option><option value="brave">Brave Search API</option></select></label>{launchSettings.search_provider === "brave" ? <label>{en ? "Brave runtime credential" : "Brave 後端憑證"}<input disabled value={launchSettings.brave_api_key_configured ? (en ? "Configured" : "已設定") : (en ? "Not configured" : "未設定")} /></label> : <label>SearXNG URL<input value={launchSettings.searxng_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, searxng_url: e.target.value })} placeholder="https://search.example" /></label>}<label className="toggle-line"><input type="checkbox" checked={permissions.web_search === true} onChange={(e) => void setWebPermission(e.target.checked)} />{en ? "Allow confirmed web searches" : "允許經使用者確認的網路搜尋"}</label></section><section><div className="integration-title"><KeyRound /><div><b>Windows Distribution</b><span>Partner Center / Signing / Updater</span></div></div><label>Microsoft Partner Product ID<input value={launchSettings.microsoft_partner_product_id || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, microsoft_partner_product_id: e.target.value })} /></label><label>{en ? "Code signing subject" : "程式簽章主體"}<input value={launchSettings.code_signing_subject || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, code_signing_subject: e.target.value })} /></label><label>{en ? "Update endpoint" : "更新端點"}<input value={launchSettings.tauri_update_endpoint || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, tauri_update_endpoint: e.target.value })} /></label></section><section><div className="integration-title"><ShieldCheck /><div><b>Legal & Support</b><span>Privacy / Terms / Contact</span></div></div><label>{en ? "Privacy policy URL" : "隱私政策網址"}<input value={launchSettings.privacy_policy_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, privacy_policy_url: e.target.value })} /></label><label>{en ? "Terms URL" : "服務條款網址"}<input value={launchSettings.terms_of_service_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, terms_of_service_url: e.target.value })} /></label><label>{en ? "Support email" : "客服信箱"}<input value={launchSettings.support_email || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, support_email: e.target.value })} /></label></section><section className="checklist-panel"><span>LAUNCH CHECKLIST</span>{(readiness.checks || []).map((check: any) => <div key={check.id} className={check.ready ? "ready" : "pending"}><i>{check.ready ? <Check size={13} /> : <X size={13} />}</i><b>{check.label}</b><em>{check.owner_action ? (en ? "OWNER" : "需你申請") : (en ? "ENGINEERING" : "工程")}</em></div>)}</section></div><div className="launch-actions"><button onClick={() => void saveLaunchSettings()}><Save size={16} />{en ? "Save launch configuration" : "儲存上線設定"}</button><span>{readiness.ready_for_store_submission ? (en ? "Ready for store submission" : "已具備送審條件") : (en ? "Missing external accounts or release materials" : "仍缺外部帳號或發布資料")}</span></div></section>;
 
-  const modelPage = <section className="full-panel model-settings"><div className="page-head"><div><span>RUNTIME CONNECTION</span><h1>模型設定</h1></div><Bot /></div><div className="settings-grid"><section><h2>{en ? "Desktop / phone connection" : "桌機 / 手機連線"}</h2><div className={`companion-state ${companion?.lan_companion_enabled ? "on" : "off"}`}><span>LAN COMPANION</span><b>{companion?.lan_companion_enabled ? "ON" : "OFF"}</b><small>{companion?.base_url || backend} · {companion?.active_devices || 0} devices</small></div><label>Backend API URL<input value={backend} onChange={(e) => setBackend(e.target.value)} /></label><label>Companion token<input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} /></label><div className="button-row"><button onClick={saveConnection}><Network size={15} />{en ? "Connect" : "儲存並連線"}</button><button disabled={!companion?.lan_companion_enabled} onClick={() => void startPairing()}><FileKey size={15} />{en ? "Pair code" : "取得配對碼"}</button><button disabled={!companion?.active_devices} onClick={() => void revokeCompanions()}><X size={15} />{en ? "Revoke" : "撤銷裝置"}</button></div>{pairing && <div className="pairing-code"><span>{en ? "PAIRING CODE" : "手機配對碼"}</span><strong>{pairing.pairing_code}</strong><small>{pairing.base_url}</small><time>{pairing.expires_at}</time></div>}</section><section><h2>LLM Runtime</h2><label>Provider<select value={modelForm.provider} onChange={(e) => setModelForm({ ...modelForm, provider: e.target.value })}><option value="lm_studio">LM Studio</option><option value="ollama">Ollama</option><option value="openai_compatible">OpenAI-compatible</option><option value="sandbox_mock_model">Sandbox</option></select></label><label>Base URL<input value={modelForm.base_url} onChange={(e) => setModelForm({ ...modelForm, base_url: e.target.value })} /></label><label>Model name<input value={modelForm.model_name} onChange={(e) => setModelForm({ ...modelForm, model_name: e.target.value })} /></label><label>API Key<input type="password" value={modelForm.api_key} onChange={(e) => setModelForm({ ...modelForm, api_key: e.target.value })} /></label><div className="button-row"><button onClick={() => void saveModel()}><Save size={15} />{en ? "Save" : "儲存設定"}</button><button onClick={() => void testModel()}><Activity size={15} />{en ? "Test" : "測試模型連線"}</button></div></section></div></section>;
+  const modelPage = <section className="full-panel model-settings"><div className="page-head"><div><span>RUNTIME CONNECTION</span><h1>模型設定</h1></div><Bot /></div><div className="settings-grid"><section><h2>{en ? "Desktop / phone connection" : "桌機 / 手機連線"}</h2><div className={`companion-state ${companion?.lan_companion_enabled ? "on" : "off"}`}><span>LAN COMPANION</span><b>{companion?.lan_companion_enabled ? "ON" : "OFF"}</b><small>{companion?.base_url || backend} · {companion?.active_devices || 0} devices</small></div><label>Backend API URL<input value={backend} onChange={(e) => setBackend(e.target.value)} /></label><label>Companion token<input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} /></label><div className="button-row"><button onClick={saveConnection}><Network size={15} />{en ? "Connect" : "儲存並連線"}</button><button disabled={!companion?.lan_companion_enabled} onClick={() => void startPairing()}><FileKey size={15} />{en ? "Pair code" : "取得配對碼"}</button><button disabled={!companion?.active_devices} onClick={() => void revokeCompanions()}><X size={15} />{en ? "Revoke" : "撤銷裝置"}</button></div>{pairing && <div className="pairing-code"><span>{en ? "PAIRING CODE" : "手機配對碼"}</span><strong>{pairing.pairing_code}</strong><small>{pairing.base_url}</small><time>{pairing.expires_at}</time></div>}</section><section><h2>LLM Runtime</h2><div className={`model-permission-card ${permissions.model_generate === true ? "on" : "off"}`}><span>{en ? "Generation permission" : "模型生成權限"}</span><b>{permissions.model_generate === true ? "ON" : "OFF"}</b><small>{model?.enabled && model?.last_test_status === "success" ? (en ? "Model tested and ready" : "模型已測試，可以進入生成流程") : (en ? "Test the model, then enable generation." : "先測試模型，再開啟生成權限。")}</small></div><label>Provider<select value={modelForm.provider} onChange={(e) => updateModelProvider(e.target.value)}><option value="lm_studio">LM Studio</option><option value="ollama">Ollama</option><option value="openai_compatible">OpenAI-compatible</option><option value="sandbox_mock_model">Sandbox</option></select></label><label>Base URL<input value={modelForm.base_url} onChange={(e) => setModelForm({ ...modelForm, base_url: e.target.value })} /></label><label>Model name<input value={modelForm.model_name} onChange={(e) => setModelForm({ ...modelForm, model_name: e.target.value })} /></label><label>API Key<input type="password" value={modelForm.api_key} onChange={(e) => setModelForm({ ...modelForm, api_key: e.target.value })} placeholder={en ? "Leave blank to keep the saved API key." : "留白會保留已儲存金鑰"} /></label><div className="button-row"><button onClick={() => void saveModel()}><Save size={15} />{en ? "Save" : "儲存設定"}</button><button onClick={() => void testModel()}><Activity size={15} />{en ? "Test" : "測試模型連線"}</button><button onClick={() => void setModelGeneratePermission(true)}><Bot size={15} />{en ? "Enable generation" : "開啟模型生成權限"}</button><button onClick={() => void switchSandboxModel()}><ShieldCheck size={15} />{en ? "Use Sandbox" : "切回 Sandbox"}</button><button onClick={() => void clearModelApiKey()}><KeyRound size={15} />{en ? "Clear API Key" : "清除 API Key"}</button></div></section></div></section>;
 
   const aboutPage = <section className="full-panel about-panel"><div className="about-mark">SCBKR<span>2.3</span></div><h1>{manifest?.name || copy.product.name}</h1><p className="about-tagline">{manifest?.tagline || copy.product.category}</p><dl><div><dt>{en ? "Author" : "作者"}</dt><dd>{manifest?.creator?.name || "許文耀 / 沈耀888π"}</dd></div><div><dt>{en ? "Organization" : "組織"}</dt><dd>{manifest?.creator?.organization || "語意防火牆"}</dd></div><div><dt>{en ? "Contact" : "合作聯絡"}</dt><dd>{manifest?.creator?.contact_email || "ken0963521@gmail.com"}</dd></div><div><dt>{en ? "Runtime" : "運行定位"}</dt><dd>{manifest?.runtime_relationship || "Local rule-driven AI control layer"}</dd></div></dl></section>;
 

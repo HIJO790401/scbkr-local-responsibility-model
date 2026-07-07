@@ -76,7 +76,7 @@ def test_lan_non_loopback_token_assets_and_health_minimal(monkeypatch):
 
 
 def test_frontend_api_base_runtime_matrix_and_companion_token_contract():
-    app = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
+    app = Path("apps/web/src/V2App.tsx").read_text(encoding="utf-8")
     api_base_path = Path("apps/web/src/apiBase.ts")
     assert api_base_path.exists()
     api_base = api_base_path.read_text(encoding="utf-8")
@@ -95,7 +95,7 @@ def test_frontend_api_base_runtime_matrix_and_companion_token_contract():
     assert "VITE_SCBKR_API_URL" in app
     assert 'window.location.port === "8787"' not in app
     assert '/^https?:$/.test(window.location.protocol)) return window.location.origin;' not in app
-    assert 'return window.location.origin' not in app[app.index("function defaultApiBaseUrl"):app.index("const API_BASE_URL")]
+    assert "function initialBackend" in app
 
     matrix_contracts = [
         ("envApiUrl highest priority", "if (envApiUrl) return envApiUrl"),

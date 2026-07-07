@@ -11,7 +11,7 @@ from core.scbkr.draft_grammar import (
 )
 from core.storage.sqlite_runtime import list_storage_items as list_persisted_storage_items
 
-APP = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
+APP = Path("apps/web/src/V2App.tsx").read_text(encoding="utf-8")
 
 
 def test_task_understanding_scalar_strings_are_not_split():
@@ -49,8 +49,9 @@ def test_frontend_owner_signature_contract():
     assert 'const [ownerSignature, setOwnerSignature] = useState("")' in APP
     assert "使用者簽名" in APP
     assert "模型不能簽名" in APP
-    assert "請先輸入使用者簽名，SCBKR 才能閉環" in APP
     assert "signature: ownerSignature.trim()" in APP
+    assert "reviewer_signature: ownerSignature.trim()" in APP
+    assert "disabled={!ownerSignature.trim()}" in APP
 
 
 def test_patch_resets_signature_and_downstream(monkeypatch):

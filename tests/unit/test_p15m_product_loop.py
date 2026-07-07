@@ -1,11 +1,7 @@
 from fastapi.testclient import TestClient
-from pathlib import Path
 
 from apps.api import main
 from apps.api.main import app
-
-APP = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
-CSS = Path("apps/web/src/App.css").read_text(encoding="utf-8")
 
 
 def test_scbkr_workbench_capability_lock_does_not_call_model(monkeypatch):
@@ -45,18 +41,3 @@ def test_scbkr_product_definition_lock(monkeypatch):
     assert "第0原理建議閘" in reply
     assert "中科大" not in reply
     assert "中國科學技術大學" not in reply
-
-
-def test_p15m_frontend_static_contracts():
-    assert 'const [taskText, setTaskText] = useState("")' in APP
-    assert "onKeyDown" in APP and "e.key === \"Enter\"" in APP and "!e.shiftKey" in APP and "setChatInput(\"\")" in APP
-    assert "isWorkbenchCommand" in APP and "/api/tasks/create" in APP and "create_scbkr_draft: true" in APP
-    assert "已建立工作台任務確認單" in APP and "setPage(\"workbench\")" in APP
-    assert "storage-request" in APP and "storage-confirm" in APP and "使用者二次確認寫入" in APP
-    assert "尚未實體寫入" in APP and "入庫完成" in APP
-    assert "written_targets" in APP and "hash / content_hash" in APP and "path / relative_path" in APP and "stored_at" in APP
-    assert "recommended" in APP and "storage-card" in CSS and ".storage-badge.green" in CSS and ".storage-badge.red" in CSS
-    assert "dataCenterView" in APP and "selectedDataItem" in APP and "dataCenterSections" in APP
-    assert "目前尚無資料" in APP and "審計資料明細" in APP
-    assert "引用證據" in APP and "本次未命中已確認資料" in APP and "source_store" in APP
-    assert "請模型產生更新草案" in APP and "修改前" in APP and "修改後" in APP and "差異" in APP

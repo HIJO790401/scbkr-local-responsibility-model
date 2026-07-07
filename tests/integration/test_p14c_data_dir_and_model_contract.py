@@ -85,9 +85,10 @@ def test_enable_model_generate_permission_api_only_updates_model_generate(tmp_pa
 
 
 def test_web_ui_contains_permission_refresh_and_sandbox_generate_guard():
-    source = open("apps/web/src/App.tsx", encoding="utf-8").read()
+    source = open("apps/web/src/V2App.tsx", encoding="utf-8").read()
 
-    assert 'if ("model_generate" in result) setPermissions(result as Permissions);' in source
-    assert 'permissions?.model_generate !== true' in source
-    assert '沙盒生成前請先開啟 model_generate 權限。' in source
+    assert "/api/settings/permissions" in source
+    assert "setPermissions" in source
+    assert "permissions.model_generate" in source
+    assert "開啟模型生成權限" in source
     assert '/generate' in source

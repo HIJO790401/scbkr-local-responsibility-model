@@ -56,6 +56,10 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await expect(page.getByRole("heading", { name: "SCBKR 聊天" })).toBeVisible();
   await expect(page.locator(".plan-details")).toBeVisible();
   await expect(page.locator(".plan-details")).toContainText(/免費草稿層|責任鏈結構層|規則書閉環審計層/);
+  await expect(page.getByRole("button", { name: "開啟一般聊天" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "開啟規則輔助" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "開啟待簽名草案" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "開啟四庫引用" })).toBeVisible();
   await page.locator(".plan-details summary").click();
   await expect(page.locator(".plan-picker button")).toHaveCount(3, { timeout: 15_000 });
   await expect(page.getByLabel("方案選擇")).toBeVisible();
@@ -90,7 +94,7 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await expect(page.getByLabel("用一句人話建立規則", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Workbench / SCBKR 工作台" })).toHaveCount(0);
 
-  await openSection(page, testInfo, "工具");
+  await openSection(page, testInfo, "工具與搜尋");
   await expect(page.getByRole("heading", { name: "工具註冊與權限" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "SCBKR 聊天" })).toHaveCount(0);
 

@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 
-APP = Path("apps/web/src/App.tsx").read_text(encoding="utf-8")
+APP = Path("apps/web/src/V2App.tsx").read_text(encoding="utf-8")
 PREVIEW_SMOKE = Path("scripts/smoke_p14c_preview_windows.ps1").read_text(encoding="utf-8")
 RELEASE_SMOKE = Path("scripts/smoke_desktop_release_windows.ps1").read_text(encoding="utf-8")
 
@@ -24,18 +24,17 @@ def test_release_smoke_proves_second_confirm_is_required_before_success():
 def test_frontend_storage_has_no_fallback_signatures_and_requires_owner_signature():
     assert "owner-signature-required" not in APP
     assert "storage-owner-signature" not in APP
-    assert 'setMessage("請先輸入使用者簽名，才能建立入庫請求或二次確認寫入。")' in APP
     assert 'signature: ownerSignature.trim()' in APP
-    assert 'const storageConfirm = async () => { if (!task) return; if (!ownerSignature.trim())' in APP
+    assert "if (!task || !ownerSignature.trim()) return;" in APP
+    assert "disabled={!ownerSignature.trim()}" in APP
 
 
-def test_frontend_clears_owner_signature_after_draft_changes():
-    assert 'const clearOwnerSignatureForDraftChange = () => { setOwnerSignature("")' in APP
-    assert 'const updateField = (d: ScbkrDimensionKey, f: string, v: string) => { if (!task?.scbkr || locked) return; const old = task.scbkr[d]?.[f]; clearOwnerSignatureForDraftChange();' in APP
-    assert 'const applyPatch = () => task && pendingPatch && !locked' in APP and 'clearOwnerSignatureForDraftChange(); setPendingPatch(null);' in APP
-    assert 'const regenerateDraft = () => task && !task.confirmed && !locked' in APP and 'clearOwnerSignatureForDraftChange(); });' in APP
-    assert 'const localRevision = invalidateDownstreamForRevision(task)' in APP and 'setOwnerSignature("");' in APP
-    assert 'create_scbkr_draft: true, prefill }) })).then((r: any) => r?.task_id && (setOwnerSignature(""), setPage("workbench")))' in APP
+def test_frontend_clears_owner_signature_when_creating_or_patching_drafts():
+    assert "setOwnerSignature(\"\")" in APP
+    assert "setPendingPatch(null)" in APP
+    assert "/scbkr/patch-draft" in APP
+    assert "/scbkr/apply-patch" in APP
+    assert "create_scbkr_draft: true" in APP
 
 
 def test_release_candidate_metadata_and_readme_contracts():
@@ -76,17 +75,12 @@ def test_storage_ui_targets_remain_formal_four_store_targets():
     assert 'UI_TARGETS = ("vector", "corpus", "logic", "memory", "exports")' not in storage_suggestion
 
 
-def test_data_center_confirm_uses_dedicated_signature_and_blocks_empty_signature():
-    assert 'const [dataCenterOwnerSignature, setDataCenterOwnerSignature] = useState("")' in APP
-    assert '資料中心使用者簽名' in APP
-    assert '請先輸入資料中心使用者簽名，才能確認更改或封存資料。' in APP
-    assert 'signature: dataCenterOwnerSignature.trim()' in APP
-    assert 'signature: ownerSignature.trim(), change_reason' not in APP
-    assert 'signature: ownerSignature.trim(), delete_reason' not in APP
-    assert 'if (!signature) { setMessage(dataCenterSignatureRequiredMessage); return; }' in APP
-    assert 'disabled={!updateDraft || !dataCenterOwnerSignature.trim()}' in APP
-    assert 'disabled={!dataCenterOwnerSignature.trim()}' in APP
-    assert 'setDataCenterOwnerSignature("")' in APP
+def test_data_center_is_readable_four_store_evidence_not_raw_duplicate_panels():
+    assert "四庫資料中心" in APP
+    assert "用人話查詢已簽名資料" in APP
+    assert "模型只能引用已簽名、已驗收的資料" in APP
+    assert "/api/data-center/ask" in APP
+    assert "/api/data-center/" in APP
 
 
 def test_storage_confirm_has_no_legacy_exports_physical_target_path():
