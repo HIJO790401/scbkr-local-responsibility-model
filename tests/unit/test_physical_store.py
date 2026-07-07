@@ -10,6 +10,7 @@ from core.storage.physical_store import (
     commit_memory_rule,
     commit_storage_items,
     hash_payload,
+    prepare_storage_payloads,
     write_json_atomic,
 )
 
@@ -84,6 +85,30 @@ def test_commit_storage_items_writes_corpus_logic_without_unapproved_vector(tmp_
     assert (tmp_path / "logic").is_dir()
     assert not (tmp_path / "exports").exists()
     assert not (tmp_path / "vector").exists()
+
+
+def test_prepare_storage_payloads_gives_each_four_store_a_distinct_contract():
+    task = make_passed_task()
+    task["raw_input"] = "幫我生成商業文案規則表單"
+    task["generation_result"]["content"] = "已驗收的商業文案規則輸出"
+    task["scbkr"]["S"] = {"task_subject": "商業文案規則表單"}
+    task["scbkr"]["C"] = {"core_logic": ["先確認受眾，再生成文案"], "flow_steps": ["確認需求", "生成文案"], "test_conditions": ["可驗收"]}
+    task["scbkr"]["B"] = {"stop_conditions": ["不得編造價格"], "formation_conditions": ["使用者簽名"], "failure_conditions": ["模型代簽"]}
+    task["scbkr"]["K"] = {"source_credibility": ["沒有四庫不得宣稱引用"]}
+    task["scbkr"]["R"] = {"acceptance_criteria": ["使用者可驗收"], "failure_conditions": ["未簽名失效"]}
+
+    payloads = prepare_storage_payloads(task, ["vector", "corpus", "logic", "memory"], task["ledger_id"])
+
+    assert payloads["vector"]["store_role"] == "相似案例索引"
+    assert payloads["vector"]["citation_policy"] == "discovery_index_only_not_formal_basis"
+    assert "retrieval_text" in payloads["vector"]
+    assert payloads["corpus"]["store_role"] == "原文素材庫"
+    assert payloads["corpus"]["source_material"] == "已驗收的商業文案規則輸出"
+    assert payloads["logic"]["store_role"] == "規則與流程判準庫"
+    assert "不得編造價格" in payloads["logic"]["content"]
+    assert payloads["memory"]["store_role"] == "長期偏好與使用者規則記憶"
+    assert payloads["memory"]["memory_statement"] == "幫我生成商業文案規則表單"
+    assert len({payloads[target]["content"] for target in payloads}) == 4
 
 
 def test_commit_storage_items_idempotent_for_same_content(tmp_path, monkeypatch):

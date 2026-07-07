@@ -37,6 +37,22 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "can_claim_close": False,
         "service_refusal_gate": False,
         "requires_owner_signature": True,
+        "human_capabilities": [
+            "一般聊天與任務草稿",
+            "自然語言建立未簽名規則草案",
+            "四庫只能做候選搜尋，不能當正式引用結論",
+        ],
+        "model_scbr_fill": "不主動補完整 S/C/B/K/R；只提供基礎草稿與提示。",
+        "formation_conditions": [
+            "使用者提供任務或規則原句",
+            "系統可產生草案",
+            "正式成立前必須由使用者檢查與簽名",
+        ],
+        "failure_conditions": [
+            "沒有使用者簽名不得成立規則",
+            "沒有四庫正式引用不得宣稱已有依據",
+            "模型不得自行 CLOSE、驗收或入庫",
+        ],
     },
     "NT690": {
         "plan_level": "NT690",
@@ -52,6 +68,22 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "can_claim_close": False,
         "service_refusal_gate": False,
         "requires_owner_signature": True,
+        "human_capabilities": [
+            "協助補 S/C/B/K/R 基本欄位",
+            "擋掉空回覆、假因果、缺參數建議",
+            "把使用者一句話整理成可檢查草案",
+        ],
+        "model_scbr_fill": "可補主體、流程、邊界、依據、驗收條件，但只能是草案。",
+        "formation_conditions": [
+            "通過第 0 原理：不是空話或只有『好』",
+            "語意合法：有主語、目的、邊界或可追問缺口",
+            "使用者簽名後才可進入生成或啟用",
+        ],
+        "failure_conditions": [
+            "主語不明、邊界不明或責任不明",
+            "只有空泛要求，沒有任務參數",
+            "模型補欄位後未經使用者簽名",
+        ],
     },
     "NT3300": {
         "plan_level": "NT3300",
@@ -74,6 +106,26 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "can_claim_close": False,
         "service_refusal_gate": True,
         "requires_owner_signature": True,
+        "human_capabilities": [
+            "建立 CLOSE_CANDIDATE，而非替使用者終裁",
+            "明列成立條件、失效條件與修復路徑",
+            "高風險工具、發布、入庫、外部連線一律要求簽名",
+        ],
+        "model_scbr_fill": "可補完整 S/C/B/K/R、成立條件、失效條件、修復路徑與工具拒絕理由。",
+        "formation_conditions": [
+            "第 0 原理通過",
+            "語意合法 Gate 通過",
+            "有效性/失敗審計通過",
+            "高風險操作已有使用者簽名",
+            "若引用四庫，必須命中已簽名且已驗收資料",
+        ],
+        "failure_conditions": [
+            "語意 Gate 未閉合",
+            "高風險操作未簽名",
+            "宣稱引用但四庫沒有正式資料",
+            "模型自行簽名、驗收、入庫或宣稱 CLOSE",
+            "服務對象、邊界、標準、責任、回放缺任一項",
+        ],
     },
 }
 
@@ -185,6 +237,22 @@ def public_settings(settings: dict[str, Any] | None = None, locale: str = "zh-TW
             "en": "I am SCBKR Responsibility Chain Language Model 2.3. The author is ShenYao / Wen-Yao Hsu, founder of Semantic Firewall. The model assists output; rules and responsibility require user signature.",
         },
         "updated_at": value.get("updated_at"),
+    }
+
+
+def plan_contract(plan_level: str, locale: str = "zh-TW") -> dict[str, Any]:
+    plan = deepcopy(PLAN_CATALOG[normalize_plan_level(plan_level)])
+    return {
+        "plan_level": plan["plan_level"],
+        "display_name": plan["name"].get(locale) or plan["name"]["zh-TW"],
+        "display_summary": plan["summary"].get(locale) or plan["summary"]["zh-TW"],
+        "human_capabilities": plan.get("human_capabilities", []),
+        "model_scbr_fill": plan.get("model_scbr_fill", ""),
+        "formation_conditions": plan.get("formation_conditions", []),
+        "failure_conditions": plan.get("failure_conditions", []),
+        "requires_owner_signature": plan.get("requires_owner_signature", True),
+        "can_fill_structure": plan.get("can_fill_structure", False),
+        "can_claim_close": plan.get("can_claim_close", False),
     }
 
 
@@ -334,6 +402,276 @@ def _four_store_state(four_store_context: dict[str, Any] | None = None) -> dict[
     }
 
 
+def _append_unique(target: list[Any], values: list[Any]) -> list[Any]:
+    seen = {str(item) for item in target}
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text and text not in seen:
+            target.append(text)
+            seen.add(text)
+    return target
+
+
+def _ensure_list(container: dict[str, Any], key: str) -> list[Any]:
+    value = container.get(key)
+    if isinstance(value, list):
+        return value
+    if value in (None, "", {}):
+        container[key] = []
+    else:
+        container[key] = [value]
+    return container[key]
+
+
+def _is_business_copy_task(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(token in lowered for token in ("商業文案", "文案", "廣告", "銷售", "landing page", "copywriting", "marketing copy"))
+
+
+def _is_rule_form_task(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(token in lowered for token in ("規則表單", "規則", "表單", "確認單", "rule form", "policy", "checklist"))
+
+
+def _semantic_task_profile(text: str) -> dict[str, Any]:
+    raw = (text or "").strip()
+    business_copy = _is_business_copy_task(raw)
+    rule_form = _is_rule_form_task(raw)
+    if business_copy and rule_form:
+        return {
+            "subject": "商業文案規則表單",
+            "goal": "把商業文案需求編譯成可檢查的 SCBKR 規則確認單，讓使用者確認後再生成正式文案。",
+            "outputs": ["商業文案規則確認單", "文案生成前檢查表", "可驗收的文案輸出條件"],
+            "logic": [
+                "先確認商業目的、商品/服務、受眾、通路、語氣與禁止宣稱。",
+                "再把需求拆成 S/C/B/K/R 五鏈，使用者簽名後才可當規則使用。",
+                "若要發布、寄出、上架或入庫，必須另經使用者簽名確認。",
+            ],
+            "boundaries": [
+                "不得在缺少商品、受眾、通路、價格或品牌限制時宣稱已完成正式商業文案。",
+                "不得編造價格、保證、療效、法規、實測成果、客戶背書或競品資料。",
+                "不得把文案草稿當成已簽名規則、已驗收內容或可直接發布內容。",
+                "涉及公開發布、寄送、上架、付款或外部工具時，必須要求使用者簽名。",
+            ],
+            "basis": [
+                "使用者原始指令",
+                "SCBKR 五鏈語法",
+                "第0原理：主語、邊界、責任不足時不得硬編",
+                "四庫資料只有在已簽名且已驗收時才能當正式引用",
+            ],
+            "acceptance": [
+                "表單清楚列出商業目的、受眾、輸出格式、禁止事項與驗收標準。",
+                "B 層明確阻止編造商業事實、保證與未授權發布。",
+                "K 層明確區分使用者原句、SCBKR 語法與四庫正式引用。",
+                "R 層要求使用者簽名後才成立，模型不得自行 CLOSE。",
+            ],
+            "formation": [
+                "使用者明確要求建立商業文案規則或確認單。",
+                "S/C/B/K/R 五鏈都有可檢查內容。",
+                "B 層已列出不可編造、不可發布、不可代簽等邊界。",
+                "K 層已標清依據來源，沒有四庫正式資料時不得宣稱引用。",
+                "R 層保留使用者簽名與驗收條件。",
+            ],
+            "failure": [
+                "缺少商品/服務、目標受眾、通路、格式或禁止宣稱時只能停在草案。",
+                "模型編造價格、保證、療效、法規、實測或引用來源時失效。",
+                "模型未經使用者簽名就發布、入庫、寄送或宣稱規則成立時失效。",
+                "B 或 K 層沒有寫出邊界與依據時不得確認。",
+            ],
+            "repair": [
+                "補商品/服務、受眾、通路、語氣、禁止宣稱與輸出格式。",
+                "補 B 層停止條件與 K 層依據來源。",
+                "補 R 層驗收標準與使用者簽名要求。",
+                "重新生成確認單，交使用者審查後再簽名。",
+            ],
+        }
+    if rule_form:
+        return {
+            "subject": raw[:48] or "使用者規則確認單",
+            "goal": "把使用者原句整理成可簽名、可驗收、可回放的 SCBKR 規則草案。",
+            "outputs": ["規則確認單", "成立條件", "失效條件", "驗收標準"],
+            "logic": [
+                "先鎖定使用者要建立的規則主體。",
+                "再拆成 S/C/B/K/R 五鏈草案。",
+                "使用者簽名後才可進入生成、驗收或入庫。",
+            ],
+            "boundaries": [
+                "不得把未簽名草案當成已啟用規則。",
+                "不得替使用者簽名、驗收或入庫。",
+                "不得偽造四庫引用或外部依據。",
+            ],
+            "basis": ["使用者原始指令", "SCBKR 五鏈語法", "第0原理"],
+            "acceptance": [
+                "S/C/B/K/R 欄位可被普通使用者讀懂。",
+                "成立條件與失效條件明確。",
+                "使用者簽名後才成立。",
+            ],
+            "formation": ["使用者有明確規則意圖", "五鏈欄位完整", "使用者完成簽名"],
+            "failure": ["主語不明", "邊界不明", "依據不明", "模型代簽或宣稱 CLOSE"],
+            "repair": ["補主語", "補邊界", "補依據", "補驗收與簽名條件"],
+        }
+    return {
+        "subject": raw[:48] or "SCBKR 任務確認單",
+        "goal": "把使用者需求整理成可檢查、可簽名、可回放的責任鏈草案。",
+        "outputs": ["SCBKR 確認單", "任務草案", "驗收條件"],
+        "logic": [
+            "先抽取任務主體與目的。",
+            "再補流程、邊界、依據與責任。",
+            "使用者簽名後才可生成正式結果。",
+        ],
+        "boundaries": [
+            "不得把草案當正式結果。",
+            "不得替使用者簽名、驗收、入庫或發布。",
+            "資料不足時必須標示待補，不得硬編。",
+        ],
+        "basis": ["使用者原始指令", "SCBKR 五鏈語法", "第0原理"],
+        "acceptance": ["五鏈欄位完整", "使用者能看懂", "使用者簽名後才成立"],
+        "formation": ["使用者提供任務原句", "五鏈欄位完整", "使用者確認並簽名"],
+        "failure": ["主語不明", "邊界不明", "責任不明", "模型代簽或宣稱完成"],
+        "repair": ["補主語/目的", "補邊界/依據", "補驗收/簽名要求"],
+    }
+
+
+def _gate_summary(assessment: dict[str, Any]) -> list[str]:
+    summary: list[str] = []
+    for gate in assessment.get("gates", []) or []:
+        gate_id = str(gate.get("gate_id") or "Gate")
+        status = str(gate.get("status") or "unknown")
+        findings = gate.get("findings") or gate.get("failure_cases") or []
+        suffix = f"：{', '.join(map(str, findings))}" if findings else ""
+        summary.append(f"{gate_id} = {status}{suffix}")
+    return summary
+
+
+def apply_rule_assist_to_scbkr(raw_input: str, scbkr: dict[str, Any], assessment: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Apply FREE / NT690 / NT3300 structure-assist rules to a SCBKR draft.
+
+    This is deterministic backend logic. A local LLM may supply phrasing before
+    this step, but the product contract is enforced here.
+    """
+    draft = deepcopy(scbkr or {})
+    assessment = assessment or evaluate_rule_assist(raw_input, "FREE", target_mode="task")
+    plan = normalize_plan_level(str(assessment.get("plan_level") or "FREE"))
+    profile = _semantic_task_profile(raw_input)
+    contract = assessment.get("plan_contract") or plan_contract(plan)
+    draft["rule_assist_plan"] = plan
+    draft["rule_assist_state"] = assessment.get("state", "DRAFT")
+    draft["structure_assist"] = {
+        "plan_level": plan,
+        "state": assessment.get("state", "DRAFT"),
+        "model_can_fill": contract.get("model_scbr_fill", ""),
+        "gate_summary": _gate_summary(assessment),
+        "owner_signature_required": True,
+    }
+    if plan == "FREE":
+        return draft
+
+    draft.setdefault("S", {})
+    draft.setdefault("C", {})
+    draft.setdefault("B", {})
+    draft.setdefault("K", {})
+    draft.setdefault("R", {})
+    draft["S"]["task_subject"] = draft["S"].get("task_subject") or profile["subject"]
+    if _is_business_copy_task(raw_input) and _is_rule_form_task(raw_input):
+        draft["S"]["task_name"] = "商業文案規則表單確認草案"
+        draft["S"]["task_subject"] = profile["subject"]
+        draft["S"]["output_format"] = profile["outputs"]
+    _append_unique(_ensure_list(draft["C"], "core_logic"), profile["logic"])
+    _append_unique(_ensure_list(draft["C"], "test_conditions"), [
+        "第0原理通過：不是空泛口令，有主語、目的、邊界或待補問題。",
+        "五鏈欄位可由使用者逐項確認。",
+    ])
+    _append_unique(_ensure_list(draft["B"], "stop_conditions"), profile["boundaries"])
+    _append_unique(_ensure_list(draft["B"], "error_handling"), [
+        "若主語、邊界、依據或責任不足，必須停在 OWNER_REVIEW，請使用者補資料。",
+        "若模型草案與使用者原句衝突，以使用者原句與已簽名四庫資料為準。",
+    ])
+    _append_unique(_ensure_list(draft["K"], "references"), profile["basis"])
+    _append_unique(_ensure_list(draft["K"], "source_credibility"), [
+        "使用者原句是本次草案的主要依據。",
+        "沒有已簽名、已驗收四庫資料時，不得宣稱正式引用。",
+        "模型輸出只能作為草案，不是終局依據。",
+    ])
+    draft["K"]["evidence_policy"] = "signed_four_store_required_for_formal_citation"
+    _append_unique(_ensure_list(draft["R"], "acceptance_criteria"), profile["acceptance"])
+    draft["R"]["owner_signature_required"] = True
+    draft["R"]["model_signature_allowed"] = False
+    draft["R"]["required_signer"] = "user"
+
+    if plan == "NT3300":
+        formation = list(contract.get("formation_conditions") or []) + profile["formation"]
+        failure = list(contract.get("failure_conditions") or []) + profile["failure"]
+        repair = profile["repair"]
+        for gate in assessment.get("gates", []) or []:
+            if isinstance(gate.get("repair_path"), list):
+                repair.extend(gate["repair_path"])
+        draft["B"]["formation_conditions"] = _append_unique([], formation)
+        draft["B"]["failure_conditions"] = _append_unique([], failure)
+        draft["R"]["formation_conditions"] = _append_unique([], formation)
+        draft["R"]["failure_conditions"] = _append_unique([], failure)
+        draft["R"]["repair_path"] = _append_unique([], repair)
+        draft["R"]["closure_state"] = "CLOSE_CANDIDATE_ONLY_BEFORE_OWNER_SIGNATURE"
+        draft["structure_assist"]["closure_limit"] = "模型可補完整條件，但正式 CLOSE 必須使用者簽名、驗收與回放。"
+    return draft
+
+
+def build_scbkr_layer_patch(
+    *,
+    raw_input: str,
+    scbkr: dict[str, Any],
+    layer: str,
+    instruction: str,
+    assessment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a user-reviewable patch for one SCBKR dimension."""
+    layer = str(layer or "B").upper()
+    if layer not in {"S", "C", "B", "K", "R"}:
+        raise ValueError("layer must be S/C/B/K/R")
+    assessment = assessment or evaluate_rule_assist(raw_input, "FREE", target_mode="task")
+    plan = normalize_plan_level(str(assessment.get("plan_level") or "FREE"))
+    profile = _semantic_task_profile(raw_input)
+    after = deepcopy((scbkr or {}).get(layer) or {})
+    _append_unique(_ensure_list(after, "pending_questions"), [f"使用者要求修改：{instruction or '請依使用者指令調整此層。'}"])
+
+    if layer == "S":
+        after["task_subject"] = profile["subject"]
+        after["output_format"] = profile["outputs"]
+        after["task_name"] = after.get("task_name") or f"{profile['subject']}確認草案"
+    elif layer == "C":
+        _append_unique(_ensure_list(after, "core_logic"), profile["logic"])
+        _append_unique(_ensure_list(after, "flow_steps"), ["理解使用者原句", "補齊五鏈草案", "等待使用者簽名確認"])
+        _append_unique(_ensure_list(after, "test_conditions"), ["第0原理通過", "使用者可逐項驗收"])
+    elif layer == "B":
+        _append_unique(_ensure_list(after, "stop_conditions"), profile["boundaries"])
+        _append_unique(_ensure_list(after, "data_write_scope"), ["未簽名不得寫入四庫", "未驗收不得入庫", "未簽名不得發布或寄出"])
+        _append_unique(_ensure_list(after, "error_handling"), ["B 層不完整時進 OWNER_REVIEW，不得讓模型硬編。"])
+        if plan == "NT3300":
+            after["formation_conditions"] = _append_unique([], profile["formation"])
+            after["failure_conditions"] = _append_unique([], profile["failure"])
+    elif layer == "K":
+        _append_unique(_ensure_list(after, "references"), profile["basis"])
+        _append_unique(_ensure_list(after, "source_credibility"), [
+            "使用者原始指令可作草案依據。",
+            "第0原理與 SCBKR 語法可作結構依據。",
+            "四庫正式引用必須是已簽名、已驗收資料。",
+            "沒有正式引用時要明講：本次不是引用四庫結論。",
+        ])
+        after["evidence_policy"] = "signed_four_store_required_for_formal_citation"
+    elif layer == "R":
+        _append_unique(_ensure_list(after, "acceptance_criteria"), profile["acceptance"])
+        after["owner_signature_required"] = True
+        after["model_signature_allowed"] = False
+        after["required_signer"] = "user"
+        if plan == "NT3300":
+            after["formation_conditions"] = _append_unique([], profile["formation"])
+            after["failure_conditions"] = _append_unique([], profile["failure"])
+            after["repair_path"] = _append_unique([], profile["repair"])
+            after["closure_state"] = "CLOSE_CANDIDATE_ONLY_BEFORE_OWNER_SIGNATURE"
+    return after
+
+
 def evaluate_rule_assist(
     text: str,
     plan_level: str = "FREE",
@@ -353,6 +691,9 @@ def evaluate_rule_assist(
         "target_mode": target_mode,
         "text_hash": text_hash,
         "four_store": _four_store_state(four_store_context),
+        "plan_contract": plan_contract(plan, locale),
+        "formation_conditions": deepcopy(PLAN_CATALOG[plan].get("formation_conditions", [])),
+        "failure_conditions": deepcopy(PLAN_CATALOG[plan].get("failure_conditions", [])),
         "gates": [],
         "state": "DRAFT",
         "model_claim_limit": "model_may_draft_never_sign_or_close",

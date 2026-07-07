@@ -111,6 +111,8 @@ except Exception:
                         return _Response(200, main.scbkr_patch_draft(task_id, json or {}))
                     if action == "scbkr" and len(parts) > 4 and parts[4] == "apply-patch":
                         return _Response(200, main.apply_scbkr_patch(task_id, json or {}))
+                    if action == "scbkr" and len(parts) > 4 and parts[4] == "apply-rule-assist":
+                        return _Response(200, main.apply_scbkr_rule_assist(task_id, json or {}))
                     if action == "dates":
                         return _Response(200, main.update_task_dates(task_id, json or {}))
                     if action in handlers:

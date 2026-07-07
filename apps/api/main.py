@@ -94,6 +94,8 @@ from core.storage.runtime_paths import current_data_dir
 from core.runtime_settings import load_runtime_section, save_runtime_section
 from core.rule_assist import (
     DEFAULT_RULE_ASSIST_SETTINGS,
+    apply_rule_assist_to_scbkr,
+    build_scbkr_layer_patch,
     build_local_rule_assist_reply,
     build_rule_assist_prompt,
     evaluate_rule_assist,
@@ -595,7 +597,12 @@ def _validate_task_understanding(candidate: Any) -> dict[str, Any]:
     return validate_task_understanding_strict(candidate)
 
 
-def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_context: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool, str | None]:
+def _model_authored_scbkr_draft(
+    raw_input: str,
+    task_type: str,
+    retrieval_context: dict[str, Any] | None = None,
+    rule_assist_assessment: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], bool, str | None]:
     understanding = None
     skipped_reason = None
     compiler_errors: list[str] = []
@@ -661,6 +668,14 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
     else:
         skipped_reason = "model_not_connected"
     draft = build_scbkr_from_understanding(raw_input, task_type, understanding, retrieval_context)
+    if rule_assist_assessment is None:
+        rule_assist_assessment = _assess_rule_assist(
+            raw_input,
+            locale=_response_locale(raw_input, None),
+            target_mode="task",
+            four_store_context=retrieval_context,
+        )
+    draft = apply_rule_assist_to_scbkr(raw_input, draft, rule_assist_assessment)
     draft["compiler_report"] = build_compiler_report(
         status="model_compiled" if understanding is not None else "base_logic" if compiler_attempts == 0 else "base_logic_after_model",
         attempts=compiler_attempts,
@@ -1654,7 +1669,7 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
         task["data_center_context"] = _build_four_store_context(raw_input, task_id)
         task["data_center_context"].update({"advisory": True, "retrieval_required": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": len(task["data_center_context"].get("hits", []))})
         task["rule_assist"] = _assess_rule_assist(raw_input, locale=_response_locale(raw_input, None), target_mode=str(payload.get("object_type") or "task"), four_store_context=task["data_center_context"])
-        task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task["task_type"], task["data_center_context"])
+        task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task["task_type"], task["data_center_context"], task["rule_assist"])
         task["draft_object"] = build_scbkr_draft_object(
             user_request_raw=raw_input,
             scbkr=task["scbkr"],
@@ -1691,7 +1706,7 @@ def create_scbkr(task_id: str) -> dict[str, Any]:
     task["data_center_context"].update({"advisory": True, "retrieval_required": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": len(task["data_center_context"].get("hits", []))})
     task["rule_assist_plan"] = RULE_ASSIST_SETTINGS.get("plan_level", "FREE")
     task["rule_assist"] = _assess_rule_assist(task["raw_input"], locale=_response_locale(task["raw_input"], None), target_mode="task", four_store_context=task["data_center_context"])
-    task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(task["raw_input"], task["task_type"], task["data_center_context"])
+    task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(task["raw_input"], task["task_type"], task["data_center_context"], task["rule_assist"])
     task["draft_object"] = build_scbkr_draft_object(user_request_raw=task["raw_input"], scbkr=task["scbkr"], draft_id=task_id, evidence_context=task["data_center_context"])
     task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
     task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
@@ -1726,7 +1741,7 @@ def regenerate_scbkr_draft(task_id: str, payload: dict[str, Any]) -> dict[str, A
     task["data_center_context"] = _build_four_store_context(raw_input, task_id)
     task["rule_assist_plan"] = RULE_ASSIST_SETTINGS.get("plan_level", "FREE")
     task["rule_assist"] = _assess_rule_assist(raw_input, locale=_response_locale(raw_input, None), target_mode="task", four_store_context=task["data_center_context"])
-    task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task.get("task_type", "general"), task["data_center_context"])
+    task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task.get("task_type", "general"), task["data_center_context"], task["rule_assist"])
     task["draft_object"] = build_scbkr_draft_object(user_request_raw=raw_input, scbkr=task["scbkr"], draft_id=task_id, evidence_context=task["data_center_context"])
     task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
     task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
@@ -1763,6 +1778,51 @@ def edit_scbkr(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     return _task_response(task)
 
 
+@app.post("/api/tasks/{task_id}/scbkr/apply-rule-assist")
+def apply_scbkr_rule_assist(task_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    task = _get_task(task_id)
+    _ensure_scbkr_edit_allowed(task)
+    if "scbkr" not in task:
+        raise HTTPException(status_code=400, detail="SCBKR draft required before rule assist")
+    payload = payload or {}
+    status_before = task.get("status")
+    raw_input = str(payload.get("raw_input") or task.get("raw_input") or "").strip()
+    task["data_center_context"] = task.get("data_center_context") or _build_four_store_context(raw_input, task_id)
+    task["rule_assist_plan"] = RULE_ASSIST_SETTINGS.get("plan_level", "FREE")
+    task["rule_assist"] = _assess_rule_assist(
+        raw_input,
+        locale=_response_locale(raw_input, None),
+        target_mode="task",
+        four_store_context=task["data_center_context"],
+    )
+    task["scbkr"] = apply_rule_assist_to_scbkr(raw_input, task["scbkr"], task["rule_assist"])
+    _reset_owner_signature_status(task["scbkr"])
+    task["confirmed"] = False
+    task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
+    task["draft_object"] = build_scbkr_draft_object(
+        user_request_raw=raw_input,
+        scbkr=task["scbkr"],
+        draft_id=task_id,
+        evidence_context=task.get("data_center_context"),
+    )
+    task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
+    task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
+    _invalidate_downstream_after_scbkr_revision(task, status_before)
+    save_task(task)
+    save_scbkr_confirmation(task_id, task["scbkr"])
+    _append_task_event(
+        "scbkr_rule_assist_applied",
+        task,
+        status_before=status_before,
+        status_after=task["status"],
+        payload={
+            "plan_level": task["rule_assist"].get("plan_level"),
+            "rule_assist_state": task["rule_assist"].get("state"),
+        },
+    )
+    return _task_response(task)
+
+
 @app.post("/api/tasks/{task_id}/scbkr/patch-draft")
 def scbkr_patch_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
@@ -1771,12 +1831,32 @@ def scbkr_patch_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     if layer not in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
         raise HTTPException(status_code=400, detail="layer must be S/C/B/K/R")
     before = task.get("scbkr", {}).get(layer, {})
-    after = strip_confirmation_metadata(dict(before))
-    after["pending_questions"] = [f"使用者要求修改：{instruction or '請依使用者指令調整此層。'}"]
+    raw_input = str(task.get("raw_input") or "").strip()
+    assessment = _assess_rule_assist(
+        raw_input,
+        locale=_response_locale(raw_input, None),
+        target_mode="task",
+        four_store_context=task.get("data_center_context"),
+    )
+    after = strip_confirmation_metadata(build_scbkr_layer_patch(
+        raw_input=raw_input,
+        scbkr=task.get("scbkr", {}),
+        layer=layer,
+        instruction=instruction,
+        assessment=assessment,
+    ))
     if layer == "B" and ("日期" in instruction or "date" in instruction.lower()):
         after["stop_conditions"] = list(after.get("stop_conditions") or []) + ["模型不得自行確認事件日期；日期必須由使用者填寫或確認。"]
         after["sensitive_operation_confirm"] = True
-    patch = {"layer": layer, "before_summary": str(before)[:240], "after_draft": after, "reason": instruction or "使用者要求模型提出此層修改草案。", "auto_confirmed": False}
+    patch = {
+        "layer": layer,
+        "before_summary": str(before)[:240],
+        "after_draft": after,
+        "reason": instruction or "使用者要求模型提出此層修改草案。",
+        "plan_level": assessment.get("plan_level"),
+        "rule_assist_state": assessment.get("state"),
+        "auto_confirmed": False,
+    }
     return {"task_id": task_id, "patch": patch, "confirmed": False, "status": task.get("status")}
 
 
@@ -2340,23 +2420,64 @@ def _dc_item_from_storage(item: dict[str, Any]) -> dict[str, Any]:
     payload = item.get("payload") or {}
     relative_path = item.get("relative_path")
     storage_location = item.get("storage_location") or relative_path
+    target = item.get("target")
+    store_labels = {
+        "vector": "向量庫",
+        "vector_db": "向量庫",
+        "corpus": "語料庫",
+        "logic": "邏輯庫",
+        "memory": "記憶庫",
+    }
+    store_roles = {
+        "vector": "相似案例索引",
+        "vector_db": "相似案例索引",
+        "corpus": "原文素材庫",
+        "logic": "規則與流程判準庫",
+        "memory": "長期偏好與使用者規則記憶",
+    }
+    citation_roles = {
+        "vector": "候選召回，不能單獨當正式判準",
+        "vector_db": "候選召回，不能單獨當正式判準",
+        "corpus": "可引用原文素材",
+        "logic": "可引用規則/流程/邊界判準",
+        "memory": "可引用使用者長期偏好與固定提醒",
+    }
+    status = item.get("status", "active")
+    status_labels = {
+        "active": "可引用",
+        "superseded": "已被新版取代",
+        "archived": "已封存",
+        "revoked": "已撤銷",
+    }
+    content = payload.get("content") or payload.get("rule_statement") or payload.get("summary") or payload.get("purpose") or payload
+    content_text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, sort_keys=True, indent=2)
+    title = payload.get("title") or payload.get("name") or payload.get("purpose") or payload.get("summary") or item.get("item_id")
+    summary = payload.get("summary") or payload.get("purpose") or content_text[:220]
     return {
         "id": item.get("item_id"),
         "item_id": item.get("item_id"),
-        "title": payload.get("title") or payload.get("name"),
-        "summary": payload.get("summary") or payload.get("purpose"),
+        "title": title,
+        "summary": summary,
         "task_id": item.get("task_id"),
         "created_at": item.get("created_at"),
         "stored_at": item.get("stored_at") or item.get("created_at"),
         "hash": item.get("content_hash") or payload.get("hash"),
         "content_hash": item.get("content_hash"),
-        "target": item.get("target"),
+        "target": target,
+        "store_label": store_labels.get(str(target), str(target or "")),
+        "store_role": payload.get("store_role") or store_roles.get(str(target), str(target or "")),
+        "store_purpose": payload.get("store_purpose") or "",
+        "citation_policy": payload.get("citation_policy") or citation_roles.get(str(target), ""),
+        "model_reading_hint": f"{store_labels.get(str(target), str(target or ''))}：{payload.get('store_role') or store_roles.get(str(target), str(target or ''))}；{payload.get('citation_policy') or citation_roles.get(str(target), '')}",
         "path": relative_path,
         "storage_location": storage_location,
         "relative_path": relative_path,
-        "preview": _preview(payload.get("content") or payload),
+        "preview": _preview(content_text),
+        "content_text": content_text,
+        "plain_summary": summary,
         "payload": payload,
-        "status": item.get("status", "active"),
+        "status": status,
+        "status_label": status_labels.get(str(status), str(status)),
         "version": item.get("version", 1),
         "parent_item_id": item.get("parent_item_id"),
         "superseded_by": item.get("superseded_by"),
@@ -2461,15 +2582,33 @@ def data_center_ask(payload: dict[str, Any]) -> dict[str, Any]:
             "model_called": False,
             "status": "no_authoritative_evidence",
         }
-    citation_payload = [{key: item.get(key) for key in ("source_store", "rule", "content_hash", "author_id", "version")} for item in citations]
-    answer = "\n".join(f"[{item.get('source_store')}] {item.get('rule')}" for item in citation_payload)
+    citation_payload = []
+    for item in citations:
+        section_item = None
+        if item.get("storage_item_id"):
+            try:
+                section_item = _dc_item_from_storage(_find_storage_item(str(item.get("storage_item_id"))))
+            except HTTPException:
+                section_item = None
+        citation_payload.append({
+            "source_store": item.get("source_store"),
+            "store_role": (section_item or {}).get("store_role"),
+            "store_purpose": (section_item or {}).get("store_purpose"),
+            "citation_policy": (section_item or {}).get("citation_policy"),
+            "model_reading_hint": (section_item or {}).get("model_reading_hint"),
+            "rule": item.get("rule"),
+            "content_hash": item.get("content_hash") or item.get("hash"),
+            "author_id": item.get("author_id"),
+            "version": item.get("version"),
+        })
+    answer = "\n".join(f"[{item.get('source_store')}｜{item.get('store_role') or '四庫資料'}] {item.get('rule')}" for item in citation_payload)
     model_called = False
     model_error = None
     if _model_connected():
         try:
             _assert_model_gateway_call_allowed(MODEL_SETTINGS)
             response = _post_openai_compatible(MODEL_SETTINGS, [
-                {"role": "system", "content": "你是 SCBKR 四庫閱讀器。只能整理提供的正式引用，不得加入引用中不存在的事實。輸出繁體中文，並保留來源庫標記。"},
+                {"role": "system", "content": "你是 SCBKR 四庫閱讀器。只能整理提供的正式引用，不得加入引用中不存在的事實。必須遵守 store_role / citation_policy：vector 只能當候選召回，不得單獨當正式判準；corpus 是原文素材；logic 是規則/流程/邊界判準；memory 是使用者長期偏好與固定提醒。輸出繁體中文，並保留來源庫標記。"},
                 {"role": "user", "content": json.dumps({"question": query, "authoritative_citations": citation_payload}, ensure_ascii=False)},
             ])
             answer = parse_chat_completion_response(response)

@@ -16,6 +16,40 @@ from core.storage.runtime_paths import REPO_ROOT
 from core.storage.storage_manifest import SUCCESS_STORAGE_TARGETS
 
 SENSITIVE_KEYS = {"api_key", "apikey", "authorization", "access_token", "refresh_token", "token", "secret"}
+FOUR_STORE_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "vector": {
+        "store_label": "向量庫",
+        "store_role": "相似案例索引",
+        "store_purpose": "讓系統找到相似任務、路由候選資料與召回案例；不得單獨當正式判準。",
+        "can_be_used_for": ["相似任務搜尋", "候選資料召回", "RAG 前置索引"],
+        "cannot_be_used_for": ["單獨作為正式引用", "取代邏輯庫判準", "取代使用者簽名"],
+        "citation_policy": "discovery_index_only_not_formal_basis",
+    },
+    "corpus": {
+        "store_label": "語料庫",
+        "store_role": "原文素材庫",
+        "store_purpose": "保存使用者確認過的原始文本、生成成品或可供引用的素材內容。",
+        "can_be_used_for": ["引用原文素材", "保存已驗收輸出", "提供後續生成語料"],
+        "cannot_be_used_for": ["自動推導規則成立", "取代邏輯庫流程", "取代長期記憶"],
+        "citation_policy": "signed_reviewed_source_material_can_be_formal_basis",
+    },
+    "logic": {
+        "store_label": "邏輯庫",
+        "store_role": "規則與流程判準庫",
+        "store_purpose": "保存 SCBKR 五鏈、成立條件、失效條件、流程、邊界、驗收與責任規則。",
+        "can_be_used_for": ["規則引用", "流程判準", "邊界與驗收檢查", "CLOSE_CANDIDATE 審計"],
+        "cannot_be_used_for": ["保存大量原文素材", "取代向量搜尋", "未簽名時宣稱正式規則"],
+        "citation_policy": "signed_reviewed_logic_can_be_formal_rule_basis",
+    },
+    "memory": {
+        "store_label": "記憶庫",
+        "store_role": "長期偏好與使用者規則記憶",
+        "store_purpose": "保存使用者簽名確認後要長期影響未來任務的偏好、禁止事項與固定提醒。",
+        "can_be_used_for": ["長期偏好提醒", "固定禁止條款", "未來任務預設提醒"],
+        "cannot_be_used_for": ["保存一次性輸出成品", "取代語料原文", "未簽名時影響未來任務"],
+        "citation_policy": "signed_user_memory_can_guide_future_tasks",
+    },
+}
 
 
 def _now() -> str:
@@ -123,6 +157,22 @@ def _summary(task: dict[str, Any]) -> str:
     return text[:300]
 
 
+def _store_contract(target: str) -> dict[str, Any]:
+    return dict(FOUR_STORE_DEFINITIONS[target])
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(sanitize_payload(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _list_text(value: Any) -> str:
+    if isinstance(value, list):
+        return "\n".join(f"- {item}" for item in value if item not in (None, ""))
+    if isinstance(value, dict):
+        return _compact_json(value)
+    return str(value or "")
+
+
 def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], ledger_id: str | None = None) -> dict[str, dict[str, Any]]:
     """Build structured payloads for storage layer; never writes files or mutates task state."""
     now = task.get("created_at") or f"system_storage:{task.get('task_id') or 'unknown-task'}"
@@ -136,7 +186,6 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
         "ledger_id": ledger_id or task.get("ledger_id"),
         "title": _title(task),
         "summary": _summary(task),
-        "content": f"{gen_text}\n\nSCBKR: {json.dumps(_sealed_scbkr(task), ensure_ascii=False, sort_keys=True)}".strip(),
         "source_task_id": task.get("task_id"),
         "source_generation_id": generation.get("generation_id") or task.get("trace_id"),
         "raw_input": task.get("raw_input"),
@@ -158,13 +207,118 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
     }
     payloads: dict[str, dict[str, Any]] = {}
     if "vector" in selected_targets:
-        payloads["vector"] = {**base, "target": "vector", "case_id": f"vector:{task.get('task_id')}", "S": scbkr.get("S"), "C": scbkr.get("C"), "B": scbkr.get("B"), "K": scbkr.get("K"), "R": scbkr.get("R"), "embedding_status": "pending", "embedding": None, "status": "metadata_saved_embedding_pending"}
+        s = scbkr.get("S", {})
+        c = scbkr.get("C", {})
+        b = scbkr.get("B", {})
+        r = scbkr.get("R", {})
+        retrieval_text = "\n".join(
+            part for part in [
+                f"任務：{task.get('raw_input')}",
+                f"主體：{s.get('task_subject') or s.get('task_name')}",
+                f"摘要：{_summary(task)}",
+                f"核心邏輯：{_list_text(c.get('core_logic'))}",
+                f"停止條件：{_list_text(b.get('stop_conditions'))}",
+                f"驗收：{_list_text(r.get('acceptance_criteria'))}",
+            ] if part.strip()
+        )
+        payloads["vector"] = {
+            **base,
+            **_store_contract("vector"),
+            "target": "vector",
+            "case_id": f"vector:{task.get('task_id')}",
+            "item_type": "retrieval_case_index",
+            "content": retrieval_text,
+            "retrieval_text": retrieval_text,
+            "index_fields": {
+                "S": s,
+                "C_core_logic": c.get("core_logic", []),
+                "B_stop_conditions": b.get("stop_conditions", []),
+                "R_acceptance_criteria": r.get("acceptance_criteria", []),
+            },
+            "embedding_status": "pending",
+            "embedding": None,
+            "status": "metadata_saved_embedding_pending",
+        }
     if "corpus" in selected_targets:
-        payloads["corpus"] = {**base, "target": "corpus", "source_id": f"corpus:{task.get('task_id')}", "type": "review_passed_generation", "tags": [str(task.get("task_type") or "general"), "corpus"], "source_origin": "user_confirmed_storage"}
+        source_material = gen_text or str(task.get("raw_input") or "")
+        payloads["corpus"] = {
+            **base,
+            **_store_contract("corpus"),
+            "target": "corpus",
+            "source_id": f"corpus:{task.get('task_id')}",
+            "item_type": "review_passed_source_material",
+            "type": "review_passed_generation",
+            "content": source_material,
+            "source_material": source_material,
+            "source_material_kind": "review_passed_generation" if gen_text else "owner_raw_input",
+            "tags": [str(task.get("task_type") or "general"), "corpus"],
+            "source_origin": "user_confirmed_storage",
+        }
     if "logic" in selected_targets:
-        payloads["logic"] = {**base, "target": "logic", "logic_id": f"logic:{task.get('task_id')}", "name": _title(task), "purpose": _summary(task), "flow_steps": scbkr.get("C", {}).get("flow_steps", []), "boundary_rules": scbkr.get("B", {}).get("storage_conditions", []), "test_rules": scbkr.get("C", {}).get("test_conditions", []), "dependencies": scbkr.get("C", {}).get("dependencies", []), "status": "active"}
+        c = scbkr.get("C", {})
+        b = scbkr.get("B", {})
+        k = scbkr.get("K", {})
+        r = scbkr.get("R", {})
+        logic_content = "\n".join([
+            f"規則/流程：{_title(task)}",
+            f"目的：{_summary(task)}",
+            f"流程：\n{_list_text(c.get('flow_steps'))}",
+            f"核心邏輯：\n{_list_text(c.get('core_logic'))}",
+            f"邊界/停止條件：\n{_list_text(b.get('stop_conditions') or b.get('storage_conditions'))}",
+            f"成立條件：\n{_list_text(b.get('formation_conditions') or r.get('formation_conditions'))}",
+            f"失效條件：\n{_list_text(b.get('failure_conditions') or r.get('failure_conditions'))}",
+            f"依據政策：\n{_list_text(k.get('source_credibility'))}",
+            f"驗收：\n{_list_text(r.get('acceptance_criteria'))}",
+        ]).strip()
+        payloads["logic"] = {
+            **base,
+            **_store_contract("logic"),
+            "target": "logic",
+            "logic_id": f"logic:{task.get('task_id')}",
+            "item_type": "scbkr_rule_logic",
+            "name": _title(task),
+            "purpose": _summary(task),
+            "content": logic_content,
+            "flow_steps": c.get("flow_steps", []),
+            "core_logic": c.get("core_logic", []),
+            "boundary_rules": b.get("stop_conditions") or b.get("storage_conditions", []),
+            "formation_conditions": b.get("formation_conditions") or r.get("formation_conditions", []),
+            "failure_conditions": b.get("failure_conditions") or r.get("failure_conditions", []),
+            "test_rules": c.get("test_conditions", []),
+            "dependencies": c.get("dependencies", []),
+            "acceptance_criteria": r.get("acceptance_criteria", []),
+            "status": "active",
+        }
     if "memory" in selected_targets:
-        payloads["memory"] = {**base, "target": "memory", "memory_id": f"memory:{task.get('task_id')}", "category": str(task.get("task_type") or "general"), "reason": "使用者二次確認後保存為本地記憶資料。", "source_task": task.get("task_id"), "confirmed_by_user": True, "status": "active"}
+        b = scbkr.get("B", {})
+        r = scbkr.get("R", {})
+        memory_statement = (
+            str(task.get("raw_input") or "").strip()
+            or _summary(task)
+            or _title(task)
+        )
+        memory_content = "\n".join([
+            f"長期記憶：{memory_statement}",
+            f"觸發條件：\n{_list_text(b.get('stop_conditions') or b.get('failure_conditions'))}",
+            f"必須提醒：\n{_list_text(r.get('acceptance_criteria'))}",
+            "限制：這不是一次性生成成品；只有使用者簽名確認後才影響未來任務。",
+        ]).strip()
+        payloads["memory"] = {
+            **base,
+            **_store_contract("memory"),
+            "target": "memory",
+            "memory_id": f"memory:{task.get('task_id')}",
+            "item_type": "user_confirmed_long_term_memory",
+            "category": str(task.get("task_type") or "general"),
+            "content": memory_content,
+            "memory_statement": memory_statement,
+            "trigger_conditions": b.get("stop_conditions") or b.get("failure_conditions", []),
+            "required_behavior": r.get("acceptance_criteria", []),
+            "reason": "使用者二次確認後保存為本地長期記憶資料。",
+            "source_task": task.get("task_id"),
+            "confirmed_by_user": True,
+            "status": "active",
+        }
     for target, payload in payloads.items():
         payload["hash"] = hash_payload(payload)
     return payloads

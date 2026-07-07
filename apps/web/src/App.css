@@ -1053,6 +1053,247 @@ select {
   border-top: 1px solid #e1ebf4;
   padding: 8px;
 }
+.plan-contract {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  border: 1px solid #d6e4f0;
+  border-radius: 7px;
+  padding: 9px;
+  background: #fbfdff;
+}
+.plan-contract > div {
+  display: grid;
+  gap: 3px;
+}
+.plan-contract b {
+  color: #173554;
+  font-size: .7rem;
+}
+.plan-contract span {
+  color: #526d88;
+  font-size: .68rem;
+  line-height: 1.45;
+}
+.plan-contract summary {
+  cursor: pointer;
+  color: #1d5f9f;
+  font-size: .7rem;
+  font-weight: 850;
+}
+.condition-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.condition-grid section {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #e0ebf4;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fff;
+}
+.condition-grid section span {
+  display: block;
+  border-left: 3px solid #1b77d2;
+  padding-left: 7px;
+}
+.compiler-panel,
+.patch-assistant {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 9px;
+  border: 1px solid #c6d9ec;
+  border-radius: 7px;
+  padding: 10px;
+  background: #fff;
+}
+.compiler-panel header,
+.patch-assistant header,
+.store-browser header {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+.compiler-panel header span,
+.patch-assistant header span,
+.store-browser header span {
+  display: block;
+  color: #67829e;
+  font: .58rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .12em;
+}
+.compiler-panel header b,
+.patch-assistant header b {
+  display: block;
+  color: #153d66;
+  font-size: .76rem;
+}
+.compiler-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.compiler-meta span {
+  border: 1px solid #d8e6f3;
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: #4f6985;
+  background: #f7fbff;
+  font-size: .6rem;
+}
+.compiler-panel .button-row,
+.patch-assistant .button-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.patch-controls {
+  display: grid;
+  gap: 7px;
+}
+.patch-controls label {
+  margin: 0;
+}
+.patch-preview {
+  border: 1px solid #d8e5f2;
+  border-left: 4px solid #1b77d2;
+  border-radius: 6px;
+  padding: 9px;
+  background: #f7fbff;
+}
+.patch-preview b {
+  color: #143a61;
+  font-size: .72rem;
+}
+.patch-preview p {
+  margin: 5px 0 7px;
+  color: #4c6782;
+  font-size: .68rem;
+}
+.patch-preview pre {
+  max-height: 180px;
+  margin: 0;
+  border-radius: 5px;
+  padding: 8px;
+  color: #dcefff;
+  background: #071c31;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: .62rem;
+  line-height: 1.45;
+}
+.store-band.openable button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  justify-content: stretch;
+  text-align: left;
+  border-color: #bcd0e5;
+  border-radius: 6px;
+  padding: 13px;
+  background: #f9fcff;
+}
+.store-band.openable button.selected {
+  border-color: #1b77d2;
+  background: #edf7ff;
+  box-shadow: inset 3px 0 0 #1b77d2;
+}
+.store-band.openable button span {
+  color: #526c8b;
+}
+.store-band.openable button strong {
+  color: #164e80;
+  font-size: 1.35rem;
+}
+.store-band.openable button small {
+  grid-column: 2 / 4;
+  color: #6a839d;
+}
+.store-browser {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  border: 1px solid #c7d9eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+.store-browser h2 {
+  margin: 0;
+  color: #122f4f;
+}
+.store-record {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #d8e5f1;
+  border-radius: 7px;
+  padding: 8px;
+  background: #fbfdff;
+}
+.store-record > button {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  justify-content: stretch;
+  min-height: 42px;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+}
+.store-record > button:hover {
+  background: transparent;
+}
+.store-record b {
+  color: #17395d;
+  font-size: .76rem;
+}
+.store-record small {
+  overflow-wrap: anywhere;
+  font-size: .62rem;
+}
+.store-record p {
+  margin: 0;
+  color: #405d7a;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: .7rem;
+  line-height: 1.5;
+}
+.store-record code {
+  color: #1a6bad;
+  font-size: .62rem;
+}
+.store-role-note {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #d6e5f2;
+  border-left: 3px solid #1b77d2;
+  border-radius: 5px;
+  padding: 7px 8px;
+  background: #f6fbff;
+}
+.store-role-note b {
+  color: #185d9c;
+  font-size: .66rem;
+}
+.store-role-note span {
+  color: #536f8b;
+  font-size: .64rem;
+  line-height: 1.45;
+}
+.store-record pre {
+  max-height: 260px;
+  margin: 0;
+  border-radius: 6px;
+  padding: 9px;
+  color: #dcefff;
+  background: #071c31;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: .62rem;
+  line-height: 1.48;
+}
 .tool-plus {
   width: 44px;
   height: 44px;

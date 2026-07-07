@@ -1,3 +1,5 @@
+import importlib
+
 from fastapi.testclient import TestClient
 
 from apps.api import main
@@ -30,3 +32,32 @@ def test_four_store_reader_refuses_to_answer_without_authoritative_evidence(tmp_
     assert body["status"] == "no_authoritative_evidence"
     assert body["model_called"] is False
     assert body["citations"] == []
+
+
+def test_data_center_section_exposes_human_readable_storage_item(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_DATA_DIR", str(tmp_path))
+    local_main = importlib.reload(main)
+    local_main.save_storage_item({
+        "item_id": "logic-readable-1",
+        "task_id": "task-readable",
+        "target": "logic",
+        "status": "active",
+        "content_hash": "abc123",
+        "relative_path": "logic/logic-readable-1.json",
+        "version": 1,
+        "payload": {
+            "summary": "商業文案規則表單",
+            "content": "B層：不得編造價格；K層：沒有四庫資料不得宣稱正式引用。",
+        },
+    })
+
+    response = TestClient(local_main.app).get("/api/data-center/logic")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["store_label"] == "邏輯庫"
+    assert item["store_role"] == "規則與流程判準庫"
+    assert item["status_label"] == "可引用"
+    assert "邏輯庫" in item["model_reading_hint"]
+    assert "不得編造價格" in item["content_text"]
+    assert item["plain_summary"] == "商業文案規則表單"

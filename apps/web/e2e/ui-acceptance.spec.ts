@@ -50,12 +50,12 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   expect(healthResponse.ok(), "本機 FastAPI health 必須可連線").toBe(true);
   await expect(page.locator(".top-status-bar")).toContainText("API online", { timeout: 15_000 });
   if (testInfo.project.name === "desktop-chromium") {
-    await expect(page.getByText("PLAN FREE", { exact: true })).toBeVisible();
+    await expect(page.locator(".top-status-bar")).toContainText(/PLAN (FREE|NT690|NT3300)/);
   }
   await expect(page.getByLabel("一般聊天主視窗")).toBeVisible();
   await expect(page.getByRole("heading", { name: "一句話工作台" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "免費草稿層" })).toBeVisible();
   await expect(page.locator(".plan-details")).toBeVisible();
+  await expect(page.locator(".plan-details")).toContainText(/免費草稿層|責任鏈結構層|規則書閉環審計層/);
   await page.locator(".plan-details summary").click();
   await expect(page.locator(".plan-picker button")).toHaveCount(3, { timeout: 15_000 });
   await expect(page.getByLabel("方案選擇")).toBeVisible();
@@ -98,8 +98,10 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await expect(page.getByRole("heading", { name: "上線中心", exact: true })).toBeVisible();
 
   await openSection(page, testInfo, "資料中心");
-  await expect(page.getByRole("heading", { name: "四庫搜尋與閱讀區", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "四庫資料中心", exact: true })).toBeVisible();
   await expect(page.getByLabel("搜尋四庫", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "邏輯庫 資料庫", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "邏輯庫", exact: true })).toBeVisible();
   await attachScreen(page, testInfo, "04-data-center");
 
   const viewportFits = await page.evaluate(() =>

@@ -39,6 +39,58 @@ def test_nt3300_requires_owner_signature_for_high_risk_tool_action():
     assert "external_send" in refusal["blocked_without_signature"]
 
 
+def test_nt3300_compiles_business_copy_rule_form_with_conditions(tmp_path, monkeypatch):
+    local_main = fresh_main(tmp_path, monkeypatch)
+    local_main.MODEL_SETTINGS["enabled"] = False
+    client = TestClient(local_main.app)
+    client.post("/api/rule-assist/settings", json={"plan_level": "NT3300"})
+    task = client.post(
+        "/api/tasks/create",
+        json={
+            "raw_input": "幫我生成商業文案規則表單",
+            "task_type": "general",
+            "create_scbkr_draft": True,
+        },
+    ).json()
+
+    scbkr = task["scbkr"]
+    assert scbkr["rule_assist_plan"] == "NT3300"
+    assert scbkr["S"]["task_subject"] == "商業文案規則表單"
+    assert any("不得編造價格" in item for item in scbkr["B"]["stop_conditions"])
+    assert any("使用者明確要求建立商業文案規則" in item for item in scbkr["B"]["formation_conditions"])
+    assert any("模型編造價格" in item for item in scbkr["R"]["failure_conditions"])
+    assert scbkr["R"]["closure_state"] == "CLOSE_CANDIDATE_ONLY_BEFORE_OWNER_SIGNATURE"
+
+
+def test_patch_draft_can_rewrite_b_and_k_layers_with_rule_assist(tmp_path, monkeypatch):
+    local_main = fresh_main(tmp_path, monkeypatch)
+    local_main.MODEL_SETTINGS["enabled"] = False
+    client = TestClient(local_main.app)
+    client.post("/api/rule-assist/settings", json={"plan_level": "NT3300"})
+    task = client.post(
+        "/api/tasks/create",
+        json={
+            "raw_input": "幫我生成商業文案規則表單",
+            "task_type": "general",
+            "create_scbkr_draft": True,
+        },
+    ).json()
+
+    b_patch = client.post(
+        f"/api/tasks/{task['task_id']}/scbkr/patch-draft",
+        json={"layer": "B", "instruction": "B層不對，補上不能發布與不能編造價格"},
+    ).json()["patch"]
+    assert any("不得編造價格" in item for item in b_patch["after_draft"]["stop_conditions"])
+    assert any("未簽名不得發布" in item for item in b_patch["after_draft"]["data_write_scope"])
+
+    k_patch = client.post(
+        f"/api/tasks/{task['task_id']}/scbkr/patch-draft",
+        json={"layer": "K", "instruction": "K層不對，不能假裝有四庫引用"},
+    ).json()["patch"]
+    assert "signed_four_store_required_for_formal_citation" == k_patch["after_draft"]["evidence_policy"]
+    assert any("不得宣稱正式引用" in item for item in k_patch["after_draft"]["source_credibility"])
+
+
 def test_rule_assist_api_persists_plan_and_chat_falls_back_without_model(tmp_path, monkeypatch):
     local_main = fresh_main(tmp_path, monkeypatch)
     client = TestClient(local_main.app)

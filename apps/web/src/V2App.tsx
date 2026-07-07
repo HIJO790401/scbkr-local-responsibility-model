@@ -73,6 +73,9 @@ function fieldTitle(key: string, en: boolean) {
     stop_conditions: ["停止條件", "Stop conditions"], data_write_scope: ["可寫入範圍", "Write scope"], error_handling: ["錯誤處理", "Error handling"],
     references: ["正式依據", "References"], source_credibility: ["來源狀態", "Source status"], acceptance_criteria: ["驗收標準", "Acceptance criteria"],
     expected_outputs: ["交付內容", "Deliverables"], signature_status: ["簽名狀態", "Signature status"], review_status: ["驗收狀態", "Review status"],
+    formation_conditions: ["成立條件", "Formation conditions"], failure_conditions: ["失效條件", "Failure conditions"], repair_path: ["修復路徑", "Repair path"],
+    evidence_policy: ["引用政策", "Evidence policy"], closure_state: ["閉環狀態", "Closure state"], structure_assist: ["結構輔助", "Structure assist"],
+    store_role: ["四庫角色", "Store role"], store_purpose: ["四庫用途", "Store purpose"], citation_policy: ["引用政策", "Citation policy"],
   };
   return labels[key]?.[en ? 1 : 0] || key.split("_").join(" ");
 }
@@ -86,6 +89,21 @@ function scopeSummary(scope: Record<string, any> | undefined, en: boolean) {
     row("關鍵字", "Keywords", value.keywords),
     row("工具", "Tools", value.tools),
   ].join("\n");
+}
+
+function listText(value: any): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function compilerStatusLabel(status: string | undefined, en: boolean) {
+  const labels: Record<string, [string, string]> = {
+    model_compiled: ["模型已補寫表單", "Model filled the form"],
+    base_logic_after_model: ["模型嘗試失敗，已用後端基礎邏輯補表", "Model failed; backend base logic filled it"],
+    base_logic: ["後端基礎邏輯補表", "Backend base logic filled it"],
+  };
+  return labels[String(status || "base_logic")]?.[en ? 1 : 0] || String(status || "base_logic");
 }
 
 function readableStatus(status: string, en: boolean) {
@@ -207,12 +225,18 @@ export default function V2App() {
   const [naturalRuleText, setNaturalRuleText] = useState("");
   const [dataQuery, setDataQuery] = useState("");
   const [readResult, setReadResult] = useState<Record<string, any> | null>(null);
+  const [dataSection, setDataSection] = useState("logic");
+  const [dataSectionResult, setDataSectionResult] = useState<Record<string, any> | null>(null);
+  const [expandedDataItem, setExpandedDataItem] = useState("");
   const [webResult, setWebResult] = useState<Record<string, any> | null>(null);
   const [runtimeMode, setRuntimeMode] = useState("black_shield_strict");
   const [runtimeSignature, setRuntimeSignature] = useState("");
   const [taskInput, setTaskInput] = useState("");
   const [task, setTask] = useState<TaskSummary | null>(null);
   const [ownerSignature, setOwnerSignature] = useState("");
+  const [patchLayer, setPatchLayer] = useState<ScbkrDimensionKey>("B");
+  const [patchInstruction, setPatchInstruction] = useState("");
+  const [pendingPatch, setPendingPatch] = useState<Record<string, any> | null>(null);
   const [selectedStores, setSelectedStores] = useState(["vector", "logic"]);
   const [ruleForm, setRuleForm] = useState({ name: "", keywords: "", tools: "", action: "draft" });
   const [ruleSignature, setRuleSignature] = useState("");
@@ -441,6 +465,7 @@ export default function V2App() {
   function syncTask(updated: TaskSummary) {
     setTask(updated);
     setTasks((current) => [updated, ...current.filter((item) => item.task_id !== updated.task_id)]);
+    setPendingPatch(null);
   }
 
   async function confirmTask() {
@@ -505,6 +530,47 @@ export default function V2App() {
     const result = await run(en ? "Search and read four stores" : "搜尋並閱讀四庫", () => api<any>("/api/data-center/ask", { method: "POST", body: JSON.stringify({ query: text }) }));
     if (result) { setReadResult(result); setDataQuery(text); }
     return result;
+  }
+
+  async function openDataSection(section = dataSection) {
+    const result = await run(en ? "Open data store" : "打開四庫資料", () => api<any>(`/api/data-center/${encodeURIComponent(section)}`));
+    if (result) {
+      setDataSection(section);
+      setDataSectionResult(result);
+      setExpandedDataItem("");
+    }
+    return result;
+  }
+
+  async function regenerateCurrentScbkr() {
+    if (!task) return null;
+    const updated = await run(en ? "Ask model to fill SCBKR" : "模型補寫 SCBKR 表單", () => api<TaskSummary>(`/api/tasks/${task.task_id}/scbkr/regenerate-draft`, { method: "POST", body: JSON.stringify({ raw_input: (task as any).raw_input || taskInput || "" }) }));
+    if (updated) syncTask(updated);
+    return updated;
+  }
+
+  async function applyCurrentRuleAssist() {
+    if (!task) return null;
+    const updated = await run(en ? "Apply structure assist" : "套用結構補強", () => api<TaskSummary>(`/api/tasks/${task.task_id}/scbkr/apply-rule-assist`, { method: "POST", body: JSON.stringify({ raw_input: (task as any).raw_input || taskInput || "" }) }));
+    if (updated) syncTask(updated);
+    return updated;
+  }
+
+  async function draftLayerPatch() {
+    if (!task || !patchInstruction.trim()) return null;
+    const drafted = await run(en ? "Draft SCBKR patch" : "模型提出欄位修改草案", () => api<any>(`/api/tasks/${task.task_id}/scbkr/patch-draft`, { method: "POST", body: JSON.stringify({ layer: patchLayer, instruction: patchInstruction.trim() }) }));
+    if (drafted?.patch) setPendingPatch(drafted.patch);
+    return drafted;
+  }
+
+  async function applyLayerPatch() {
+    if (!task || !pendingPatch) return null;
+    const updated = await run(en ? "Apply SCBKR patch" : "套用欄位修改", () => api<TaskSummary>(`/api/tasks/${task.task_id}/scbkr/apply-patch`, { method: "POST", body: JSON.stringify({ patch: pendingPatch }) }));
+    if (updated) {
+      setPatchInstruction("");
+      syncTask(updated);
+    }
+    return updated;
   }
 
   async function saveLaunchSettings() {
@@ -649,6 +715,16 @@ export default function V2App() {
     <section className="ops-panel plan-console">
       <header><PlanIcon size={20} /><div><span>RULE ASSIST</span><h2>{activePlan.display_name || (en ? "Free Draft Layer" : "免費草稿層")}</h2></div><b>{planLevel}</b></header>
       <p>{activePlan.display_summary || (en ? "Local draft mode" : "本機草案模式")}</p>
+      <div className="plan-contract">
+        <div><b>{en ? "Model can fill" : "模型可補"}</b><span>{activePlan.model_scbr_fill || (en ? "Draft only" : "僅草案")}</span></div>
+        <details>
+          <summary>{en ? "Valid / invalid conditions" : "成立／失效條件"}</summary>
+          <div className="condition-grid">
+            <section><b>{en ? "Valid when" : "成立條件"}</b>{listText(activePlan.formation_conditions).map((item) => <span key={item}>{item}</span>)}</section>
+            <section><b>{en ? "Invalid when" : "失效條件"}</b>{listText(activePlan.failure_conditions).map((item) => <span key={item}>{item}</span>)}</section>
+          </div>
+        </details>
+      </div>
       <details className="plan-details">
         <summary><SlidersHorizontal size={15} />{en ? "Switch plan" : "切換方案"}<span>{planLevel}</span></summary>
         <div className="plan-picker" aria-label={en ? "Plan selector" : "方案選擇"}>
@@ -751,6 +827,24 @@ export default function V2App() {
       <div className="zone-title"><div><span>RESPONSIBILITY MATRIX</span><h2>Workbench / SCBKR 工作台</h2></div><CircleGauge size={20} /></div>
       {!task ? <div className="workbench-empty"><SquareTerminal size={26} /><h3>建立責任鏈確認單</h3><label>{en ? "Task" : "任務指令"}<textarea value={taskInput} onChange={(e) => setTaskInput(e.target.value)} /></label><button disabled={!taskInput.trim()} onClick={() => void createTask()}><Sparkles size={16} />{en ? "Compile SCBKR" : "編譯 SCBKR 草案"}</button></div> : <>
         <div className="task-state"><span>{task.task_id}</span><b>{task.status}</b></div>
+        <section className="compiler-panel">
+          <header><Bot size={16} /><div><span>{en ? "FORM FILLER" : "表單補寫"}</span><b>{compilerStatusLabel(task.scbkr?.compiler_report?.status, en)}</b></div></header>
+          <div className="compiler-meta"><span>{en ? "Attempts" : "嘗試"} {task.scbkr?.compiler_report?.attempts ?? 0}</span><span>{task.scbkr?.model_participated ? (en ? "Model participated" : "模型有參與") : (en ? "Backend base logic" : "後端基礎邏輯")}</span><span>{task.scbkr?.draft_source || "draft"}</span></div>
+          {Boolean(task.scbkr?.draft_model_call_skipped_reason || task.scbkr?.compiler_report?.errors?.length) && <small>{task.scbkr?.draft_model_call_skipped_reason || human(task.scbkr?.compiler_report?.errors)}</small>}
+          <div className="button-row">
+            {!task.confirmed && <button onClick={() => void regenerateCurrentScbkr()}><BrainCircuit size={15} />{en ? "Ask model to fill again" : "模型補寫表單"}</button>}
+            {!task.confirmed && <button onClick={() => void applyCurrentRuleAssist()}><SlidersHorizontal size={15} />{en ? "Apply plan assist" : "套用690/3300結構補強"}</button>}
+          </div>
+        </section>
+        {!task.confirmed && <section className="patch-assistant">
+          <header><MessageSquare size={16} /><div><span>{en ? "EDIT BY CONVERSATION" : "對話修表單"}</span><b>{en ? "Model proposes, user applies" : "模型先草案，使用者再套用"}</b></div></header>
+          <div className="patch-controls">
+            <label>{en ? "Layer" : "要修改哪一層"}<select value={patchLayer} onChange={(event) => setPatchLayer(event.target.value as ScbkrDimensionKey)}>{dims.map((dim) => <option key={dim} value={dim}>{dim} · {dimensionNames[dim][en ? "en" : "zh"]}</option>)}</select></label>
+            <label>{en ? "Instruction" : "用人話說哪裡不對"}<textarea value={patchInstruction} onChange={(event) => setPatchInstruction(event.target.value)} placeholder={en ? "Example: B is missing publish boundaries and K is claiming citations." : "例如：B 層沒有寫清楚不能發布；K 層不能假裝有引用四庫。"} /></label>
+          </div>
+          <div className="button-row"><button disabled={!patchInstruction.trim()} onClick={() => void draftLayerPatch()}><Sparkles size={15} />{en ? "Propose patch" : "請模型提出修改"}</button><button disabled={!pendingPatch} onClick={() => void applyLayerPatch()}><Check size={15} />{en ? "Apply patch" : "套用修改草案"}</button><button disabled={!pendingPatch} onClick={() => setPendingPatch(null)}><X size={15} />{en ? "Discard" : "取消草案"}</button></div>
+          {pendingPatch && <div className="patch-preview"><b>{pendingPatch.layer} · {pendingPatch.plan_level || planLevel}</b><p>{pendingPatch.reason}</p><pre>{human(pendingPatch.after_draft)}</pre></div>}
+        </section>}
         <div className="dimension-grid">{dims.map((dim) => { const content = task.scbkr?.[dim] || {}; const preview = human(content.task_subject || content.core_logic || content.stop_conditions || content.references || content.acceptance_criteria).slice(0, 88); return <details className={`dimension-row ${dimColor[dim]}`} key={dim} open={dim === "S"}><summary><b>{dim}</b><span><strong>{dimensionNames[dim][en ? "en" : "zh"]}</strong>{preview || (en ? "Pending" : "待補")}</span><ChevronRight size={15} /></summary><div className="dimension-readable">{Object.entries(content).filter(([key, value]) => key !== "pending_questions" && human(value).trim()).map(([key, value]) => <div key={key}><b>{fieldTitle(key, en)}</b><p>{human(value)}</p></div>)}</div></details>; })}</div>
         <div className="gate-sequence"><span className={task.confirmed ? "passed" : "current"}>1 {en ? "SIGN" : "簽名"}</span><span className={task.generation_result ? "passed" : task.confirmed ? "current" : ""}>2 {en ? "GENERATE" : "生成"}</span><span className={task.review_passed ? "passed" : task.status === "waiting_review" ? "current" : ""}>3 {en ? "REVIEW" : "驗收"}</span><span className={task.storage_confirmed ? "passed" : task.review_passed ? "current" : ""}>4 {en ? "STORE" : "入庫"}</span></div>
         <label>{en ? "Owner signature" : "使用者簽名"}<input value={ownerSignature} onChange={(e) => setOwnerSignature(e.target.value)} disabled={task.confirmed} /></label>
@@ -788,7 +882,7 @@ export default function V2App() {
 
   const toolsPage = <div className="workspace-page split-workspace tools-workspace"><div className="workspace-primary">{toolPanel}</div><aside className="workspace-inspector"><div className="workspace-heading"><span>TOOL INSPECTOR</span><h2>{selectedToolData?.name || (en ? "Select a tool" : "選擇工具")}</h2></div>{selectedToolData && <div className="tool-inspector"><div className="status-banner"><span>{selectedToolData.risk_level}</span><b>{selectedToolData.tool_id}</b></div><p>{human(selectedToolData.capabilities)}</p><dl><div><dt>{en ? "Permissions" : "需要權限"}</dt><dd>{human(selectedToolData.required_permissions)}</dd></div><div><dt>{en ? "Actions" : "可用動作"}</dt><dd>{human(selectedToolData.allowed_actions)}</dd></div></dl></div>}<ContextAssistant en={en} title={en ? "Tool guidance" : "工具協作"} context={selectedToolData ? `Current tool: ${JSON.stringify({ id: selectedToolData.tool_id, risk: selectedToolData.risk_level, capabilities: selectedToolData.capabilities })}. Explain gates and risks without executing the tool.` : "No tool selected."} onAsk={(text) => askWorkspace("TOOLS", text)} /><div className="trace-mini"><h3>{en ? "Recent traces" : "最近回放"}</h3>{traces.slice(0, 6).map((trace) => <div key={trace.trace_id}><span className={`state-dot ${trace.allowed ? "active" : "revoked"}`} /><b>{trace.tool_id}</b><small>{trace.action}</small></div>)}</div></aside></div>;
 
-  const dataPage = <section className="full-panel data-center-panel"><div className="page-head"><div><span>LOCAL EVIDENCE PLANE</span><h1>{en ? "Search & Read Data Center" : "四庫搜尋與閱讀區"}</h1></div><button onClick={() => void refreshAll()}><RefreshCw size={15} />{en ? "Refresh" : "讀回資料中心"}</button></div><div className="data-reader"><div><span>AUTHORITATIVE STORE READER</span><h2>{en ? "Ask your signed knowledge" : "用人話查詢已簽名資料"}</h2><small>{en ? "Vector matches are candidates only. The model reads signed and reviewed citations." : "向量只負責找候選；模型只整理已簽名、已驗收的正式引用。"}</small></div><div className="reader-input"><input aria-label={en ? "Search four stores" : "搜尋四庫"} value={dataQuery} onChange={(e) => setDataQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void readFourStores(); }} placeholder={en ? "Ask a question about your stored rules..." : "例如：我的發布規則要求什麼？"} /><button disabled={!dataQuery.trim()} onClick={() => void readFourStores()}><Search size={16} />{en ? "Search and read" : "搜尋並閱讀"}</button></div>{readResult && <div className={`reader-result ${readResult.citation_count ? "has-evidence" : "empty"}`}><header><b>{readResult.citation_count || 0} {en ? "authoritative citations" : "筆正式引用"}</b><span>{readResult.candidates_excluded || 0} {en ? "candidates excluded" : "筆候選已排除"}</span><em>{readResult.model_called ? (en ? "MODEL READING DRAFT" : "模型閱讀草稿") : (en ? "NO MODEL CLAIM" : "未讓模型無依據作答")}</em></header><p>{readResult.answer}</p>{(readResult.citations || []).map((citation: any, index: number) => <div className="citation-row" key={`${citation.content_hash}-${index}`}><b>{citation.source_store}</b><span>{citation.rule}</span><code>{String(citation.content_hash || "").slice(0, 12)}</code></div>)}</div>}</div><div className="store-band">{stores.map((store) => { const Icon = store.icon; return <section key={store.id}><Icon /><span>{store.label}</span><strong>{store.count}</strong></section>; })}</div><div className="trace-table"><h2>{en ? "Execution traces" : "執行回放"}</h2>{traces.map((trace) => <div key={trace.trace_id}><span className={`state-dot ${trace.allowed ? "active" : "revoked"}`} /><b>{trace.tool_id}</b><span>{trace.action}</span><span>{trace.reason}</span><time>{trace.timestamp}</time></div>)}</div></section>;
+  const dataPage = <section className="full-panel data-center-panel"><div className="page-head"><div><span>LOCAL EVIDENCE PLANE</span><h1>{en ? "Four Stores" : "四庫資料中心"}</h1></div><button onClick={() => void refreshAll()}><RefreshCw size={15} />{en ? "Refresh" : "讀回資料中心"}</button></div><div className="data-reader"><div><span>AUTHORITATIVE STORE READER</span><h2>{en ? "Ask your signed knowledge" : "用人話查詢已簽名資料"}</h2><small>{en ? "The model may only cite signed and reviewed records. Open a store below to inspect what is actually saved." : "模型只能引用已簽名、已驗收的資料；下面可直接打開四庫看實際存了什麼。"}</small></div><div className="reader-input"><input aria-label={en ? "Search four stores" : "搜尋四庫"} value={dataQuery} onChange={(e) => setDataQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void readFourStores(); }} placeholder={en ? "Ask a question about your stored rules..." : "例如：我的發布規則要求什麼？"} /><button disabled={!dataQuery.trim()} onClick={() => void readFourStores()}><Search size={16} />{en ? "Search and read" : "搜尋並閱讀"}</button></div>{readResult && <div className={`reader-result ${readResult.citation_count ? "has-evidence" : "empty"}`}><header><b>{readResult.citation_count || 0} {en ? "authoritative citations" : "筆正式引用"}</b><span>{readResult.candidates_excluded || 0} {en ? "candidates excluded" : "筆候選已排除"}</span><em>{readResult.model_called ? (en ? "MODEL READING DRAFT" : "模型閱讀草稿") : (en ? "NO MODEL CLAIM" : "未讓模型無依據作答")}</em></header><p>{readResult.answer}</p>{(readResult.citations || []).map((citation: any, index: number) => <div className="citation-row" key={`${citation.content_hash}-${index}`}><b>{citation.source_store}</b><span>{citation.store_role ? `${citation.store_role} · ` : ""}{citation.rule}</span><code>{String(citation.content_hash || "").slice(0, 12)}</code></div>)}</div>}</div><div className="store-band openable">{stores.map((store) => { const Icon = store.icon; return <button key={store.id} className={dataSection === store.id ? "selected" : ""} onClick={() => void openDataSection(store.id)} aria-label={`${store.label} ${en ? "store" : "資料庫"}`}><Icon /><span>{store.label}</span><strong>{store.count}</strong><small>{en ? "Open" : "打開"}</small></button>; })}</div><section className="store-browser"><header><div><span>{en ? "OPEN STORE" : "目前打開"}</span><h2>{stores.find((store) => store.id === dataSection)?.label || dataSection}</h2></div><button onClick={() => void openDataSection(dataSection)}><RefreshCw size={15} />{en ? "Reload store" : "重新讀取"}</button></header>{!dataSectionResult && <div className="empty-state">{en ? "Choose a store above to inspect saved records." : "點上面的向量庫、語料庫、邏輯庫或記憶庫，就能看到實際存入資料。"}</div>}{dataSectionResult && dataSectionResult.count === 0 && <div className="empty-state">{dataSectionResult.empty_message || (en ? "No records in this store." : "這個庫目前沒有資料。")}</div>}{(dataSectionResult?.items || []).map((item: any) => <article className="store-record" key={item.item_id || item.id}><button onClick={() => setExpandedDataItem((current) => current === (item.item_id || item.id) ? "" : (item.item_id || item.id))}><span className={`state-dot ${item.status === "active" ? "active" : "waiting_owner_signature"}`} /><div><b>{item.title || item.item_id}</b><small>{item.store_label || item.target} · {item.store_role || item.status_label || item.status} · v{item.version || 1}</small></div><code>{String(item.content_hash || item.hash || "").slice(0, 12)}</code></button><div className="store-role-note"><b>{item.citation_policy || item.status_label || item.status}</b><span>{item.store_purpose || item.model_reading_hint}</span></div><p>{item.plain_summary || item.summary || item.preview}</p><small>{item.storage_location || item.relative_path}</small>{expandedDataItem === (item.item_id || item.id) && <pre>{item.content_text || JSON.stringify(item.payload || item, null, 2)}</pre>}</article>)}</section><div className="trace-table"><h2>{en ? "Execution traces" : "執行回放"}</h2>{traces.map((trace) => <div key={trace.trace_id}><span className={`state-dot ${trace.allowed ? "active" : "revoked"}`} /><b>{trace.tool_id}</b><span>{trace.action}</span><span>{trace.reason}</span><time>{trace.timestamp}</time></div>)}</div></section>;
 
   const runtime = runtimeCatalog[0];
   const runtimeRelease = runtime?.versions?.[0];
