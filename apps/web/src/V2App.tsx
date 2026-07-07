@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity, Archive, Bot, Box, Braces, Check, ChevronRight, CircleGauge,
   Cloud, CreditCard, Crown, Database, Eye, FileKey, FolderOpen, Globe2, HardDrive, Info, KeyRound, Languages, Lock, Mail, Menu, MessageSquare,
@@ -22,7 +22,6 @@ const dimensionNames: Record<ScbkrDimensionKey, { zh: string; en: string }> = {
   K: { zh: "依據與引用", en: "Basis and citations" },
   R: { zh: "責任與驗收", en: "Responsibility" },
 };
-const ResponsibilityCore = lazy(() => import("./components/ResponsibilityCore"));
 
 type View = "command" | "rules" | "workbench" | "tools" | "data" | "runtime" | "model" | "launch" | "about" | "more";
 type CommandMode = "chat" | "web" | "search" | "rule";
@@ -87,6 +86,68 @@ function scopeSummary(scope: Record<string, any> | undefined, en: boolean) {
     row("關鍵字", "Keywords", value.keywords),
     row("工具", "Tools", value.tools),
   ].join("\n");
+}
+
+function readableStatus(status: string, en: boolean) {
+  const labels: Record<string, [string, string]> = {
+    draft: ["草案", "Draft"],
+    confirmed: ["已簽名", "Signed"],
+    generating: ["生成中", "Generating"],
+    waiting_review: ["待驗收", "Review"],
+    completed: ["已完成", "Done"],
+    storage_committed: ["已入庫", "Stored"],
+  };
+  return labels[String(status || "draft").toLowerCase()]?.[en ? 1 : 0] || String(status || "draft").replace(/_/g, " ");
+}
+
+function RuleFlowSurface({
+  en,
+  status,
+  activeRules,
+  citations,
+  tokensAvoided,
+  planLevel,
+}: {
+  en: boolean;
+  status: string;
+  activeRules: number;
+  citations: number;
+  tokensAvoided: number;
+  planLevel: string;
+}) {
+  const steps = [
+    { icon: MessageSquare, label: en ? "Intake" : "一句話入口", value: en ? "Ready" : "就緒", state: "active" },
+    { icon: Search, label: en ? "Route" : "自動分流", value: en ? "Chat / stores / rule" : "對話／四庫／規則", state: "active" },
+    { icon: FileKey, label: en ? "Draft" : "待簽名草案", value: readableStatus(status, en), state: status === "draft" ? "wait" : "active" },
+    { icon: Database, label: en ? "Citations" : "四庫引用", value: String(citations), state: citations > 0 ? "active" : "wait" },
+  ];
+  return (
+    <section className="plain-rule-surface" aria-label={en ? "Natural language routing" : "自然語言納編狀態"}>
+      <div className="flow-summary">
+        <div>
+          <span>RULE ROUTER</span>
+          <strong>{en ? "One-line workbench" : "一句話工作台"}</strong>
+        </div>
+        <div className="scbkr-rail" aria-label="SCBKR">
+          {dims.map((dim) => <i key={dim} className={dimColor[dim]}>{dim}</i>)}
+        </div>
+      </div>
+      <div className="flow-steps">
+        {steps.map(({ icon: Icon, label, value, state }) => (
+          <span key={label} className={state}>
+            <Icon size={16} />
+            <b>{label}</b>
+            <small>{value}</small>
+          </span>
+        ))}
+      </div>
+      <div className="flow-metrics">
+        <span><ShieldCheck size={14} />{activeRules} {en ? "rules" : "規則"}</span>
+        <span><Activity size={14} />{planLevel}</span>
+        <span><Sparkles size={14} />{tokensAvoided} {en ? "tokens saved" : "Token 節省"}</span>
+      </div>
+    </section>
+  );
 }
 
 function ContextAssistant({ en, title, context, onAsk }: { en: boolean; title: string; context: string; onAsk: (text: string) => Promise<string | null> }) {
@@ -588,9 +649,12 @@ export default function V2App() {
     <section className="ops-panel plan-console">
       <header><PlanIcon size={20} /><div><span>RULE ASSIST</span><h2>{activePlan.display_name || (en ? "Free Draft Layer" : "免費草稿層")}</h2></div><b>{planLevel}</b></header>
       <p>{activePlan.display_summary || (en ? "Local draft mode" : "本機草案模式")}</p>
-      <div className="plan-picker" aria-label={en ? "Plan selector" : "方案選擇"}>
-        {planCatalog.map((plan) => <button key={plan.plan_level} className={planLevel === plan.plan_level ? "active" : ""} onClick={() => void updateRuleAssistSettings({ plan_level: plan.plan_level })}><span>{plan.price_label}</span><b>{plan.display_name}</b></button>)}
-      </div>
+      <details className="plan-details">
+        <summary><SlidersHorizontal size={15} />{en ? "Switch plan" : "切換方案"}<span>{planLevel}</span></summary>
+        <div className="plan-picker" aria-label={en ? "Plan selector" : "方案選擇"}>
+          {planCatalog.map((plan) => <button key={plan.plan_level} className={planLevel === plan.plan_level ? "active" : ""} onClick={() => void updateRuleAssistSettings({ plan_level: plan.plan_level })}><span>{plan.price_label}</span><b>{plan.display_name}</b></button>)}
+        </div>
+      </details>
       <label>{en ? "Answer language" : "模型輸出語言"}<select value={ruleAssist.locale || "auto"} onChange={(event) => void updateRuleAssistSettings({ locale: event.target.value })}><option value="auto">Auto</option><option value="zh-TW">繁體中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
       <button className="primary-action" onClick={() => void runRuleAssistMock()}><Play size={15} />{en ? "Test rule layer" : "測試規則層回覆"}</button>
     </section>
@@ -673,14 +737,12 @@ export default function V2App() {
 
   const chatPanel = (
     <section className="command-zone chat-main" aria-label="一般聊天主視窗">
-      <Suspense fallback={<div className="responsibility-core responsibility-core-loading" aria-label={en ? "Loading responsibility core" : "正在載入責任核心"} />}>
-        <ResponsibilityCore status={status} locale={locale} activeRules={activeRules} citations={citations} tokensAvoided={Number(tokenMetrics.estimated_tokens_avoided || task?.scbkr?.token_metrics?.estimated_tokens_avoided || 0)} />
-      </Suspense>
-      <header className="command-header"><div><span>NATURAL LANGUAGE CONTROL PLANE</span><h1>{en ? "Natural Language Console" : "自然語言控制台"}</h1></div><div className="stage-chip"><Activity size={15} />{status}</div></header>
+      <header className="command-header"><div><span>SCBKR 2.3</span><h1>{en ? "One-line Workbench" : "一句話工作台"}</h1></div><div className="stage-chip"><Activity size={15} />{readableStatus(status, en)}</div></header>
       <div className={`rule-awareness-strip ${String(ruleState.awareness_state || "EMPTY").toLowerCase()}`}><span>{ruleState.awareness_state || "EMPTY"}</span><b>{ruleState.active_rulepack_id ? `${ruleState.active_rulepack_id} v${ruleState.active_rulepack_version}` : ruleState.active_rule_id ? `${ruleState.active_rule_id} v${ruleState.active_rule_version}` : (en ? "No active rule" : "尚無生效規則")}</b><em>{ruleState.responsibility_holder ? `${en ? "RESPONSIBILITY" : "責任歸屬"} · ${ruleState.responsibility_holder}` : (en ? "ASSISTANCE ONLY" : "僅供輔助對話")}</em></div>
-      <div className="command-modes" role="tablist" aria-label={en ? "Natural language mode" : "自然語言模式"}><button className={commandMode === "chat" ? "active" : ""} onClick={() => setCommandMode("chat")}><MessageSquare size={15} />{en ? "Chat" : "一般對話"}</button><button className={commandMode === "web" ? "active" : ""} onClick={() => setCommandMode("web")}><Globe2 size={15} />{en ? "Web" : "網路搜尋"}</button><button className={commandMode === "search" ? "active" : ""} onClick={() => setCommandMode("search")}><Search size={15} />{en ? "Stores" : "搜尋四庫"}</button><button className={commandMode === "rule" ? "active" : ""} onClick={() => setCommandMode("rule")}><FileKey size={15} />{en ? "Rule" : "建立規則"}</button></div>
+      <RuleFlowSurface en={en} status={status} activeRules={activeRules} citations={citations} tokensAvoided={Number(tokenMetrics.estimated_tokens_avoided || task?.scbkr?.token_metrics?.estimated_tokens_avoided || 0)} planLevel={planLevel} />
+      <div className="command-modes" role="tablist" aria-label={en ? "Quick route" : "自然語言快速路由"}><button className={commandMode === "chat" ? "active" : ""} onClick={() => setCommandMode("chat")}><MessageSquare size={15} />{en ? "Auto route" : "自動分流"}</button><button className={commandMode === "web" ? "active" : ""} onClick={() => setCommandMode("web")}><Globe2 size={15} />{en ? "Verify web" : "上網查證"}</button><button className={commandMode === "search" ? "active" : ""} onClick={() => setCommandMode("search")}><Search size={15} />{en ? "Read stores" : "查四庫"}</button><button className={commandMode === "rule" ? "active" : ""} onClick={() => setCommandMode("rule")}><FileKey size={15} />{en ? "New rule" : "建規則"}</button></div>
       <div className="message-list" ref={messageListRef}>{messages.map((item, index) => <div key={`${item.role}-${index}`} className={`message ${item.role} ${item.card ? "has-card" : ""}`}><span>{item.role === "assistant" ? "SCBKR" : en ? "YOU" : "你"}</span><div>{item.content}</div>{item.card && renderWorkflowCard(item.card)}</div>)}</div>
-      <div className="chat-input"><label className="natural-input-label"><span>{commandMode === "chat" ? (en ? "Talk to the local model" : "直接用人話跟本機模型說") : commandMode === "web" ? (en ? "Search the live web through SCBKR gates" : "經過 SCBKR Gate 搜尋即時網路") : commandMode === "search" ? (en ? "Ask the signed four stores" : "搜尋並閱讀已簽名四庫") : (en ? "Describe the rule you want" : "說出你要建立的規則")}</span><textarea aria-label={en ? "Natural language input" : "自然語言輸入"} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={commandMode === "chat" ? (en ? "Describe a task or ask SCBKR..." : "直接輸入你想做的事或想問的問題…") : commandMode === "web" ? (en ? "Search current information on the web..." : "搜尋現在網路上的資料…") : commandMode === "search" ? (en ? "What do the signed stores say about..." : "例如：四庫裡有哪些關於發布規則的資料？") : (en ? "Before publishing, require my signature..." : "例如：凡是要發布內容，都必須先讓我簽名。")} /></label><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Run" : "執行"}>{commandMode === "web" ? <Globe2 size={20} /> : commandMode === "search" ? <Search size={20} /> : commandMode === "rule" ? <FileKey size={20} /> : <Send size={20} />}</button></div>
+      <div className="chat-input"><label className="natural-input-label"><span>{commandMode === "chat" ? (en ? "One-line input" : "一句話輸入") : commandMode === "web" ? (en ? "Verified web query" : "上網查證") : commandMode === "search" ? (en ? "Signed-store question" : "四庫問題") : (en ? "Rule sentence" : "規則句")}</span><textarea aria-label={en ? "Natural language input" : "自然語言輸入"} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={commandMode === "chat" ? (en ? "Create a rule: require my signature before publishing." : "例如：幫我建立規則：發布前都要我簽名。") : commandMode === "web" ? (en ? "Verify current information about..." : "例如：查目前某項服務是否可用。") : commandMode === "search" ? (en ? "What do my signed rules say about publishing?" : "例如：四庫裡我對發布有什麼規則？") : (en ? "Before publishing, require my signature." : "例如：凡是要發布內容，都必須先讓我簽名。")} /></label><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Run" : "執行"}>{commandMode === "web" ? <Globe2 size={20} /> : commandMode === "search" ? <Search size={20} /> : commandMode === "rule" ? <FileKey size={20} /> : <Send size={20} />}</button></div>
     </section>
   );
 

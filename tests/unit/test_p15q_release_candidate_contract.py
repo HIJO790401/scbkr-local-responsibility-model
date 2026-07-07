@@ -39,9 +39,11 @@ def test_frontend_clears_owner_signature_after_draft_changes():
 
 
 def test_release_candidate_metadata_and_readme_contracts():
-    assert '"version": "2.1.0"' in Path("package.json").read_text(encoding="utf-8")
+    assert '"version": "2.3.0"' in Path("package.json").read_text(encoding="utf-8")
+    assert '"version": "2.3.0"' in Path("apps/web/package.json").read_text(encoding="utf-8")
     desktop_package = Path("apps/desktop/package.json").read_text(encoding="utf-8")
     assert '"name": "scbkr-desktop"' in desktop_package
+    assert '"version": "2.1.0"' in desktop_package
     assert '"check:release"' in desktop_package
     assert Path("scripts/build_desktop_release_windows.ps1").exists()
     assert Path("scripts/smoke_desktop_release_windows.ps1").exists()

@@ -164,7 +164,8 @@ def test_readme_final_rc_contract_and_images_exist():
 
 
 def test_release_metadata_contracts():
-    assert '"version": "2.1.0"' in Path("package.json").read_text(encoding="utf-8")
+    assert '"version": "2.3.0"' in Path("package.json").read_text(encoding="utf-8")
+    assert '"version": "2.3.0"' in Path("apps/web/package.json").read_text(encoding="utf-8")
     assert '"version": "2.1.0"' in Path("apps/desktop/package.json").read_text(encoding="utf-8")
     assert '"version": "2.1.0"' in Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
     assert 'version = "2.1.0"' in Path("apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")

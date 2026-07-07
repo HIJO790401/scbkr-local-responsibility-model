@@ -1,5 +1,4 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { PNG } from "pngjs";
 
 async function openSection(page: Page, testInfo: TestInfo, label: string) {
   if (testInfo.project.name === "mobile-chromium") {
@@ -54,37 +53,20 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
     await expect(page.getByText("PLAN FREE", { exact: true })).toBeVisible();
   }
   await expect(page.getByLabel("一般聊天主視窗")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "自然語言控制台" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "一句話工作台" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "免費草稿層" })).toBeVisible();
+  await expect(page.locator(".plan-details")).toBeVisible();
+  await page.locator(".plan-details summary").click();
   await expect(page.locator(".plan-picker button")).toHaveCount(3, { timeout: 15_000 });
   await expect(page.getByLabel("方案選擇")).toBeVisible();
   await expect(page.locator(".rule-awareness-strip")).toContainText(/EMPTY|DRAFTING/);
   await expect(page.locator(".rule-awareness-strip")).toContainText("尚無生效規則");
-  await expect(page.getByRole("button", { name: "網路搜尋", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "搜尋四庫", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "建立規則", exact: true })).toBeVisible();
+  await expect(page.getByLabel("自然語言納編狀態")).toBeVisible();
+  await expect(page.locator('[data-testid="scbkr-canvas"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "上網查證", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "查四庫", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "建規則", exact: true })).toBeVisible();
   await expect(page.getByLabel("自然語言輸入", { exact: true })).toBeVisible();
-  const canvas = page.locator('[data-testid="scbkr-canvas"]');
-  await expect(canvas).toHaveCount(1);
-  await expect(canvas).toBeVisible();
-  const canvasBox = await canvas.boundingBox();
-  expect(canvasBox?.width).toBeGreaterThan(280);
-  expect(canvasBox?.height).toBeGreaterThan(220);
-  const pixels = PNG.sync.read(await canvas.screenshot());
-  const sampledColors = new Set<string>();
-  let luminousSamples = 0;
-  for (let y = 0; y < pixels.height; y += 8) {
-    for (let x = 0; x < pixels.width; x += 8) {
-      const offset = (pixels.width * y + x) * 4;
-      const r = pixels.data[offset];
-      const g = pixels.data[offset + 1];
-      const b = pixels.data[offset + 2];
-      sampledColors.add(`${Math.floor(r / 16)}:${Math.floor(g / 16)}:${Math.floor(b / 16)}`);
-      if (r + g + b > 420) luminousSamples += 1;
-    }
-  }
-  expect(sampledColors.size, "Three.js canvas must contain a rendered multi-color scene").toBeGreaterThan(12);
-  expect(luminousSamples, "Three.js nodes and stars must produce visible pixels").toBeGreaterThan(20);
   if (testInfo.project.name === "desktop-chromium") {
     await page.locator(".tool-plus").click();
     await expect(page.getByRole("heading", { name: "模型可碰的工具" })).toBeVisible();
@@ -94,7 +76,7 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
 
   await openSection(page, testInfo, "工作台");
   await expect(page.getByRole("heading", { name: "建立責任鏈確認單" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "自然語言控制台" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "一句話工作台" })).toHaveCount(0);
   await attachScreen(page, testInfo, "02-workbench");
 
   await openSection(page, testInfo, "規則中心");
@@ -103,7 +85,7 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
 
   await openSection(page, testInfo, "工具");
   await expect(page.getByRole("heading", { name: "工具註冊與權限" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "自然語言控制台" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "一句話工作台" })).toHaveCount(0);
 
   await openSection(page, testInfo, "模型設定");
   await expect(page.getByRole("heading", { name: "模型設定" })).toBeVisible();
