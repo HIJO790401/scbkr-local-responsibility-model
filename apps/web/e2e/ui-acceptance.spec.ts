@@ -53,7 +53,7 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
     await expect(page.locator(".top-status-bar")).toContainText(/PLAN (FREE|NT690|NT3300)/);
   }
   await expect(page.getByLabel("一般聊天主視窗")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "一句話工作台" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "SCBKR 聊天" })).toBeVisible();
   await expect(page.locator(".plan-details")).toBeVisible();
   await expect(page.locator(".plan-details")).toContainText(/免費草稿層|責任鏈結構層|規則書閉環審計層/);
   await page.locator(".plan-details summary").click();
@@ -83,7 +83,7 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
 
   await openSection(page, testInfo, "工作台");
   await expect(page.getByRole("heading", { name: "建立責任鏈確認單" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "一句話工作台" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "SCBKR 聊天" })).toHaveCount(0);
   await attachScreen(page, testInfo, "02-workbench");
 
   await openSection(page, testInfo, "規則中心");
@@ -92,7 +92,7 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
 
   await openSection(page, testInfo, "工具");
   await expect(page.getByRole("heading", { name: "工具註冊與權限" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "一句話工作台" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "SCBKR 聊天" })).toHaveCount(0);
 
   await openSection(page, testInfo, "模型設定");
   await expect(page.getByRole("heading", { name: "模型設定" })).toBeVisible();
