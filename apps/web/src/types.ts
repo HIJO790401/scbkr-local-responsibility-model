@@ -34,7 +34,10 @@ export type TaskSummary = {
   review_passed: boolean;
   storage_confirmed: boolean;
   runtime: string;
+  rule_assist_plan?: string;
+  rule_assist?: Record<string, any>;
   scbkr?: Record<string, any>;
+  draft_object?: Record<string, any>;
   generation_result?: Record<string, any>;
   review_result?: Record<string, any>;
   storage_request?: Record<string, any>;

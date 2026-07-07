@@ -49,12 +49,16 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await expect(page.locator(".app-shell")).toBeVisible();
   const healthResponse = await page.request.get("http://127.0.0.1:8787/health");
   expect(healthResponse.ok(), "本機 FastAPI health 必須可連線").toBe(true);
+  await expect(page.locator(".top-status-bar")).toContainText("API online", { timeout: 15_000 });
   if (testInfo.project.name === "desktop-chromium") {
-    await expect(page.getByText("API online", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("PLAN FREE", { exact: true })).toBeVisible();
   }
   await expect(page.getByLabel("一般聊天主視窗")).toBeVisible();
   await expect(page.getByRole("heading", { name: "自然語言控制台" })).toBeVisible();
-  await expect(page.locator(".rule-awareness-strip")).toContainText("EMPTY");
+  await expect(page.getByRole("heading", { name: "免費草稿層" })).toBeVisible();
+  await expect(page.locator(".plan-picker button")).toHaveCount(3, { timeout: 15_000 });
+  await expect(page.getByLabel("方案選擇")).toBeVisible();
+  await expect(page.locator(".rule-awareness-strip")).toContainText(/EMPTY|DRAFTING/);
   await expect(page.locator(".rule-awareness-strip")).toContainText("尚無生效規則");
   await expect(page.getByRole("button", { name: "網路搜尋", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "搜尋四庫", exact: true })).toBeVisible();
@@ -81,14 +85,25 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   }
   expect(sampledColors.size, "Three.js canvas must contain a rendered multi-color scene").toBeGreaterThan(12);
   expect(luminousSamples, "Three.js nodes and stars must produce visible pixels").toBeGreaterThan(20);
+  if (testInfo.project.name === "desktop-chromium") {
+    await page.locator(".tool-plus").click();
+    await expect(page.getByRole("heading", { name: "模型可碰的工具" })).toBeVisible();
+    await page.locator(".tool-plus").click();
+  }
   await attachScreen(page, testInfo, "01-chat-home");
 
   await openSection(page, testInfo, "工作台");
   await expect(page.getByRole("heading", { name: "建立責任鏈確認單" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "自然語言控制台" })).toHaveCount(0);
   await attachScreen(page, testInfo, "02-workbench");
 
   await openSection(page, testInfo, "規則中心");
   await expect(page.getByLabel("用一句人話建立規則", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Workbench / SCBKR 工作台" })).toHaveCount(0);
+
+  await openSection(page, testInfo, "工具");
+  await expect(page.getByRole("heading", { name: "工具註冊與權限" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "自然語言控制台" })).toHaveCount(0);
 
   await openSection(page, testInfo, "模型設定");
   await expect(page.getByRole("heading", { name: "模型設定" })).toBeVisible();

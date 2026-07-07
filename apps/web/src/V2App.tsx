@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   Activity, Archive, Bot, Box, Braces, Check, ChevronRight, CircleGauge,
-  Cloud, CreditCard, Database, FileKey, Globe2, HardDrive, Info, KeyRound, Languages, Menu, MessageSquare,
-  Network, Play, RefreshCw, Save, Search, Send, Settings, ShieldCheck,
-  SlidersHorizontal, Sparkles, SquareTerminal, Rocket, Wrench, X,
+  Cloud, CreditCard, Crown, Database, Eye, FileKey, FolderOpen, Globe2, HardDrive, Info, KeyRound, Languages, Lock, Mail, Menu, MessageSquare,
+  Monitor, Network, Play, Plus, RefreshCw, Save, Search, Send, Settings, ShieldCheck,
+  SlidersHorizontal, Smartphone, Sparkles, SquareTerminal, Rocket, Wrench, X, AlertTriangle, BrainCircuit, CheckCircle2, Wifi,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { getMessages, normalizeLocale, type Locale } from "./i18n";
 import { isLoopbackHostname, resolveApiBaseUrl } from "./apiBase";
 import type { ModelSettings, ScbkrDimensionKey, TaskSummary } from "./types";
@@ -14,12 +15,40 @@ const BACKEND_KEY = "scbkr.activeBackendUrl";
 const LOCALE_KEY = "scbkr.locale";
 const dims: ScbkrDimensionKey[] = ["S", "C", "B", "K", "R"];
 const dimColor: Record<ScbkrDimensionKey, string> = { S: "blue", C: "cyan", B: "yellow", K: "red", R: "green" };
+const dimensionNames: Record<ScbkrDimensionKey, { zh: string; en: string }> = {
+  S: { zh: "這件事是什麼", en: "What this is" },
+  C: { zh: "流程與原因", en: "Flow and reasons" },
+  B: { zh: "界線與禁止事項", en: "Boundaries" },
+  K: { zh: "依據與引用", en: "Basis and citations" },
+  R: { zh: "責任與驗收", en: "Responsibility" },
+};
 const ResponsibilityCore = lazy(() => import("./components/ResponsibilityCore"));
 
 type View = "command" | "rules" | "workbench" | "tools" | "data" | "runtime" | "model" | "launch" | "about" | "more";
 type CommandMode = "chat" | "web" | "search" | "rule";
 type Rule = Record<string, any>;
 type Tool = Record<string, any>;
+type WorkflowCard = {
+  id: string;
+  kind: "suggestion" | "task" | "rule";
+  title: string;
+  summary: string;
+  state: string;
+  taskId?: string;
+  ruleId?: string;
+  objectType?: string;
+  suggestedStores?: string[];
+  suggestion?: Record<string, any>;
+};
+type ChatMessage = { role: "user" | "assistant"; content: string; card?: WorkflowCard };
+type RuleAssistStatus = {
+  plan_level?: "FREE" | "NT690" | "NT3300" | string;
+  locale?: string;
+  active_plan?: Record<string, any>;
+  catalog?: Record<string, any>[];
+  identity?: Record<string, any>;
+  mock_model_enabled?: boolean;
+};
 
 function initialBackend() {
   const stored = localStorage.getItem(BACKEND_KEY);
@@ -38,6 +67,43 @@ function human(value: any): string {
   return String(value ?? "");
 }
 
+function fieldTitle(key: string, en: boolean) {
+  const labels: Record<string, [string, string]> = {
+    task_subject: ["任務主體", "Subject"], user_instruction: ["使用者原句", "Owner request"], output_format: ["預期輸出", "Expected output"],
+    flow_steps: ["處理步驟", "Steps"], core_logic: ["核心邏輯", "Core logic"], dependencies: ["需要的資料", "Dependencies"],
+    stop_conditions: ["停止條件", "Stop conditions"], data_write_scope: ["可寫入範圍", "Write scope"], error_handling: ["錯誤處理", "Error handling"],
+    references: ["正式依據", "References"], source_credibility: ["來源狀態", "Source status"], acceptance_criteria: ["驗收標準", "Acceptance criteria"],
+    expected_outputs: ["交付內容", "Deliverables"], signature_status: ["簽名狀態", "Signature status"], review_status: ["驗收狀態", "Review status"],
+  };
+  return labels[key]?.[en ? 1 : 0] || key.split("_").join(" ");
+}
+
+function scopeSummary(scope: Record<string, any> | undefined, en: boolean) {
+  const value = scope || {};
+  const row = (labelZh: string, labelEn: string, items: any) => `${en ? labelEn : labelZh}: ${human(items) || (en ? "Any" : "不限")}`;
+  return [
+    row("任務", "Tasks", value.task_types),
+    row("動作", "Actions", value.actions),
+    row("關鍵字", "Keywords", value.keywords),
+    row("工具", "Tools", value.tools),
+  ].join("\n");
+}
+
+function ContextAssistant({ en, title, context, onAsk }: { en: boolean; title: string; context: string; onAsk: (text: string) => Promise<string | null> }) {
+  const [input, setInput] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function ask() {
+    const text = input.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    const result = await onAsk(`${context}\n\n${text}`);
+    if (result) setAnswer(result);
+    setBusy(false);
+  }
+  return <section className="context-assistant"><header><Bot size={18} /><div><span>CONTEXT MODEL</span><h3>{title}</h3></div></header>{answer && <div className="context-answer">{answer}</div>}<label>{en ? "Ask about this workspace" : "詢問目前工作區"}<textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void ask(); } }} /></label><button disabled={!input.trim() || busy} onClick={() => void ask()}><Send size={15} />{busy ? (en ? "Thinking" : "處理中") : (en ? "Ask model" : "詢問模型")}</button></section>;
+}
+
 export default function V2App() {
   captureToken();
   const [locale, setLocale] = useState<Locale>(normalizeLocale(localStorage.getItem(LOCALE_KEY) || "zh-TW"));
@@ -45,7 +111,6 @@ export default function V2App() {
   const en = locale === "en";
   const [view, setView] = useState<View>("command");
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 820px)").matches);
-  const [rightMode, setRightMode] = useState<"workbench" | "tools">("workbench");
   const [health, setHealth] = useState("checking");
   const [backend, setBackend] = useState(initialBackend());
   const [tokenInput, setTokenInput] = useState(localStorage.getItem(TOKEN_KEY) || "");
@@ -61,18 +126,21 @@ export default function V2App() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [packs, setPacks] = useState<Record<string, any>[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
+  const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [traces, setTraces] = useState<Record<string, any>[]>([]);
   const [overview, setOverview] = useState<Record<string, any>>({});
   const [tokenMetrics, setTokenMetrics] = useState<Record<string, any>>({});
   const [ruleState, setRuleState] = useState<Record<string, any>>({ state: "independent", effective_label: "獨立使用者規則" });
+  const [ruleAssist, setRuleAssist] = useState<RuleAssistStatus>({ plan_level: "FREE", locale: "zh-TW" });
   const [runtimeCatalog, setRuntimeCatalog] = useState<Record<string, any>[]>([]);
   const [launchSettings, setLaunchSettings] = useState<Record<string, any>>({});
   const [readiness, setReadiness] = useState<Record<string, any>>({ checks: [] });
   const [permissions, setPermissions] = useState<Record<string, any>>({});
   const [notice, setNotice] = useState("");
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([
+  const [messages, setMessages] = useState<ChatMessage[]>([
     { role: "assistant", content: en ? "SCBKR local runtime ready." : "SCBKR 本機責任核心已就緒。" },
   ]);
+  const messageListRef = useRef<HTMLDivElement>(null);
   const [chatInput, setChatInput] = useState("");
   const [commandMode, setCommandMode] = useState<CommandMode>("chat");
   const [naturalRuleText, setNaturalRuleText] = useState("");
@@ -91,12 +159,16 @@ export default function V2App() {
   const [selectedTool, setSelectedTool] = useState("web_search");
   const [toolAction, setToolAction] = useState("search");
   const [toolConfirmed, setToolConfirmed] = useState(false);
+  const [toolLauncherOpen, setToolLauncherOpen] = useState(false);
   const [toolResult, setToolResult] = useState<Record<string, any> | null>(null);
   const [modelForm, setModelForm] = useState({ provider: "lm_studio", mode: "local", base_url: "http://127.0.0.1:1234/v1", api_key: "", model_name: "", temperature: 0.2, max_tokens: 4096, context_length: 8192, timeout: 120 });
 
   const activeRules = rules.filter((rule) => rule.activation_status === "active").length;
   const citations = Number(task?.data_center_context?.evidence_packet?.authority_count || 0);
   const status = task?.status || "draft";
+  const activePlan = ruleAssist.active_plan || {};
+  const planLevel = String(ruleAssist.plan_level || "FREE");
+  const replyLocale = ruleAssist.locale && ruleAssist.locale !== "auto" ? ruleAssist.locale : locale;
 
   async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const token = localStorage.getItem(TOKEN_KEY) || "";
@@ -135,13 +207,13 @@ export default function V2App() {
   async function refreshAll() {
     if (pairingRequired) return;
     const result = await run(en ? "Refresh runtime" : "更新系統", async () => {
-      const [healthData, modelData, manifestData, companionData, ruleData, packData, toolData, traceData, overviewData, tokenData, ruleStateData, runtimeData, launchData, readinessData, permissionData] = await Promise.all([
+      const [healthData, modelData, manifestData, companionData, ruleData, packData, toolData, traceData, taskData, overviewData, tokenData, ruleStateData, ruleAssistData, runtimeData, launchData, readinessData, permissionData] = await Promise.all([
         api<any>("/health"), api<ModelSettings>("/api/settings/model"), api<any>(`/api/product/manifest?locale=${locale}`),
         api<any>("/api/companion/status"),
-        api<any>("/api/rules"), api<any>("/api/rulepacks"), api<any>("/api/tools"), api<any>("/api/tools/traces?limit=20"), api<any>("/api/data-center/overview"), api<any>("/api/metrics/token-efficiency"),
-        api<any>("/api/rule-state/status"), api<any>("/api/rule-state/catalog"), api<any>("/api/launch/settings"), api<any>("/api/launch/readiness"), api<any>("/api/settings/permissions"),
+        api<any>("/api/rules"), api<any>("/api/rulepacks"), api<any>("/api/tools"), api<any>("/api/tools/traces?limit=20"), api<any>("/api/tasks"), api<any>("/api/data-center/overview"), api<any>("/api/metrics/token-efficiency"),
+        api<any>("/api/rule-state/status"), api<any>(`/api/rule-assist/status?locale=${locale}`), api<any>("/api/rule-state/catalog"), api<any>("/api/launch/settings"), api<any>("/api/launch/readiness"), api<any>("/api/settings/permissions"),
       ]);
-      return { healthData, modelData, manifestData, companionData, ruleData, packData, toolData, traceData, overviewData, tokenData, ruleStateData, runtimeData, launchData, readinessData, permissionData };
+      return { healthData, modelData, manifestData, companionData, ruleData, packData, toolData, traceData, taskData, overviewData, tokenData, ruleStateData, ruleAssistData, runtimeData, launchData, readinessData, permissionData };
     });
     if (!result) { setHealth("offline"); return; }
     setHealth("online");
@@ -152,9 +224,11 @@ export default function V2App() {
     setPacks(result.packData.rulepacks || []);
     setTools(result.toolData.tools || []);
     setTraces(result.traceData.traces || []);
+    setTasks(result.taskData.tasks || []);
     setOverview(result.overviewData || {});
     setTokenMetrics(result.tokenData || {});
     setRuleState(result.ruleStateData || {});
+    setRuleAssist(result.ruleAssistData || { plan_level: "FREE", locale: locale });
     setMessages((current) => current.length === 1 && (current[0].content.includes("runtime ready") || current[0].content.includes("本機責任核心已就緒"))
       ? [{ role: "assistant", content: assistantEnvelope(en ? "Local runtime ready." : "本機 Runtime 已就緒。", result.ruleStateData || {}) }]
       : current);
@@ -168,11 +242,80 @@ export default function V2App() {
   useEffect(() => { void refreshAll(); }, [backend, locale, pairingRequired]);
   useEffect(() => { localStorage.setItem(LOCALE_KEY, locale); }, [locale]);
   useEffect(() => {
+    const list = messageListRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [messages]);
+  useEffect(() => {
     const media = window.matchMedia("(max-width: 820px)");
     const update = () => setIsMobile(media.matches);
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
+
+  function taskCard(created: TaskSummary): WorkflowCard {
+    const draft = (created as any).draft_object || {};
+    return {
+      id: `task-${created.task_id}`,
+      kind: "task",
+      title: draft.proposed_title || created.task_name || (en ? "Responsibility draft" : "責任鏈草案"),
+      summary: draft.summary || created.raw_input || "",
+      state: draft.state || created.status,
+      taskId: created.task_id,
+      objectType: draft.object_type || "task",
+      suggestedStores: draft.suggested_store || [],
+    };
+  }
+
+  function ruleCard(created: Record<string, any>): WorkflowCard {
+    const rule = created.rule || {};
+    const draft = created.draft_object || {};
+    return {
+      id: `rule-${rule.rule_id}`,
+      kind: "rule",
+      title: draft.proposed_title || rule.rule_name || (en ? "Rule draft" : "規則草案"),
+      summary: draft.summary || rule.rule_text || "",
+      state: draft.state || rule.activation_status || "DRAFTING",
+      ruleId: rule.rule_id,
+      objectType: "rule",
+      suggestedStores: draft.suggested_store || ["logic"],
+    };
+  }
+
+  function suggestionCard(suggestion: Record<string, any>, fallback: string): WorkflowCard {
+    return {
+      id: `suggestion-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      kind: "suggestion",
+      title: suggestion.title || (en ? "Draft suggested" : "建議建立草案"),
+      summary: suggestion.user_original || fallback,
+      state: "SESSION_CONTEXT_ONLY",
+      objectType: suggestion.suggested_type || "task",
+      suggestedStores: [suggestion.suggested_write_direction || (en ? "memory" : "記憶庫")],
+      suggestion,
+    };
+  }
+
+  function dismissCard(cardId: string) {
+    setMessages((current) => current.map((item) => item.card?.id === cardId ? { ...item, card: { ...item.card, state: "DISMISSED" } } : item));
+  }
+
+  async function openTask(taskId: string) {
+    const selected = await run(en ? "Open task" : "開啟草案", () => api<TaskSummary>(`/api/tasks/${taskId}`));
+    if (selected) { setTask(selected); setView("workbench"); }
+  }
+
+  async function askWorkspace(scope: string, prompt: string) {
+    const result = await run(en ? "Ask workspace model" : "詢問工作區模型", () => api<any>("/api/chat/general", { method: "POST", body: JSON.stringify({ message: `[${scope}] ${prompt}`, locale: replyLocale }) }));
+    return result?.reply || null;
+  }
+
+  async function acceptSuggestion(card: WorkflowCard) {
+    const accepted = await run(en ? "Prepare draft" : "準備草案", () => api<any>("/api/chat/suggestions/accept", { method: "POST", body: JSON.stringify({ suggestion: card.suggestion, user_original: card.summary }) }));
+    if (!accepted) return;
+    const created = await createTask(accepted.prefill?.suggested_instruction || card.summary, false, "create_confirmation", "memory");
+    if (created) {
+      setMessages((current) => current.map((item) => item.card?.id === card.id ? { ...item, card: taskCard(created) } : item));
+    }
+  }
 
   async function sendChat() {
     const text = chatInput.trim();
@@ -198,57 +341,63 @@ export default function V2App() {
     if (commandMode === "rule") {
       const result = await createNaturalRule(text);
       if (result) {
-        setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "Rule draft created. Review and sign it in Rule Center." : "規則草案已建立。請在規則中心檢查、簽名，再決定是否啟用。", result.rule_state || ruleState) }]);
-        setView("rules");
+        setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "An unsigned rule draft is ready." : "未簽名規則草案已建立。", result.rule_state || ruleState), card: ruleCard(result) }]);
       }
       return;
     }
-    const routed = await run(en ? "Route request" : "判斷任務", () => api<any>("/api/chat/intent", { method: "POST", body: JSON.stringify({ message: text }) }));
+    const routed = await run(en ? "Route request" : "判斷任務", () => api<any>("/api/chat/intent", { method: "POST", body: JSON.stringify({ message: text, locale: replyLocale }) }));
     if (!routed) return;
     if (routed.intent === "create_new_rule_confirmation") {
       const drafted = await createNaturalRule(text);
-      if (drafted) setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "I created an unsigned rule draft. You remain the only signer and activator." : "我已建立未簽名規則草案。只有你能簽名與啟用。", drafted.rule_state || ruleState) }]);
+      if (drafted) setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "I created an unsigned rule draft. You remain the only signer and activator." : "我已建立未簽名規則草案。只有你能簽名與啟用。", drafted.rule_state || ruleState), card: ruleCard(drafted) }]);
       return;
     }
     if (routed.intent === "create_confirmation") {
       setTaskInput(text);
-      await createTask(text);
-      setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "Draft compiled. Review S/C/B/K/R in Workbench." : "草案已編譯，請在工作台檢查 S/C/B/K/R。") }]);
+      const created = await createTask(text, false, routed.intent, routed.draft_object_type || "task");
+      if (created) setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "Draft compiled. It is waiting for your review." : "草案已編譯，正在等待你檢查。"), card: taskCard(created) }]);
       return;
     }
-    const reply = await run(en ? "Chat" : "模型回覆", () => api<any>("/api/chat/general", { method: "POST", body: JSON.stringify({ message: text, locale }) }));
+    if (routed.intent === "data_center_query") {
+      const result = await readFourStores(text);
+      if (result) setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(result.answer, result.rule_state || ruleState) }]);
+      return;
+    }
+    const reply = await run(en ? "Chat" : "模型回覆", () => api<any>("/api/chat/general", { method: "POST", body: JSON.stringify({ message: text, locale: replyLocale }) }));
     if (reply) {
-      let ruleNotice = "";
-      if (reply.suggestion) {
-        const drafted = await createNaturalRule(reply.suggestion.suggested_instruction || text);
-        if (drafted) ruleNotice = en ? "\n\nUnsigned rule draft created automatically. Review it in Rule Center before signing." : "\n\n已自動建立未簽名規則草案；請到規則中心檢查後再簽名。";
-      }
-      setMessages((current) => [...current, { role: "assistant", content: `${reply.reply}${ruleNotice}` }]);
+      const suggestion = routed.suggestion || reply.suggestion;
+      setMessages((current) => [...current, { role: "assistant", content: reply.reply, card: suggestion ? suggestionCard(suggestion, text) : undefined }]);
     }
   }
 
-  async function createTask(input = taskInput) {
+  async function createTask(input = taskInput, navigate = true, intent = "create_confirmation", objectType = "task") {
     if (!input.trim()) { setNotice(en ? "Task input required" : "請輸入任務內容"); return; }
-    const created = await run(en ? "Compile draft" : "編譯草案", () => api<TaskSummary>("/api/tasks/create", { method: "POST", body: JSON.stringify({ raw_input: input.trim(), task_type: "general", create_scbkr_draft: true }) }));
-    if (created) { setTask(created); setOwnerSignature(""); setRightMode("workbench"); setView("workbench"); }
+    const created = await run(en ? "Compile draft" : "編譯草案", () => api<TaskSummary>("/api/tasks/create", { method: "POST", body: JSON.stringify({ raw_input: input.trim(), task_type: "general", intent, object_type: objectType, create_scbkr_draft: true, locale: replyLocale, rule_assist_plan: planLevel }) }));
+    if (created) { setTask(created); setOwnerSignature(""); setTasks((current) => [created, ...current.filter((item) => item.task_id !== created.task_id)]); if (navigate) setView("workbench"); }
+    return created;
+  }
+
+  function syncTask(updated: TaskSummary) {
+    setTask(updated);
+    setTasks((current) => [updated, ...current.filter((item) => item.task_id !== updated.task_id)]);
   }
 
   async function confirmTask() {
     if (!task || !ownerSignature.trim()) return;
     const confirmed = await run(en ? "Sign responsibility chain" : "簽名責任鏈", () => api<TaskSummary>(`/api/tasks/${task.task_id}/confirm`, { method: "POST", body: JSON.stringify({ scbkr: task.scbkr, confirmed_by: "user", signature: ownerSignature.trim() }) }));
-    if (confirmed) setTask(confirmed);
+    if (confirmed) syncTask(confirmed);
   }
 
   async function generate() {
     if (!task) return;
     const generated = await run(en ? "Generate" : "模型生成", () => api<TaskSummary>(`/api/tasks/${task.task_id}/generate`, { method: "POST", body: "{}" }));
-    if (generated) setTask(generated);
+    if (generated) syncTask(generated);
   }
 
   async function review(decision: "pass" | "fail") {
     if (!task) return;
     const reviewed = await run(en ? "Review output" : "驗收輸出", () => api<TaskSummary>(`/api/tasks/${task.task_id}/review`, { method: "POST", body: JSON.stringify({ review_decision: decision, review_message: decision === "pass" ? "Owner accepted" : "Owner rejected", reviewer_signature: ownerSignature || "owner" }) }));
-    if (reviewed) setTask(reviewed);
+    if (reviewed) syncTask(reviewed);
   }
 
   async function commitStores() {
@@ -260,7 +409,7 @@ export default function V2App() {
       current = requested;
     }
     const committed = await run(en ? "Commit four stores" : "二次確認入庫", () => api<TaskSummary>(`/api/tasks/${current.task_id}/storage-confirm`, { method: "POST", body: JSON.stringify({ storage_confirmed: true, second_confirm: true, confirmed_by: "user", signature: ownerSignature, selected_targets: selectedStores }) }));
-    if (committed) { setTask(committed); void refreshAll(); }
+    if (committed) { syncTask(committed); void refreshAll(); }
   }
 
   async function createRule() {
@@ -280,7 +429,7 @@ export default function V2App() {
   async function createNaturalRule(instruction = naturalRuleText) {
     const text = instruction.trim();
     if (!text) return null;
-    const created = await run(en ? "Compile natural-language rule" : "編譯自然語言規則", () => api<any>("/api/rules/draft-from-text", { method: "POST", body: JSON.stringify({ instruction: text }) }));
+    const created = await run(en ? "Compile natural-language rule" : "編譯自然語言規則", () => api<any>("/api/rules/draft-from-text", { method: "POST", body: JSON.stringify({ instruction: text, locale: replyLocale, rule_assist_plan: planLevel }) }));
     if (created) {
       setSelectedRule(created.rule.rule_id);
       setNaturalRuleText("");
@@ -316,6 +465,17 @@ export default function V2App() {
   async function useIndependentState() {
     const state = await run(en ? "Use independent state" : "切換獨立規則狀態", () => api<any>("/api/rule-state/deactivate", { method: "POST", body: JSON.stringify({ reason: "user_selected_independent" }) }));
     if (state) setRuleState(state);
+  }
+
+  async function updateRuleAssistSettings(payload: Record<string, any>) {
+    const updated = await run(en ? "Update rule assist" : "更新規則輔助", () => api<RuleAssistStatus>("/api/rule-assist/settings", { method: "POST", body: JSON.stringify({ locale: ruleAssist.locale || locale, ...payload }) }));
+    if (updated) setRuleAssist(updated);
+  }
+
+  async function runRuleAssistMock() {
+    const text = chatInput.trim() || (en ? "Hello, explain what this system can do." : "你好，說明這套系統可以怎麼建立規則。");
+    const result = await run(en ? "Run rule-assist mock" : "測試規則層回覆", () => api<any>("/api/rule-assist/mock-chat", { method: "POST", body: JSON.stringify({ message: text, locale: replyLocale }) }));
+    if (result) setMessages((current) => [...current, { role: "user", content: text }, { role: "assistant", content: result.reply }]);
   }
 
   async function signRule() {
@@ -382,6 +542,11 @@ export default function V2App() {
   function switchLocale() { setLocale((current) => current === "en" ? "zh-TW" : "en"); }
   function saveConnection() { localStorage.setItem(BACKEND_KEY, backend.replace(/\/+$/, "")); localStorage.setItem(TOKEN_KEY, tokenInput.trim()); setBackend(backend.replace(/\/+$/, "")); void refreshAll(); }
 
+  function renderWorkflowCard(card: WorkflowCard) {
+    if (card.state === "DISMISSED") return null;
+    return <section className={`workflow-card ${card.kind}`} aria-label={en ? "Workflow draft" : "待辦草案"}><header><span>{card.kind === "rule" ? (en ? "RULE DRAFT" : "規則草案") : card.kind === "task" ? (en ? "SCBKR DRAFT" : "責任鏈草案") : (en ? "DRAFT SUGGESTION" : "草案建議")}</span><b>{card.state}</b></header><h3>{card.title}</h3><p>{card.summary}</p>{Boolean(card.suggestedStores?.length) && <div className="store-chips">{card.suggestedStores?.map((store) => <span key={store}>{store}</span>)}</div>}<div className="workflow-actions">{card.kind === "suggestion" && <button onClick={() => void acceptSuggestion(card)}><Sparkles size={14} />{en ? "Create draft" : "建立草案"}</button>}{card.kind === "task" && card.taskId && <button onClick={() => void openTask(card.taskId!)}><SlidersHorizontal size={14} />{en ? "Open Workbench" : "前往工作台"}</button>}{card.kind === "rule" && card.ruleId && <button onClick={() => { setSelectedRule(card.ruleId!); setView("rules"); }}><FileKey size={14} />{en ? "Open Rule Center" : "前往規則中心"}</button>}<button className="quiet" onClick={() => dismissCard(card.id)}><X size={14} />{en ? "Dismiss" : "留在本次對話"}</button></div><small>{en ? "Not signed or stored." : "尚未簽名、尚未入庫。"}</small></section>;
+  }
+
   const nav = [
     { id: "command" as View, label: copy.navigation.chat, icon: MessageSquare },
     { id: "rules" as View, label: copy.navigation.rules, icon: FileKey },
@@ -401,6 +566,89 @@ export default function V2App() {
     { id: "logic", label: copy.stores.logic, count: overview.logic_count || 0, icon: Braces },
     { id: "memory", label: copy.stores.memory, count: overview.memory_count || 0, icon: HardDrive },
   ];
+  const planCatalog = ruleAssist.catalog || [];
+  const planIcon = planLevel === "NT3300" ? Crown : planLevel === "NT690" ? BrainCircuit : FileKey;
+  const PlanIcon = planIcon;
+  const aiToolCards = [
+    { id: "web_search", icon: Globe2, title: en ? "Web search" : "網頁搜尋", status: permissions.web_search === true ? "enabled" : "confirm", detail: en ? "Confirmed live search" : "依規則執行網頁搜尋與擷取" },
+    { id: "email_draft", icon: Mail, title: en ? "Email draft" : "Email 草稿", status: "confirm", detail: en ? "Draft only before signature" : "只先生成草稿，不自動寄出" },
+    { id: "code_workspace", icon: SquareTerminal, title: en ? "Code workbench" : "程式碼工作台", status: "confirm", detail: en ? "Patch and verify locally" : "依規則產生與驗證程式碼" },
+    { id: "local_files", icon: FolderOpen, title: en ? "Local files" : "本機檔案", status: "confirm", detail: en ? "Read/write requires boundary" : "讀寫必須有邊界與簽名" },
+    { id: "voice_io", icon: Bot, title: en ? "Voice I/O" : "語音輸入/輸出", status: "standby", detail: en ? "Reserved for VoxCPM" : "保留給 VoxCPM / 語音流程" },
+    { id: "desktop", icon: Monitor, title: en ? "Desktop control" : "電腦控制", status: "confirm", detail: en ? "Agent can operate after gate" : "代理可操作，主責不離使用者" },
+  ];
+  const corePrinciples = [
+    en ? "Model assists; user signs." : "模型只協助，使用者簽名。",
+    en ? "Four-store citations outrank chat context." : "四庫正式引用高於聊天上下文。",
+    en ? "No signature, no storage." : "沒有簽名，不得入庫。",
+    en ? "No review, no final close." : "沒有驗收，不得 CLOSE。",
+  ];
+
+  const planConsole = (
+    <section className="ops-panel plan-console">
+      <header><PlanIcon size={20} /><div><span>RULE ASSIST</span><h2>{activePlan.display_name || (en ? "Free Draft Layer" : "免費草稿層")}</h2></div><b>{planLevel}</b></header>
+      <p>{activePlan.display_summary || (en ? "Local draft mode" : "本機草案模式")}</p>
+      <div className="plan-picker" aria-label={en ? "Plan selector" : "方案選擇"}>
+        {planCatalog.map((plan) => <button key={plan.plan_level} className={planLevel === plan.plan_level ? "active" : ""} onClick={() => void updateRuleAssistSettings({ plan_level: plan.plan_level })}><span>{plan.price_label}</span><b>{plan.display_name}</b></button>)}
+      </div>
+      <label>{en ? "Answer language" : "模型輸出語言"}<select value={ruleAssist.locale || "auto"} onChange={(event) => void updateRuleAssistSettings({ locale: event.target.value })}><option value="auto">Auto</option><option value="zh-TW">繁體中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
+      <button className="primary-action" onClick={() => void runRuleAssistMock()}><Play size={15} />{en ? "Test rule layer" : "測試規則層回覆"}</button>
+    </section>
+  );
+
+  const activeRulePanel = (
+    <section className="ops-panel active-rule-panel">
+      <header><ShieldCheck size={20} /><div><span>CURRENT RULE STATE</span><h2>{en ? "Enabled rule" : "目前啟用規則"}</h2></div></header>
+      <dl><div><dt>{en ? "Source" : "規則來源"}</dt><dd>{ruleState.active_rulepack_id ? (en ? "ShenYao rule runtime" : "沈耀規則 Runtime") : ruleState.active_rule_id ? (en ? "User local rule" : "使用者本機規則") : (en ? "No active rule" : "尚無生效規則")}</dd></div><div><dt>{en ? "Version" : "版本"}</dt><dd>{ruleState.active_rulepack_version || ruleState.active_rule_version || "DRAFT"}</dd></div><div><dt>{en ? "Signature" : "簽名狀態"}</dt><dd>{ruleState.responsibility_holder || (en ? "Waiting user signature" : "等待使用者簽名")}</dd></div></dl>
+      <button onClick={() => setView("runtime")}><ChevronRight size={15} />{en ? "Open rule state" : "查看規則狀態"}</button>
+    </section>
+  );
+
+  const toolLauncher = (
+    <div className={`tool-launcher ${toolLauncherOpen ? "open" : ""}`}>
+      <button className="tool-plus" onClick={() => setToolLauncherOpen((value) => !value)} title={en ? "Open tool launcher" : "開啟工具列"}><Plus size={22} /></button>
+      {toolLauncherOpen && <section className="tool-launcher-menu"><header><Sparkles size={17} /><div><span>CONNECTORS</span><h2>{en ? "Model-accessible tools" : "模型可碰的工具"}</h2></div></header><div>{aiToolCards.map(({ id, icon: Icon, title, status, detail }) => <button key={id} onClick={() => { setSelectedTool(id); setView("tools"); setToolLauncherOpen(false); }}><Icon size={18} /><span><b>{title}</b><small>{detail}</small></span><em className={status}>{status}</em></button>)}</div></section>}
+    </div>
+  );
+
+  const aiToolPanel = (
+    <section className="ops-panel ai-tool-panel">
+      <header><BrainCircuit size={20} /><div><span>AI ENGINE TOOLS</span><h2>{en ? "Tool permissions" : "AI 引擎與工具"}</h2></div><em>{en ? "running" : "運行中"}</em></header>
+      <div className="tool-card-list">{aiToolCards.slice(0, 5).map(({ id, icon: Icon, title, status, detail }) => <button key={id} onClick={() => { setSelectedTool(id); setView("tools"); }}><Icon size={18} /><span><b>{title}</b><small>{detail}</small></span><i className={status}>{status === "enabled" ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}</i></button>)}</div>
+      <button onClick={() => setView("tools")}><Settings size={15} />{en ? "Manage tool gates" : "管理工具權限"}</button>
+    </section>
+  );
+
+  const auditPanel = (
+    <section className="ops-panel audit-panel">
+      <header><FileKey size={20} /><div><span>AUDIT STATE</span><h2>{en ? "Responsibility closure" : "審計狀態"}</h2></div></header>
+      <div className="audit-steps"><span className="done"><CheckCircle2 size={15} />{en ? "Rules read" : "已讀取規則版本"}</span><span className={permissions.model_generate === true || model?.enabled ? "done" : "wait"}>{permissions.model_generate === true || model?.enabled ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}{en ? "Model permission" : "模型權限"}</span><span className={ownerSignature ? "done" : "wait"}>{ownerSignature ? <CheckCircle2 size={15} /> : <Lock size={15} />}{en ? "Owner signature" : "使用者簽名"}</span><span className={task?.storage_confirmed ? "done" : "wait"}>{task?.storage_confirmed ? <CheckCircle2 size={15} /> : <Database size={15} />}{en ? "Storage confirmed" : "等待驗收 / 入庫"}</span></div>
+    </section>
+  );
+
+  const principlesPanel = (
+    <section className="ops-panel principles-panel">
+      <header><KeyRound size={20} /><div><span>CORE PRINCIPLES</span><h2>{en ? "Hard rules" : "核心原則"}</h2></div></header>
+      <ul>{corePrinciples.map((item) => <li key={item}>{item}</li>)}</ul>
+    </section>
+  );
+
+  const automationPanel = (
+    <section className="ops-panel automation-panel">
+      <header><Rocket size={20} /><div><span>AUTOMATION LEVEL</span><h2>{en ? "Execution grade" : "自動化等級"}</h2></div></header>
+      <div className="automation-levels"><span><Lock size={15} />L0</span><span className="active"><Eye size={15} />L1</span><span><FileKey size={15} />L2</span><span><SlidersHorizontal size={15} />L3</span><span><Rocket size={15} />L4</span></div>
+      <small>{planLevel === "NT3300" ? (en ? "Current ceiling: CLOSE_CANDIDATE before owner signature." : "目前上限：使用者簽名前最多 CLOSE_CANDIDATE。") : (en ? "Current ceiling: draft and structure assist." : "目前上限：草案與結構輔助。")}</small>
+    </section>
+  );
+
+  const phonePanel = (
+    <section className="ops-panel phone-panel">
+      <header><Smartphone size={20} /><div><span>MOBILE LINK</span><h2>{en ? "Phone connection" : "手機連線"}</h2></div><em className={companion?.lan_companion_enabled ? "enabled" : "confirm"}>{companion?.lan_companion_enabled ? (en ? "ready" : "可配對") : "LAN off"}</em></header>
+      <div className="phone-link-visual"><Smartphone size={38} /><span><i /><Wifi size={16} /><i /></span><Monitor size={42} /></div>
+      <small>{companion?.base_url || backend}</small>
+      {pairing ? <div className="qr-wrap"><QRCodeSVG value={`${pairing.base_url}?companion_token=${pairing.pairing_code}`} size={92} /><strong>{pairing.pairing_code}</strong></div> : <button disabled={!companion?.lan_companion_enabled} onClick={() => void startPairing()}><FileKey size={15} />{en ? "Create pair code" : "取得配對碼"}</button>}
+    </section>
+  );
 
   const rulePanel = (
     <section className="sovereignty-zone" aria-label={en ? "Rule sovereignty" : "規則主權區"}>
@@ -411,7 +659,7 @@ export default function V2App() {
         {rules.length === 0 && <div className="empty-state">{en ? "No local rules" : "尚無本機規則"}</div>}
         {rules.slice(0, 8).map((rule) => <button key={rule.rule_id} className={`rule-row ${selectedRule === rule.rule_id ? "selected" : ""}`} onClick={() => setSelectedRule(rule.rule_id)}><span className={`state-dot ${rule.activation_status}`} /><span><b>{rule.rule_name}</b><small>{rule.rule_text || rule.rule_name}</small><small>{rule.rule_source} · {rule.rule_version}</small></span><em>{rule.activation_status}</em></button>)}
       </div>
-      <details className="compact-form" open={view === "rules"}>
+      <details className="compact-form">
         <summary><Sparkles size={15} />{en ? "New user rule" : "新增使用者規則"}</summary>
         <label>{en ? "Rule name" : "規則名稱"}<input value={ruleForm.name} onChange={(e) => setRuleForm({ ...ruleForm, name: e.target.value })} /></label>
         <label>{en ? "Keywords" : "命中關鍵字"}<input value={ruleForm.keywords} onChange={(e) => setRuleForm({ ...ruleForm, keywords: e.target.value })} placeholder={en ? "comma separated" : "以逗號分隔"} /></label>
@@ -431,7 +679,7 @@ export default function V2App() {
       <header className="command-header"><div><span>NATURAL LANGUAGE CONTROL PLANE</span><h1>{en ? "Natural Language Console" : "自然語言控制台"}</h1></div><div className="stage-chip"><Activity size={15} />{status}</div></header>
       <div className={`rule-awareness-strip ${String(ruleState.awareness_state || "EMPTY").toLowerCase()}`}><span>{ruleState.awareness_state || "EMPTY"}</span><b>{ruleState.active_rulepack_id ? `${ruleState.active_rulepack_id} v${ruleState.active_rulepack_version}` : ruleState.active_rule_id ? `${ruleState.active_rule_id} v${ruleState.active_rule_version}` : (en ? "No active rule" : "尚無生效規則")}</b><em>{ruleState.responsibility_holder ? `${en ? "RESPONSIBILITY" : "責任歸屬"} · ${ruleState.responsibility_holder}` : (en ? "ASSISTANCE ONLY" : "僅供輔助對話")}</em></div>
       <div className="command-modes" role="tablist" aria-label={en ? "Natural language mode" : "自然語言模式"}><button className={commandMode === "chat" ? "active" : ""} onClick={() => setCommandMode("chat")}><MessageSquare size={15} />{en ? "Chat" : "一般對話"}</button><button className={commandMode === "web" ? "active" : ""} onClick={() => setCommandMode("web")}><Globe2 size={15} />{en ? "Web" : "網路搜尋"}</button><button className={commandMode === "search" ? "active" : ""} onClick={() => setCommandMode("search")}><Search size={15} />{en ? "Stores" : "搜尋四庫"}</button><button className={commandMode === "rule" ? "active" : ""} onClick={() => setCommandMode("rule")}><FileKey size={15} />{en ? "Rule" : "建立規則"}</button></div>
-      <div className="message-list">{messages.map((item, index) => <div key={`${item.role}-${index}`} className={`message ${item.role}`}><span>{item.role === "assistant" ? "SCBKR" : en ? "YOU" : "你"}</span>{item.content}</div>)}</div>
+      <div className="message-list" ref={messageListRef}>{messages.map((item, index) => <div key={`${item.role}-${index}`} className={`message ${item.role} ${item.card ? "has-card" : ""}`}><span>{item.role === "assistant" ? "SCBKR" : en ? "YOU" : "你"}</span><div>{item.content}</div>{item.card && renderWorkflowCard(item.card)}</div>)}</div>
       <div className="chat-input"><label className="natural-input-label"><span>{commandMode === "chat" ? (en ? "Talk to the local model" : "直接用人話跟本機模型說") : commandMode === "web" ? (en ? "Search the live web through SCBKR gates" : "經過 SCBKR Gate 搜尋即時網路") : commandMode === "search" ? (en ? "Ask the signed four stores" : "搜尋並閱讀已簽名四庫") : (en ? "Describe the rule you want" : "說出你要建立的規則")}</span><textarea aria-label={en ? "Natural language input" : "自然語言輸入"} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={commandMode === "chat" ? (en ? "Describe a task or ask SCBKR..." : "直接輸入你想做的事或想問的問題…") : commandMode === "web" ? (en ? "Search current information on the web..." : "搜尋現在網路上的資料…") : commandMode === "search" ? (en ? "What do the signed stores say about..." : "例如：四庫裡有哪些關於發布規則的資料？") : (en ? "Before publishing, require my signature..." : "例如：凡是要發布內容，都必須先讓我簽名。")} /></label><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Run" : "執行"}>{commandMode === "web" ? <Globe2 size={20} /> : commandMode === "search" ? <Search size={20} /> : commandMode === "rule" ? <FileKey size={20} /> : <Send size={20} />}</button></div>
     </section>
   );
@@ -441,7 +689,7 @@ export default function V2App() {
       <div className="zone-title"><div><span>RESPONSIBILITY MATRIX</span><h2>Workbench / SCBKR 工作台</h2></div><CircleGauge size={20} /></div>
       {!task ? <div className="workbench-empty"><SquareTerminal size={26} /><h3>建立責任鏈確認單</h3><label>{en ? "Task" : "任務指令"}<textarea value={taskInput} onChange={(e) => setTaskInput(e.target.value)} /></label><button disabled={!taskInput.trim()} onClick={() => void createTask()}><Sparkles size={16} />{en ? "Compile SCBKR" : "編譯 SCBKR 草案"}</button></div> : <>
         <div className="task-state"><span>{task.task_id}</span><b>{task.status}</b></div>
-        <div className="dimension-grid">{dims.map((dim) => <details className={`dimension-row ${dimColor[dim]}`} key={dim} open={dim === "S"}><summary><b>{dim}</b><span>{human(task.scbkr?.[dim]?.task_subject || task.scbkr?.[dim]?.core_logic || task.scbkr?.[dim]?.stop_conditions || task.scbkr?.[dim]?.references || task.scbkr?.[dim]?.acceptance_criteria).slice(0, 88) || (en ? "Pending" : "待補")}</span><ChevronRight size={15} /></summary><pre>{JSON.stringify(task.scbkr?.[dim] || {}, null, 2)}</pre></details>)}</div>
+        <div className="dimension-grid">{dims.map((dim) => { const content = task.scbkr?.[dim] || {}; const preview = human(content.task_subject || content.core_logic || content.stop_conditions || content.references || content.acceptance_criteria).slice(0, 88); return <details className={`dimension-row ${dimColor[dim]}`} key={dim} open={dim === "S"}><summary><b>{dim}</b><span><strong>{dimensionNames[dim][en ? "en" : "zh"]}</strong>{preview || (en ? "Pending" : "待補")}</span><ChevronRight size={15} /></summary><div className="dimension-readable">{Object.entries(content).filter(([key, value]) => key !== "pending_questions" && human(value).trim()).map(([key, value]) => <div key={key}><b>{fieldTitle(key, en)}</b><p>{human(value)}</p></div>)}</div></details>; })}</div>
         <div className="gate-sequence"><span className={task.confirmed ? "passed" : "current"}>1 {en ? "SIGN" : "簽名"}</span><span className={task.generation_result ? "passed" : task.confirmed ? "current" : ""}>2 {en ? "GENERATE" : "生成"}</span><span className={task.review_passed ? "passed" : task.status === "waiting_review" ? "current" : ""}>3 {en ? "REVIEW" : "驗收"}</span><span className={task.storage_confirmed ? "passed" : task.review_passed ? "current" : ""}>4 {en ? "STORE" : "入庫"}</span></div>
         <label>{en ? "Owner signature" : "使用者簽名"}<input value={ownerSignature} onChange={(e) => setOwnerSignature(e.target.value)} disabled={task.confirmed} /></label>
         <div className="action-grid">
@@ -466,7 +714,17 @@ export default function V2App() {
 
   const dataDock = <footer className="data-dock">{stores.map((store) => { const Icon = store.icon; return <button key={store.id} onClick={() => setView("data")}><Icon size={17} /><span>{store.label}</span><b>{store.count}</b></button>; })}<button onClick={() => setView("tools")}><Activity size={17} /><span>{en ? "Traces" : "執行回放"}</span><b>{traces.length}</b></button></footer>;
 
-  const desktopCommand = <div className="control-grid">{rulePanel}{chatPanel}{rightMode === "workbench" ? workbenchPanel : toolPanel}<div className="right-switch"><button className={rightMode === "workbench" ? "active" : ""} onClick={() => setRightMode("workbench")}><SlidersHorizontal size={15} /></button><button className={rightMode === "tools" ? "active" : ""} onClick={() => setRightMode("tools")}><Wrench size={15} /></button></div></div>;
+  const selectedRuleData = rules.find((rule) => rule.rule_id === selectedRule);
+  const selectedToolData = tools.find((tool) => tool.tool_id === selectedTool);
+  const pendingTasks = tasks.filter((item) => !["completed", "storage_committed"].includes(item.status)).slice(0, 12);
+
+  const commandPage = <div className="workspace-page command-workspace premium-dashboard"><div className="dashboard-grid"><section className="dashboard-main">{chatPanel}</section><aside className="dashboard-mid">{planConsole}{activeRulePanel}{aiToolPanel}</aside><aside className="dashboard-right">{auditPanel}{principlesPanel}{automationPanel}{phonePanel}<section className="ops-panel pending-panel"><header><FileKey size={20} /><div><span>ACTIVE DRAFTS</span><h2>{en ? "Pending work" : "待辦草案"}</h2></div></header><div className="activity-list">{pendingTasks.length === 0 && <div className="empty-state">{en ? "No pending drafts" : "目前沒有待辦草案"}</div>}{pendingTasks.slice(0, 5).map((item) => <button key={item.task_id} onClick={() => void openTask(item.task_id)}><span className="state-dot waiting_owner_signature" /><div><b>{item.task_name}</b><small>{item.status}</small></div><ChevronRight size={15} /></button>)}</div></section></aside>{toolLauncher}</div></div>;
+
+  const rulesPage = <div className="workspace-page split-workspace rules-workspace"><div className="workspace-primary">{rulePanel}</div><aside className="workspace-inspector"><div className="workspace-heading"><span>RULE INSPECTOR</span><h2>{selectedRuleData ? selectedRuleData.rule_name : (en ? "Select a rule" : "選擇一條規則")}</h2></div>{selectedRuleData ? <div className="rule-inspector"><div className={`status-banner ${selectedRuleData.activation_status}`}><span>{selectedRuleData.activation_status}</span><b>{selectedRuleData.rule_version}</b></div><p>{selectedRuleData.rule_text}</p><dl><div><dt>{en ? "Author" : "作者"}</dt><dd>{selectedRuleData.rule_author}</dd></div><div><dt>{en ? "Scope" : "適用範圍"}</dt><dd>{scopeSummary(selectedRuleData.rule_scope, en)}</dd></div><div><dt>{en ? "Allowed tools" : "允許工具"}</dt><dd>{human(selectedRuleData.allowed_tools) || (en ? "None" : "未指定")}</dd></div><div><dt>{en ? "Risk" : "風險"}</dt><dd>{selectedRuleData.risk_level}</dd></div></dl></div> : <div className="empty-state">{en ? "Rule details appear here." : "規則內容會顯示在這裡。"}</div>}<ContextAssistant en={en} title={en ? "Rule review" : "規則檢查"} context={selectedRuleData ? `Current unsigned or active rule: ${JSON.stringify({ name: selectedRuleData.rule_name, text: selectedRuleData.rule_text, scope: selectedRuleData.rule_scope, status: selectedRuleData.activation_status })}` : "No rule selected. Discuss rule design without claiming a rule is active."} onAsk={(text) => askWorkspace("RULE_CENTER", text)} /></aside></div>;
+
+  const workbenchPage = <div className="workspace-page workbench-workspace"><aside className="task-queue"><div className="workspace-heading"><span>DRAFT INBOX</span><h2>{en ? "Tasks" : "草案佇列"}</h2></div><button className="new-task" onClick={() => setTask(null)}><Sparkles size={15} />{en ? "New draft" : "新增草案"}</button><div className="activity-list">{tasks.slice(0, 20).map((item) => <button className={task?.task_id === item.task_id ? "selected" : ""} key={item.task_id} onClick={() => void openTask(item.task_id)}><span className={`state-dot ${item.confirmed ? "active" : "waiting_owner_signature"}`} /><div><b>{item.task_name}</b><small>{item.status}</small></div><ChevronRight size={15} /></button>)}</div></aside><div className="workspace-primary">{workbenchPanel}</div><aside className="workspace-inspector"><ContextAssistant en={en} title={en ? "Draft copilot" : "草案協作"} context={task ? `Current SCBKR task ${task.task_id}, status ${task.status}. Model may explain or propose a patch, but cannot sign, review, or store.` : "No task selected. Help the user clarify a task before creating a draft."} onAsk={(text) => askWorkspace("WORKBENCH", text)} /></aside></div>;
+
+  const toolsPage = <div className="workspace-page split-workspace tools-workspace"><div className="workspace-primary">{toolPanel}</div><aside className="workspace-inspector"><div className="workspace-heading"><span>TOOL INSPECTOR</span><h2>{selectedToolData?.name || (en ? "Select a tool" : "選擇工具")}</h2></div>{selectedToolData && <div className="tool-inspector"><div className="status-banner"><span>{selectedToolData.risk_level}</span><b>{selectedToolData.tool_id}</b></div><p>{human(selectedToolData.capabilities)}</p><dl><div><dt>{en ? "Permissions" : "需要權限"}</dt><dd>{human(selectedToolData.required_permissions)}</dd></div><div><dt>{en ? "Actions" : "可用動作"}</dt><dd>{human(selectedToolData.allowed_actions)}</dd></div></dl></div>}<ContextAssistant en={en} title={en ? "Tool guidance" : "工具協作"} context={selectedToolData ? `Current tool: ${JSON.stringify({ id: selectedToolData.tool_id, risk: selectedToolData.risk_level, capabilities: selectedToolData.capabilities })}. Explain gates and risks without executing the tool.` : "No tool selected."} onAsk={(text) => askWorkspace("TOOLS", text)} /><div className="trace-mini"><h3>{en ? "Recent traces" : "最近回放"}</h3>{traces.slice(0, 6).map((trace) => <div key={trace.trace_id}><span className={`state-dot ${trace.allowed ? "active" : "revoked"}`} /><b>{trace.tool_id}</b><small>{trace.action}</small></div>)}</div></aside></div>;
 
   const dataPage = <section className="full-panel data-center-panel"><div className="page-head"><div><span>LOCAL EVIDENCE PLANE</span><h1>{en ? "Search & Read Data Center" : "四庫搜尋與閱讀區"}</h1></div><button onClick={() => void refreshAll()}><RefreshCw size={15} />{en ? "Refresh" : "讀回資料中心"}</button></div><div className="data-reader"><div><span>AUTHORITATIVE STORE READER</span><h2>{en ? "Ask your signed knowledge" : "用人話查詢已簽名資料"}</h2><small>{en ? "Vector matches are candidates only. The model reads signed and reviewed citations." : "向量只負責找候選；模型只整理已簽名、已驗收的正式引用。"}</small></div><div className="reader-input"><input aria-label={en ? "Search four stores" : "搜尋四庫"} value={dataQuery} onChange={(e) => setDataQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void readFourStores(); }} placeholder={en ? "Ask a question about your stored rules..." : "例如：我的發布規則要求什麼？"} /><button disabled={!dataQuery.trim()} onClick={() => void readFourStores()}><Search size={16} />{en ? "Search and read" : "搜尋並閱讀"}</button></div>{readResult && <div className={`reader-result ${readResult.citation_count ? "has-evidence" : "empty"}`}><header><b>{readResult.citation_count || 0} {en ? "authoritative citations" : "筆正式引用"}</b><span>{readResult.candidates_excluded || 0} {en ? "candidates excluded" : "筆候選已排除"}</span><em>{readResult.model_called ? (en ? "MODEL READING DRAFT" : "模型閱讀草稿") : (en ? "NO MODEL CLAIM" : "未讓模型無依據作答")}</em></header><p>{readResult.answer}</p>{(readResult.citations || []).map((citation: any, index: number) => <div className="citation-row" key={`${citation.content_hash}-${index}`}><b>{citation.source_store}</b><span>{citation.rule}</span><code>{String(citation.content_hash || "").slice(0, 12)}</code></div>)}</div>}</div><div className="store-band">{stores.map((store) => { const Icon = store.icon; return <section key={store.id}><Icon /><span>{store.label}</span><strong>{store.count}</strong></section>; })}</div><div className="trace-table"><h2>{en ? "Execution traces" : "執行回放"}</h2>{traces.map((trace) => <div key={trace.trace_id}><span className={`state-dot ${trace.allowed ? "active" : "revoked"}`} /><b>{trace.tool_id}</b><span>{trace.action}</span><span>{trace.reason}</span><time>{trace.timestamp}</time></div>)}</div></section>;
 
@@ -478,17 +736,14 @@ export default function V2App() {
 
   const modelPage = <section className="full-panel model-settings"><div className="page-head"><div><span>RUNTIME CONNECTION</span><h1>模型設定</h1></div><Bot /></div><div className="settings-grid"><section><h2>{en ? "Desktop / phone connection" : "桌機 / 手機連線"}</h2><div className={`companion-state ${companion?.lan_companion_enabled ? "on" : "off"}`}><span>LAN COMPANION</span><b>{companion?.lan_companion_enabled ? "ON" : "OFF"}</b><small>{companion?.base_url || backend} · {companion?.active_devices || 0} devices</small></div><label>Backend API URL<input value={backend} onChange={(e) => setBackend(e.target.value)} /></label><label>Companion token<input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} /></label><div className="button-row"><button onClick={saveConnection}><Network size={15} />{en ? "Connect" : "儲存並連線"}</button><button disabled={!companion?.lan_companion_enabled} onClick={() => void startPairing()}><FileKey size={15} />{en ? "Pair code" : "取得配對碼"}</button><button disabled={!companion?.active_devices} onClick={() => void revokeCompanions()}><X size={15} />{en ? "Revoke" : "撤銷裝置"}</button></div>{pairing && <div className="pairing-code"><span>{en ? "PAIRING CODE" : "手機配對碼"}</span><strong>{pairing.pairing_code}</strong><small>{pairing.base_url}</small><time>{pairing.expires_at}</time></div>}</section><section><h2>LLM Runtime</h2><label>Provider<select value={modelForm.provider} onChange={(e) => setModelForm({ ...modelForm, provider: e.target.value })}><option value="lm_studio">LM Studio</option><option value="ollama">Ollama</option><option value="openai_compatible">OpenAI-compatible</option><option value="sandbox_mock_model">Sandbox</option></select></label><label>Base URL<input value={modelForm.base_url} onChange={(e) => setModelForm({ ...modelForm, base_url: e.target.value })} /></label><label>Model name<input value={modelForm.model_name} onChange={(e) => setModelForm({ ...modelForm, model_name: e.target.value })} /></label><label>API Key<input type="password" value={modelForm.api_key} onChange={(e) => setModelForm({ ...modelForm, api_key: e.target.value })} /></label><div className="button-row"><button onClick={() => void saveModel()}><Save size={15} />{en ? "Save" : "儲存設定"}</button><button onClick={() => void testModel()}><Activity size={15} />{en ? "Test" : "測試模型連線"}</button></div></section></div></section>;
 
-  const aboutPage = <section className="full-panel about-panel"><div className="about-mark">SCBKR<span>2.0</span></div><h1>{manifest?.name || copy.product.name}</h1><p className="about-tagline">{manifest?.tagline || copy.product.category}</p><dl><div><dt>{en ? "Author" : "作者"}</dt><dd>{manifest?.creator?.name || "許文耀 / 沈耀888π"}</dd></div><div><dt>{en ? "Organization" : "組織"}</dt><dd>{manifest?.creator?.organization || "語意防火牆"}</dd></div><div><dt>{en ? "Contact" : "合作聯絡"}</dt><dd>{manifest?.creator?.contact_email || "ken0963521@gmail.com"}</dd></div><div><dt>{en ? "Runtime" : "運行定位"}</dt><dd>{manifest?.runtime_relationship || "Local rule-driven AI control layer"}</dd></div></dl></section>;
+  const aboutPage = <section className="full-panel about-panel"><div className="about-mark">SCBKR<span>2.3</span></div><h1>{manifest?.name || copy.product.name}</h1><p className="about-tagline">{manifest?.tagline || copy.product.category}</p><dl><div><dt>{en ? "Author" : "作者"}</dt><dd>{manifest?.creator?.name || "許文耀 / 沈耀888π"}</dd></div><div><dt>{en ? "Organization" : "組織"}</dt><dd>{manifest?.creator?.organization || "語意防火牆"}</dd></div><div><dt>{en ? "Contact" : "合作聯絡"}</dt><dd>{manifest?.creator?.contact_email || "ken0963521@gmail.com"}</dd></div><div><dt>{en ? "Runtime" : "運行定位"}</dt><dd>{manifest?.runtime_relationship || "Local rule-driven AI control layer"}</dd></div></dl></section>;
 
   const morePage = <section className="full-panel more-page"><div className="page-head"><div><span>OPERATIONS</span><h1>{en ? "More" : "更多功能"}</h1></div><Menu /></div><div className="more-grid">{nav.filter((item) => ["tools", "runtime", "model", "launch", "about"].includes(item.id)).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setView(id)}><Icon size={23} /><b>{label}</b><ChevronRight size={16} /></button>)}</div></section>;
 
-  let mobileContent = chatPanel;
-  if (view === "rules") mobileContent = rulePanel;
-  if (view === "workbench") mobileContent = workbenchPanel;
-  if (view === "tools") mobileContent = toolPanel;
+  const primaryPage = view === "rules" ? rulesPage : view === "workbench" ? workbenchPage : view === "tools" ? toolsPage : commandPage;
   const standalonePage = view === "data" ? dataPage : view === "runtime" ? runtimePage : view === "model" ? modelPage : view === "launch" ? launchPage : view === "about" ? aboutPage : view === "more" ? morePage : null;
 
-  if (pairingRequired) return <main className="pair-gate"><div className="pair-stars" /><section><div className="pair-mark"><ShieldCheck size={30} /><span>SCBKR 2.0</span></div><p>SECURE MOBILE COMPANION</p><h1>{en ? "Pair this phone" : "配對這支手機"}</h1><small>{en ? "Enter the one-time code shown on your desktop. The code expires after 10 minutes." : "輸入桌機顯示的一次性配對碼，配對碼 10 分鐘後失效。"}</small><label>{en ? "Pairing code" : "6 位數配對碼"}<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={pairCode} onChange={(event) => setPairCode(event.target.value.replace(/\D/g, "").slice(0, 6))} onKeyDown={(event) => { if (event.key === "Enter") void redeemPairingCode(); }} placeholder="000000" /></label>{pairError && <div className="pair-error">{pairError}</div>}<button disabled={pairCode.length !== 6} onClick={() => void redeemPairingCode()}><FileKey size={17} />{en ? "Pair securely" : "安全配對"}</button><button className="pair-language" onClick={switchLocale}><Languages size={15} />{en ? "繁體中文" : "English"}</button><footer>{backend}</footer></section></main>;
+  if (pairingRequired) return <main className="pair-gate"><div className="pair-stars" /><section><div className="pair-mark"><ShieldCheck size={30} /><span>SCBKR 2.3</span></div><p>SECURE MOBILE COMPANION</p><h1>{en ? "Pair this phone" : "配對這支手機"}</h1><small>{en ? "Enter the one-time code shown on your desktop. The code expires after 10 minutes." : "輸入桌機顯示的一次性配對碼，配對碼 10 分鐘後失效。"}</small><label>{en ? "Pairing code" : "6 位數配對碼"}<input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={pairCode} onChange={(event) => setPairCode(event.target.value.replace(/\D/g, "").slice(0, 6))} onKeyDown={(event) => { if (event.key === "Enter") void redeemPairingCode(); }} placeholder="000000" /></label>{pairError && <div className="pair-error">{pairError}</div>}<button disabled={pairCode.length !== 6} onClick={() => void redeemPairingCode()}><FileKey size={17} />{en ? "Pair securely" : "安全配對"}</button><button className="pair-language" onClick={switchLocale}><Languages size={15} />{en ? "繁體中文" : "English"}</button><footer>{backend}</footer></section></main>;
 
-  return <main className="app-shell v2-shell"><aside className="side-nav"><div className="brand-lockup"><Box size={24} /><div><b>SCBKR</b><span>RESPONSIBILITY OS</span></div></div>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)} title={label}><Icon size={18} /><span>{label}</span></button>)}<button onClick={switchLocale} title="Language"><Languages size={18} /><span>{locale === "en" ? "繁中" : "EN"}</span></button></aside><nav className="mobile-drawer">{mobileNav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon size={18} /><span>{label}</span></button>)}</nav><header className="top-status-bar"><button className="mobile-menu icon-button" onClick={() => setView("command")}><Menu size={18} /></button><span className={`system-signal ${health}`}><i />API {health}</span><span>STATE {ruleState.awareness_state || "EMPTY"}</span><span>MODEL {model?.enabled && model?.last_test_status === "success" ? "LINKED" : "STANDBY"}</span><span>RULES {activeRules}</span><span>TOKEN SAVE {tokenMetrics.estimated_tokens_avoided || 0}</span><span>CITATIONS {citations}</span><button className="locale-button" onClick={switchLocale}><Globe2 size={14} />{locale}</button><em>{notice}</em></header><div className="desktop-stage">{!isMobile && (standalonePage || desktopCommand)}</div><div className="mobile-stage">{isMobile && (standalonePage || mobileContent)}</div>{dataDock}</main>;
+  return <main className="app-shell v2-shell"><aside className="side-nav"><div className="brand-lockup"><Box size={24} /><div><b>SCBKR 2.3</b><span>RESPONSIBILITY OS</span></div></div>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)} title={label}><Icon size={18} /><span>{label}</span></button>)}<button onClick={switchLocale} title="Language"><Languages size={18} /><span>{locale === "en" ? "繁中" : "EN"}</span></button></aside><nav className="mobile-drawer">{mobileNav.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon size={18} /><span>{label}</span></button>)}</nav><header className="top-status-bar"><button className="mobile-menu icon-button" onClick={() => setView("command")}><Menu size={18} /></button><span className={`system-signal ${health}`}><i />API {health}</span><span>STATE {ruleState.awareness_state || "EMPTY"}</span><span>PLAN {planLevel}</span><span>MODEL {model?.enabled && model?.last_test_status === "success" ? "LINKED" : "RULE-GATE"}</span><span>RULES {activeRules}</span><span>TOKEN SAVE {tokenMetrics.estimated_tokens_avoided || 0}</span><span>CITATIONS {citations}</span><button className="locale-button" onClick={switchLocale}><Globe2 size={14} />{locale}</button><em>{notice}</em></header><div className="desktop-stage">{!isMobile && (standalonePage || primaryPage)}</div><div className="mobile-stage">{isMobile && (standalonePage || primaryPage)}</div>{dataDock}</main>;
 }

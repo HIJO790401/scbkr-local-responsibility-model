@@ -60,6 +60,7 @@ from core.scbkr.compiler import (
     task_understanding_response_format,
     validate_task_understanding_strict,
 )
+from core.scbkr.draft_object import build_rule_draft_object, build_scbkr_draft_object
 from core.storage.physical_store import commit_memory_rule, commit_storage_items, hash_payload
 from core.storage.sqlite_runtime import (
     get_task_ledger,
@@ -91,6 +92,15 @@ from core.tools.web_runtime import WebRuntime
 from core.launch.readiness import launch_readiness, load_launch_settings, public_launch_settings, save_launch_settings
 from core.storage.runtime_paths import current_data_dir
 from core.runtime_settings import load_runtime_section, save_runtime_section
+from core.rule_assist import (
+    DEFAULT_RULE_ASSIST_SETTINGS,
+    build_local_rule_assist_reply,
+    build_rule_assist_prompt,
+    evaluate_rule_assist,
+    plan_catalog,
+    public_settings as public_rule_assist_settings,
+    validate_settings_update as validate_rule_assist_settings_update,
+)
 
 LOCAL_DESKTOP_API_BASE_URL = "http://127.0.0.1:8787"
 LOCAL_DESKTOP_CORS_ORIGINS = [
@@ -113,7 +123,7 @@ SCBKR_CONFIRMATION_REQUIRED_FIELDS = {
     "R": ["expected_outputs", "acceptance_criteria", "ledger_requirements", "storage_options", "signature_status", "review_status", "replay_requirements"],
 }
 
-app = FastAPI(title="SCBKR Local Responsibility Model API", version="2.1.0")
+app = FastAPI(title="SCBKR Local Responsibility Model API", version="2.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=LOCAL_DESKTOP_CORS_ORIGINS,
@@ -126,6 +136,7 @@ _TASK_COUNTER = count(1)
 TASKS: dict[str, dict[str, Any]] = {}
 MODEL_SETTINGS: dict[str, Any] = load_runtime_section("model", DEFAULT_MODEL_SETTINGS)
 PERMISSIONS: dict[str, Any] = load_runtime_section("permissions", DEFAULT_PERMISSION_SETTINGS)
+RULE_ASSIST_SETTINGS: dict[str, Any] = load_runtime_section("rule_assist", DEFAULT_RULE_ASSIST_SETTINGS)
 COMPANION_PAIRINGS: dict[str, dict[str, Any]] = {}
 COMPANION_TOKENS: dict[str, dict[str, Any]] = {}
 
@@ -303,6 +314,34 @@ def _looks_english(text: str) -> bool:
     return letters > 0 and letters >= non_ascii
 
 
+def _response_locale(text: str, requested: str | None = None) -> str:
+    if any("\u3040" <= ch <= "\u30ff" for ch in text):
+        return "ja"
+    if any("\uac00" <= ch <= "\ud7af" for ch in text):
+        return "ko"
+    if _looks_english(text):
+        return "en"
+    if requested in {"en", "ja", "ko", "zh-TW"}:
+        return str(requested)
+    return "zh-TW"
+
+
+def _zh_tw_output_guard(text: str) -> str:
+    replacements = {
+        "什么": "什麼", "么": "麼", "这里": "這裡", "这": "這", "个": "個", "请": "請",
+        "说": "說", "为": "為", "与": "與", "应": "應", "后": "後", "关": "關",
+        "时": "時", "对": "對", "发": "發", "写": "寫", "义": "義", "态": "態",
+        "规": "規", "则": "則", "库": "庫", "认": "認", "证": "證", "权": "權",
+        "启": "啟", "帮": "幫", "问": "問", "资": "資", "测": "測", "试": "試",
+        "输": "輸", "层": "層", "责": "責", "链": "鏈", "语": "語", "构": "構",
+        "标": "標", "签": "簽", "验": "驗", "审": "審", "计": "計", "广": "廣",
+    }
+    guarded = text
+    for simplified, traditional in replacements.items():
+        guarded = guarded.replace(simplified, traditional)
+    return guarded
+
+
 def _is_identity_question(text: str) -> bool:
     return detect_product_topic(text) == "identity"
 
@@ -350,6 +389,10 @@ def route_chat_intent(message: str) -> dict[str, Any]:
     delete_terms = ("刪除", "移除", "封存", "不要再引用", "取消引用", "revoke", "archive")
     update_terms = ("幫我改", "更新", "更改", "修改那筆", "修改某", "改那條", "update")
     query_terms = ("幫我查", "幫我找", "找到哪天", "哪個計畫", "上週那個", "某個任務", "某筆資料", "資料中心")
+    citation_terms = ("引用我們之前", "引用之前", "照我之前的判準", "照之前的規則", "之前聊過的規則", "過去規則", "previousrule", "citeprevious")
+    rule_terms = ("建立規則", "生成規則", "整理成規則", "變成規則", "規則化", "以後凡是", "createrule", "newrule")
+    memory_terms = ("幫我記住", "記住", "寫入記憶", "存起來", "以後照這樣做", "之後遇到類似情況", "這個判斷要入庫", "放進四庫", "當依據")
+    audit_terms = ("幫我審計", "建立流程", "產生任務單", "生成任務單", "auditthis", "createworkflow")
     create_terms = (
         "生成確認單", "建立確認單", "生成責任鏈", "建立責任鏈", "責任鏈任務確認單", "責任鏈確認單",
         "工作台草案", "開工作台", "幫我建確認單", "幫我做責任鏈", "你能生成責任鏈確認單嗎",
@@ -360,15 +403,30 @@ def route_chat_intent(message: str) -> dict[str, Any]:
         intent = "create_data_center_delete_confirmation" if has_any(("確認單", "建立", "生成")) else "suggest_data_center_delete_confirmation"
     elif has_any(update_terms):
         intent = "create_data_center_update_confirmation" if has_any(("確認單", "建立", "生成")) else "suggest_data_center_update_confirmation"
-    elif has_any(query_terms):
+    elif has_any(query_terms) or has_any(citation_terms):
         intent = "data_center_query"
+    elif has_any(rule_terms):
+        intent = "create_new_rule_confirmation"
+    elif has_any(memory_terms) or has_any(audit_terms):
+        intent = "create_confirmation"
     elif has_any(create_terms) or ("確認單" in normalized and has_any(("生成", "建立", "建", "開"))):
         intent = "create_confirmation"
     elif has_any(suggest_terms):
         intent = "suggest_new_rule_confirmation" if "規則" in normalized else "suggest_create_confirmation"
     else:
         intent = "normal_chat"
-    return {"intent": intent, "normalized": normalized, "message": raw, "inferred_task_type": "general"}
+    requires_draft = intent in {"create_confirmation", "create_new_rule_confirmation", "create_data_center_update_confirmation", "create_data_center_delete_confirmation"}
+    object_type = "rule" if intent == "create_new_rule_confirmation" else "memory" if has_any(memory_terms) else "task"
+    return {
+        "intent": intent,
+        "normalized": normalized,
+        "message": raw,
+        "inferred_task_type": "general",
+        "conversation_state": "DRAFTING" if requires_draft else "SESSION_CONTEXT_ONLY",
+        "requires_draft": requires_draft,
+        "draft_object_type": object_type,
+        "retrieval_source": "storage_confirmed_four_stores_only" if intent == "data_center_query" else None,
+    }
 
 def _extract_json_object(text: str) -> Any:
     value = (text or "").strip()
@@ -551,13 +609,21 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
                 skipped_reason = "external_api_permission_disabled"
                 raise PermissionError(skipped_reason)
             messages = build_task_understanding_messages(raw_input, task_type, retrieval_context)
+            lightweight_local = MODEL_SETTINGS.get("mode") == "local" and any(
+                marker in str(MODEL_SETTINGS.get("model_name") or "").lower()
+                for marker in ("0.5b", "1b", "1.5b")
+            )
+            compiler_settings = {
+                **MODEL_SETTINGS,
+                "max_tokens": min(MODEL_SETTINGS["max_tokens"], 384 if lightweight_local else 1024),
+            }
             compiler_attempts = 1
             try:
-                response = _post_openai_compatible(MODEL_SETTINGS, messages, response_format=task_understanding_response_format())
+                response = _post_openai_compatible(compiler_settings, messages, response_format=task_understanding_response_format())
             except TypeError as exc:
                 if "response_format" not in str(exc):
                     raise
-                response = _post_openai_compatible(MODEL_SETTINGS, messages)
+                response = _post_openai_compatible(compiler_settings, messages)
             model_raw = parse_chat_completion_response(response)
             if isinstance(response.get("usage"), dict):
                 provider_usages.append(response["usage"])
@@ -565,24 +631,28 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
                 understanding = _validate_task_understanding(_extract_json_object(model_raw))
             except Exception as first_error:
                 compiler_errors.append(str(first_error))
-                compiler_repairs = 1
-                compiler_attempts = 2
-                repair_messages = build_repair_messages(messages, model_raw, first_error)
-                try:
-                    try:
-                        repaired_response = _post_openai_compatible(MODEL_SETTINGS, repair_messages, response_format=task_understanding_response_format())
-                    except TypeError as exc:
-                        if "response_format" not in str(exc):
-                            raise
-                        repaired_response = _post_openai_compatible(MODEL_SETTINGS, repair_messages)
-                    repaired_raw = parse_chat_completion_response(repaired_response)
-                    if isinstance(repaired_response.get("usage"), dict):
-                        provider_usages.append(repaired_response["usage"])
-                    understanding = _validate_task_understanding(_extract_json_object(repaired_raw))
-                except Exception as repair_error:
-                    compiler_errors.append(str(repair_error))
+                if lightweight_local:
                     understanding = None
-                    skipped_reason = "model_compiler_repair_failed"
+                    skipped_reason = "lightweight_model_invalid_json_used_base_logic"
+                else:
+                    compiler_repairs = 1
+                    compiler_attempts = 2
+                    repair_messages = build_repair_messages(messages, model_raw, first_error)
+                    try:
+                        try:
+                            repaired_response = _post_openai_compatible(compiler_settings, repair_messages, response_format=task_understanding_response_format())
+                        except TypeError as exc:
+                            if "response_format" not in str(exc):
+                                raise
+                            repaired_response = _post_openai_compatible(compiler_settings, repair_messages)
+                        repaired_raw = parse_chat_completion_response(repaired_response)
+                        if isinstance(repaired_response.get("usage"), dict):
+                            provider_usages.append(repaired_response["usage"])
+                        understanding = _validate_task_understanding(_extract_json_object(repaired_raw))
+                    except Exception as repair_error:
+                        compiler_errors.append(str(repair_error))
+                        understanding = None
+                        skipped_reason = "model_compiler_repair_failed"
         except PermissionError:
             understanding = None
         except Exception as exc:
@@ -592,7 +662,7 @@ def _model_authored_scbkr_draft(raw_input: str, task_type: str, retrieval_contex
         skipped_reason = "model_not_connected"
     draft = build_scbkr_from_understanding(raw_input, task_type, understanding, retrieval_context)
     draft["compiler_report"] = build_compiler_report(
-        status="model_compiled" if understanding is not None else "base_logic" if compiler_attempts == 0 else "repair_failed",
+        status="model_compiled" if understanding is not None else "base_logic" if compiler_attempts == 0 else "base_logic_after_model",
         attempts=compiler_attempts,
         repairs=compiler_repairs,
         errors=compiler_errors,
@@ -914,6 +984,7 @@ def health() -> dict[str, Any]:
         "runtime": os.environ.get("SCBKR_DESKTOP_RUNTIME", "api"),
         "lan_companion_enabled": lan_companion_enabled(),
         "rule_state": rule_state.get("awareness_state"),
+        "rule_assist_plan": RULE_ASSIST_SETTINGS.get("plan_level", "FREE"),
     }
 
 
@@ -936,6 +1007,73 @@ def product_about(topic: str = "identity", locale: str | None = None) -> dict[st
         "locale": "en" if (locale or "").lower().startswith("en") else "zh-TW",
         "reply": build_product_reply(selected_topic, locale),
         "source": "product_manifest",
+    }
+
+
+def _rule_assist_locale(locale: str | None = None) -> str:
+    requested = str(locale or RULE_ASSIST_SETTINGS.get("locale") or "zh-TW")
+    return requested if requested in {"zh-TW", "en", "ja", "ko"} else "zh-TW"
+
+
+def _current_rule_assist_status(locale: str | None = None) -> dict[str, Any]:
+    return public_rule_assist_settings(RULE_ASSIST_SETTINGS, _rule_assist_locale(locale))
+
+
+def _assess_rule_assist(
+    text: str,
+    locale: str | None = None,
+    target_mode: str = "chat",
+    four_store_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return evaluate_rule_assist(
+        text=text,
+        plan_level=str(RULE_ASSIST_SETTINGS.get("plan_level") or "FREE"),
+        locale=_rule_assist_locale(locale),
+        target_mode=target_mode,
+        four_store_context=four_store_context,
+    )
+
+
+@app.get("/api/rule-assist/status")
+def rule_assist_status(locale: str | None = None) -> dict[str, Any]:
+    return _current_rule_assist_status(locale)
+
+
+@app.post("/api/rule-assist/settings")
+def update_rule_assist_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    RULE_ASSIST_SETTINGS.update(validate_rule_assist_settings_update(RULE_ASSIST_SETTINGS, payload))
+    save_runtime_section("rule_assist", RULE_ASSIST_SETTINGS)
+    return _current_rule_assist_status(str(payload.get("locale") or RULE_ASSIST_SETTINGS.get("locale") or "zh-TW"))
+
+
+@app.post("/api/rule-assist/evaluate")
+def evaluate_rule_assist_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+    text = str(payload.get("text") or payload.get("message") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    locale = _response_locale(text, str(payload.get("locale") or ""))
+    context = _build_four_store_context(text, None) if payload.get("include_four_store") is not False else None
+    return {
+        "assessment": _assess_rule_assist(text, locale=locale, target_mode=str(payload.get("target_mode") or "chat"), four_store_context=context),
+        "settings": _current_rule_assist_status(locale),
+    }
+
+
+@app.post("/api/rule-assist/mock-chat")
+def rule_assist_mock_chat(payload: dict[str, Any]) -> dict[str, Any]:
+    text = str(payload.get("message") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="message is required")
+    locale = _response_locale(text, str(payload.get("locale") or ""))
+    context = _build_four_store_context(text, None)
+    assessment = _assess_rule_assist(text, locale=locale, target_mode="chat", four_store_context=context)
+    return {
+        "mode": "rule_assist_mock_chat",
+        "reply": build_local_rule_assist_reply(text, assessment, locale),
+        "reply_source": "deterministic_rule_assist",
+        "rule_assist": assessment,
+        "model_connected": _model_connected(),
+        "settings": _current_rule_assist_status(locale),
     }
 
 
@@ -1006,7 +1144,11 @@ def list_rules() -> dict[str, Any]:
 def create_rule_draft(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         rule = _rule_registry().create_draft(payload)
-        return {"rule": rule, "rule_state": _rule_state_manager().status(), "next_required_action": "owner_signature"}
+        assessment = _assess_rule_assist(str(payload.get("rule_text") or payload.get("rule_name") or ""), target_mode="rule")
+        draft_object = build_rule_draft_object(rule)
+        draft_object["rule_assist_state"] = assessment.get("state")
+        draft_object["rule_assist_plan"] = assessment.get("plan_level")
+        return {"rule": rule, "draft_object": draft_object, "rule_assist": assessment, "rule_state": _rule_state_manager().status(), "next_required_action": "owner_signature"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1041,7 +1183,11 @@ def create_rule_draft_from_text(payload: dict[str, Any]) -> dict[str, Any]:
     }
     try:
         rule = _rule_registry().create_draft(draft_payload)
-        return {"rule": rule, "validation": validation, "rule_state": _rule_state_manager().status(), "compiled_from": "natural_language", "model_signed": False, "next_required_action": "owner_review_and_signature"}
+        assessment = _assess_rule_assist(instruction, locale=_response_locale(instruction, None), target_mode="rule")
+        draft_object = build_rule_draft_object(rule)
+        draft_object["rule_assist_state"] = assessment.get("state")
+        draft_object["rule_assist_plan"] = assessment.get("plan_level")
+        return {"rule": rule, "draft_object": draft_object, "rule_assist": assessment, "validation": validation, "rule_state": _rule_state_manager().status(), "compiled_from": "natural_language", "model_signed": False, "next_required_action": "owner_review_and_signature"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1400,6 +1546,8 @@ def chat_intent(payload: dict[str, Any]) -> dict[str, Any]:
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
     result = route_chat_intent(message)
+    locale = _response_locale(message, str(payload.get("locale") or ""))
+    result["rule_assist"] = _assess_rule_assist(message, locale=locale, target_mode="intent")
     if result["intent"].startswith("suggest"):
         result["suggestion"] = _build_chat_suggestion(message)
         result["suggestion"].update({"title": "可生成 SCBKR 確認單", "actions": ["生成確認單", "繼續聊天", "取消"]})
@@ -1412,7 +1560,9 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     if not user_text:
         raise HTTPException(status_code=400, detail="message is required")
     product_topic = detect_product_topic(user_text)
-    locale = "en" if _looks_english(user_text) else "zh-TW"
+    locale = _response_locale(user_text, str(payload.get("locale") or ""))
+    four_store_context = _build_four_store_context(user_text, None)
+    rule_assist = _assess_rule_assist(user_text, locale=locale, target_mode="chat", four_store_context=four_store_context)
     if _is_workbench_capability_question(user_text):
         reply = SCBKR_WORKBENCH_CAPABILITY_ZH
         source = "scbkr_workbench_capability_lock"
@@ -1423,15 +1573,15 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
         reply = build_product_reply("identity", locale)
         source = "product_manifest:identity"
     elif not _model_connected():
-        reply = "模型尚未連線。請先到連線設定儲存並測試模型連線；未 connected 時不會假裝模型回覆。"
-        source = "not_connected"
+        reply = build_local_rule_assist_reply(user_text, rule_assist, locale)
+        source = "rule_assist_local_fallback"
     elif MODEL_SETTINGS.get("mode") == "sandbox":
-        reply = "Sandbox 已連線：" + user_text
+        reply = build_local_rule_assist_reply(user_text, rule_assist, locale)
         source = "sandbox"
     else:
         try:
             _assert_model_gateway_call_allowed(MODEL_SETTINGS)
-            response = _post_openai_compatible(MODEL_SETTINGS, [{"role": "system", "content": "你是 SCBKR 一般聊天入口。預設使用繁體中文，不得自行切簡體中文，不得使用中國電商語氣，不得自行編造價格、優惠、工法、傳承。不要建立 task，不要寫入 Data Center。若使用者問 SCBKR / Workbench / Data Center / 四庫 / S/C/B/K/R，必須依本產品定義回答；不得把 SCBKR 解釋成外部組織、SAP、學校、科研平台或未知縮寫。"}, {"role": "user", "content": user_text}])
+            response = _post_openai_compatible(MODEL_SETTINGS, [{"role": "system", "content": "你是 SCBKR 一般聊天入口。必須使用使用者最新訊息所使用的語言回答；若使用者明確指定另一語言，則依指定語言回答。此規則在 EMPTY、DRAFTING、User Rule 與沈耀規則狀態都成立。繁體中文使用者不得自行切成簡體中文，也不得自行編造價格、優惠、工法、傳承。不要建立 task，不要寫入 Data Center。若使用者問 SCBKR / Workbench / Data Center / 四庫 / S/C/B/K/R，必須依本產品定義回答；不得把 SCBKR 解釋成外部組織、SAP、學校、科研平台或未知縮寫。\n\n" + build_rule_assist_prompt(rule_assist, locale)}, {"role": "user", "content": user_text}])
             reply = parse_chat_completion_response(response)
             source = "model_gateway"
         except PermissionError as exc:
@@ -1440,9 +1590,24 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
             raise HTTPException(status_code=403, detail="目前未允許模型生成，聊天內容不會送出。請開啟 model_generate 權限或改用 Sandbox。") from exc
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"模型呼叫失敗：{_friendly_model_error(MODEL_SETTINGS, str(exc))}") from exc
+    if locale == "zh-TW":
+        reply = _zh_tw_output_guard(reply)
+    if rule_assist.get("four_store", {}).get("answer_priority") == "basic_chat_or_draft_only":
+        if locale == "en":
+            marker = "Four-store state: no signed citation was found, so this is basic chat or a draft only."
+            if marker.lower() not in reply.lower():
+                reply = f"{reply}\n\n{marker}"
+        else:
+            marker = "四庫狀態：目前沒有已簽名引用，所以此回覆只能當一般聊天或草案，不作為正式規則依據。"
+            if marker not in reply:
+                reply = f"{reply}\n\n{marker}"
+    if rule_assist.get("state") == "OWNER_SIGNATURE_REQUIRED" and "簽名" not in reply and locale != "en":
+        reply = f"{reply}\n\nGate：這涉及高風險工具、發布、入庫或外部連線；我只能先做草案，正式執行前必須由使用者簽名確認。"
+    elif rule_assist.get("state") == "OWNER_SIGNATURE_REQUIRED" and locale == "en" and "signature" not in reply.lower():
+        reply = f"{reply}\n\nGate: this touches high-risk tools, publishing, storage, or external connection. I can draft only; owner signature is required before execution."
     reply = _rule_state_manager().decorate_reply(reply, locale)
     suggestion = _build_chat_suggestion(user_text) if any(trigger in user_text for trigger in SUGGESTION_TRIGGERS) else None
-    return {"mode": "general_chat", "reply": reply, "reply_source": source, "rule_state": _rule_state_manager().status(locale), "model_connected": _model_connected(), "suggestion": suggestion, "task_created": False, "data_center_written": False, "auto_workbench": False}
+    return {"mode": "general_chat", "reply": reply, "reply_source": source, "rule_state": _rule_state_manager().status(locale), "rule_assist": rule_assist, "model_connected": _model_connected(), "suggestion": suggestion, "task_created": False, "data_center_written": False, "auto_workbench": False}
 
 
 @app.post("/api/chat/suggestions/accept")
@@ -1483,14 +1648,26 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
         "storage_confirmed": False,
         "physical_write_performed": False,
         "runtime": "P13-A/B/C SQLite + JSONL retrieval runtime",
+        "rule_assist_plan": RULE_ASSIST_SETTINGS.get("plan_level", "FREE"),
     }
     if payload.get("create_scbkr_draft") is True:
         task["data_center_context"] = _build_four_store_context(raw_input, task_id)
         task["data_center_context"].update({"advisory": True, "retrieval_required": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": len(task["data_center_context"].get("hits", []))})
+        task["rule_assist"] = _assess_rule_assist(raw_input, locale=_response_locale(raw_input, None), target_mode=str(payload.get("object_type") or "task"), four_store_context=task["data_center_context"])
         task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task["task_type"], task["data_center_context"])
+        task["draft_object"] = build_scbkr_draft_object(
+            user_request_raw=raw_input,
+            scbkr=task["scbkr"],
+            intent=str(payload.get("intent") or "create_confirmation"),
+            object_type=str(payload.get("object_type") or "task"),
+            draft_id=task_id,
+            evidence_context=task["data_center_context"],
+        )
         if skipped_reason:
             task["draft_model_call_skipped_reason"] = skipped_reason
         task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
+        task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
+        task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
         task["confirmed"] = False
         TASKS[task_id] = task
         save_task(task)
@@ -1512,7 +1689,12 @@ def create_scbkr(task_id: str) -> dict[str, Any]:
     status_before = task.get("status")
     task["data_center_context"] = _build_four_store_context(task["raw_input"], task_id)
     task["data_center_context"].update({"advisory": True, "retrieval_required": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": len(task["data_center_context"].get("hits", []))})
+    task["rule_assist_plan"] = RULE_ASSIST_SETTINGS.get("plan_level", "FREE")
+    task["rule_assist"] = _assess_rule_assist(task["raw_input"], locale=_response_locale(task["raw_input"], None), target_mode="task", four_store_context=task["data_center_context"])
     task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(task["raw_input"], task["task_type"], task["data_center_context"])
+    task["draft_object"] = build_scbkr_draft_object(user_request_raw=task["raw_input"], scbkr=task["scbkr"], draft_id=task_id, evidence_context=task["data_center_context"])
+    task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
+    task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
     if skipped_reason:
         task["draft_model_call_skipped_reason"] = skipped_reason
     task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
@@ -1542,7 +1724,12 @@ def regenerate_scbkr_draft(task_id: str, payload: dict[str, Any]) -> dict[str, A
     status_before = task.get("status")
     raw_input = str(payload.get("raw_input") or task.get("raw_input") or "").strip()
     task["data_center_context"] = _build_four_store_context(raw_input, task_id)
+    task["rule_assist_plan"] = RULE_ASSIST_SETTINGS.get("plan_level", "FREE")
+    task["rule_assist"] = _assess_rule_assist(raw_input, locale=_response_locale(raw_input, None), target_mode="task", four_store_context=task["data_center_context"])
     task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task.get("task_type", "general"), task["data_center_context"])
+    task["draft_object"] = build_scbkr_draft_object(user_request_raw=raw_input, scbkr=task["scbkr"], draft_id=task_id, evidence_context=task["data_center_context"])
+    task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
+    task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
     task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
     task["confirmed"] = False
     if skipped_reason:
@@ -1568,6 +1755,7 @@ def edit_scbkr(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task["confirmed"] = False
     task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
     task["scbkr"]["confirmation_status"] = "draft"
+    task["draft_object"] = build_scbkr_draft_object(user_request_raw=task.get("raw_input", ""), scbkr=task["scbkr"], draft_id=task_id, evidence_context=task.get("data_center_context"))
     _invalidate_downstream_after_scbkr_revision(task, status_before)
     save_task(task)
     save_scbkr_confirmation(task_id, task["scbkr"])
@@ -1624,6 +1812,7 @@ def apply_scbkr_patch(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     _reset_owner_signature_status(task["scbkr"])
     task["confirmed"] = False
     task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
+    task["draft_object"] = build_scbkr_draft_object(user_request_raw=task.get("raw_input", ""), scbkr=task["scbkr"], draft_id=task_id, evidence_context=task.get("data_center_context"))
     _invalidate_downstream_after_scbkr_revision(task, status_before)
     save_task(task)
     save_scbkr_confirmation(task_id, task["scbkr"])
@@ -1690,6 +1879,8 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
         task["status"] = "confirmed"
         task["scbkr"]["signature_status"] = "owner_signed"
         task["scbkr"].setdefault("R", {})["signature_status"] = "owner_signed"
+        if isinstance(task.get("draft_object"), dict):
+            task["draft_object"].update({"state": "OWNER_SIGNED", "confirmed_by": "user", "signed_at": _now()})
     save_task(task)
     save_scbkr_confirmation(task_id, task["scbkr"])
     _append_task_event(

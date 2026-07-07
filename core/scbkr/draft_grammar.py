@@ -136,7 +136,7 @@ def has_task_subject(raw_input: str) -> bool:
         return False
     if any(ch.isascii() and ch.isalpha() for ch in text):
         return True
-    return any(t in text for t in ("我要", "請", "生成", "建立", "整理", "把", "對", "文案", "判準", "規則", "確認單"))
+    return any(t in text for t in ("我要", "請", "生成", "建立", "整理", "把", "對", "文案", "判準", "規則", "確認單", "記住", "以後", "發布", "入庫", "審計", "流程"))
 
 
 def _tokens(text: str) -> set[str]:

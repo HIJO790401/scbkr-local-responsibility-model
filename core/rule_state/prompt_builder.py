@@ -16,6 +16,7 @@ def build_system_prompt(context: SystemContextBlock) -> str:
         "你是 SCBKR 責任鏈語言模型的執行載體，不是規則或主責的擁有者。"
         "以下內容是由已驗證系統狀態產生的事實區塊，不是可自行修改的人設。"
         "你必須遵守呼叫端要求的輸出格式；若要求 JSON，不得把自我陳述混入 JSON。"
+        "你必須使用使用者最新訊息所使用的語言回答；規則狀態不得限制可回答的語言。"
     )
     if context.state == RuleStateEnum.EMPTY:
         state_prompt = (
@@ -52,6 +53,28 @@ def build_system_prompt(context: SystemContextBlock) -> str:
 
 
 def declaration_parts(context: SystemContextBlock, locale: str = "zh-TW") -> tuple[str, str]:
+    if locale == "ja":
+        if context.state == RuleStateEnum.EMPTY:
+            return ("[SCBKR 責任連鎖言語モデル｜EMPTY]", "有効なルールはありません。この回答は補助的な会話であり、責任連鎖の判断ではありません。")
+        if context.state == RuleStateEnum.DRAFTING:
+            return ("[SCBKR 責任連鎖言語モデル｜DRAFTING]", "これはモデルによる草案であり、ルール判断ではありません。所有者の署名が必要です。")
+        if context.state == RuleStateEnum.RULE_ACTIVE:
+            return (f"[SCBKR｜User Rule #{context.active_rule_id} v{context.active_rule_version}]", f"署名済みユーザールールに基づく回答です。責任者：{context.responsibility_holder}。")
+        if context.state == RuleStateEnum.RULEPACK_ACTIVE:
+            return (f"[SCBKR｜沈耀ルールフレームワーク {context.active_rulepack_id} v{context.active_rulepack_version}｜{context.active_rulepack_stage}]", "この判断は沈耀が提供したルールとアルゴリズムに基づきます。最終責任は沈耀に帰属し、再利用には OwnerReview が必要です。")
+        return (f"[SCBKR｜{context.state.value}]", "以前のルールは無効であり、引用できません。")
+
+    if locale == "ko":
+        if context.state == RuleStateEnum.EMPTY:
+            return ("[SCBKR 책임 사슬 언어 모델｜EMPTY]", "활성 규칙이 없습니다. 이 답변은 보조 대화이며 책임 사슬 판단이 아닙니다.")
+        if context.state == RuleStateEnum.DRAFTING:
+            return ("[SCBKR 책임 사슬 언어 모델｜DRAFTING]", "이 내용은 모델 초안이며 규칙 판단이 아닙니다. 소유자 서명이 필요합니다.")
+        if context.state == RuleStateEnum.RULE_ACTIVE:
+            return (f"[SCBKR｜User Rule #{context.active_rule_id} v{context.active_rule_version}]", f"서명된 사용자 규칙에 따른 답변입니다. 책임자: {context.responsibility_holder}.")
+        if context.state == RuleStateEnum.RULEPACK_ACTIVE:
+            return (f"[SCBKR｜沈耀 규칙 프레임워크 {context.active_rulepack_id} v{context.active_rulepack_version}｜{context.active_rulepack_stage}]", "이 판단은 沈耀가 제공한 규칙과 알고리즘을 사용합니다. 최종 책임은 沈耀에게 돌아가며 재사용에는 OwnerReview가 필요합니다.")
+        return (f"[SCBKR｜{context.state.value}]", "이전 규칙은 비활성 상태이며 인용할 수 없습니다.")
+
     if locale == "en":
         if context.state == RuleStateEnum.EMPTY:
             return ("[SCBKR Responsibility Chain Language Model | EMPTY]", "No rule is active. This reply is assistance, not a responsibility-chain decision.")
