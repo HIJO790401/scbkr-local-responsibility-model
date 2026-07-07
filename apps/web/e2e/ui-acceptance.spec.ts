@@ -67,6 +67,13 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await expect(page.getByRole("button", { name: "查四庫", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "建規則", exact: true })).toBeVisible();
   await expect(page.getByLabel("自然語言輸入", { exact: true })).toBeVisible();
+  await page.getByLabel("自然語言輸入", { exact: true }).fill("以後發布內容都要先讓我簽名，幫我建立規則。");
+  await page.getByLabel("自然語言輸入", { exact: true }).press("Enter");
+  await expect(page.getByText("第0原理建議閘").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "草擬確認單", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "保持一般聊天", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "補角色與邊界", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "建立責任鏈確認單" })).toHaveCount(0);
   if (testInfo.project.name === "desktop-chromium") {
     await page.locator(".tool-plus").click();
     await expect(page.getByRole("heading", { name: "模型可碰的工具" })).toBeVisible();

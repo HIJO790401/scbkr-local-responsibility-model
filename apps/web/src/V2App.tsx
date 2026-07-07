@@ -29,10 +29,11 @@ type Rule = Record<string, any>;
 type Tool = Record<string, any>;
 type WorkflowCard = {
   id: string;
-  kind: "suggestion" | "task" | "rule";
+  kind: "advisory" | "suggestion" | "task" | "rule";
   title: string;
   summary: string;
   state: string;
+  details?: string[];
   taskId?: string;
   ruleId?: string;
   objectType?: string;
@@ -135,7 +136,7 @@ function RuleFlowSurface({
 }) {
   const steps = [
     { icon: MessageSquare, label: en ? "Intake" : "一句話入口", value: en ? "Ready" : "就緒", state: "active" },
-    { icon: Search, label: en ? "Route" : "自動分流", value: en ? "Chat / stores / rule" : "對話／四庫／規則", state: "active" },
+    { icon: Search, label: en ? "Assist" : "規則輔助", value: en ? "Chat first" : "聊天優先", state: "active" },
     { icon: FileKey, label: en ? "Draft" : "待簽名草案", value: readableStatus(status, en), state: status === "draft" ? "wait" : "active" },
     { icon: Database, label: en ? "Citations" : "四庫引用", value: String(citations), state: citations > 0 ? "active" : "wait" },
   ];
@@ -217,7 +218,7 @@ export default function V2App() {
   const [permissions, setPermissions] = useState<Record<string, any>>({});
   const [notice, setNotice] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: en ? "SCBKR local runtime ready." : "SCBKR 本機責任核心已就緒。" },
+    { role: "assistant", content: en ? "You can chat normally. When something should become a reusable rule, I will show the Zeroth Principle Advisory Gate first." : "你可以先像一般模型一樣聊天。只有內容適合變成可重用規則時，我才會先顯示第0原理建議閘。" },
   ]);
   const messageListRef = useRef<HTMLDivElement>(null);
   const [chatInput, setChatInput] = useState("");
@@ -379,6 +380,36 @@ export default function V2App() {
     };
   }
 
+  function zerothGateCard(routed: Record<string, any>, fallback: string): WorkflowCard {
+    const suggestion = routed.suggestion || {};
+    const original = suggestion.user_original || suggestion.suggested_instruction || fallback;
+    const objectType = routed.draft_object_type || suggestion.suggested_type || (routed.intent === "create_new_rule_confirmation" ? "rule" : "task");
+    return {
+      id: `zeroth-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      kind: "advisory",
+      title: en ? "Zeroth Principle Advisory Gate" : "第0原理建議閘",
+      summary: en
+        ? "Reusable rule intent detected. This stays as normal chat until you choose to draft a confirmation sheet."
+        : "偵測到可重用規則需求；在你按下草擬之前，這仍然只是一般聊天，不會自動建規則或入庫。",
+      state: "π | OWNER_REVIEW",
+      details: en
+        ? ["Gap: responsibility boundary, invalidation conditions, replay requirements.", "Next: enter the FREE draft confirmation layer."]
+        : ["缺口：責任邊界、失效條件、回放條件。", "下一步：進入 FREE 草稿確認單。"],
+      objectType,
+      suggestedStores: [objectType === "rule" ? "logic" : "memory"],
+      suggestion: {
+        ...suggestion,
+        user_original: original,
+        suggested_instruction: suggestion.suggested_instruction || original,
+        suggested_type: objectType,
+        suggested_reason: suggestion.suggested_reason || "第0原理偵測到可重用需求",
+        suggested_write_direction: objectType === "rule" ? "logic" : "memory",
+        route_intent: routed.intent,
+        advisory_gate: true,
+      },
+    };
+  }
+
   function dismissCard(cardId: string) {
     setMessages((current) => current.map((item) => item.card?.id === cardId ? { ...item, card: { ...item.card, state: "DISMISSED" } } : item));
   }
@@ -400,6 +431,32 @@ export default function V2App() {
     if (created) {
       setMessages((current) => current.map((item) => item.card?.id === card.id ? { ...item, card: taskCard(created) } : item));
     }
+  }
+
+  async function draftFromAdvisoryGate(card: WorkflowCard) {
+    const instruction = String(card.suggestion?.suggested_instruction || card.suggestion?.user_original || "").trim();
+    if (!instruction) return;
+    const routeIntent = String(card.suggestion?.route_intent || "create_confirmation");
+    const isRule = routeIntent === "create_new_rule_confirmation" || card.objectType === "rule";
+    const drafted = isRule ? await createNaturalRule(instruction) : null;
+    const created = await createTask(instruction, false, isRule ? "create_new_rule_confirmation" : "create_confirmation", isRule ? "rule" : (card.objectType || "task"));
+    if (drafted || created) {
+      setMessages((current) => current.map((item) => item.card?.id === card.id ? {
+        ...item,
+        content: assistantEnvelope(en
+          ? "FREE draft confirmation sheet created. It remains unsigned, draft-only, and waits for your review."
+          : "FREE 草稿層確認單已建立。它仍是未簽名、僅草稿，等你在工作台檢查。",
+        drafted?.rule_state || ruleState),
+        card: created ? taskCard(created) : drafted ? ruleCard(drafted) : undefined,
+      } : item));
+    }
+  }
+
+  function prepareBoundaryFollowup(card: WorkflowCard) {
+    const instruction = String(card.suggestion?.suggested_instruction || card.suggestion?.user_original || "").trim();
+    setChatInput(en
+      ? `For this reusable rule, help me define the role, responsibility boundary, invalidation conditions, and replay requirements:\n${instruction}`
+      : `針對這段可重用規則，先幫我補角色、責任邊界、失效條件與回放條件：\n${instruction}`);
   }
 
   async function sendChat() {
@@ -437,20 +494,15 @@ export default function V2App() {
     }
     const routed = await run(en ? "Route request" : "判斷任務", () => api<any>("/api/chat/intent", { method: "POST", body: JSON.stringify({ message: text, locale: replyLocale }) }));
     if (!routed) return;
-    if (routed.intent === "create_new_rule_confirmation") {
-      const drafted = await createNaturalRule(text);
-      const created = await createTask(text, false, routed.intent, "rule");
-      if (drafted || created) setMessages((current) => [...current, {
+    if (routed.intent === "create_new_rule_confirmation" || routed.intent === "create_confirmation") {
+      setMessages((current) => [...current, {
         role: "assistant",
-        content: assistantEnvelope(en ? "I created an unsigned rule draft and SCBKR review sheet. You remain the only signer and activator." : "我已建立未簽名規則草案與 SCBKR 確認單。只有你能簽名與啟用。", drafted?.rule_state || ruleState),
-        card: created ? taskCard(created) : drafted ? ruleCard(drafted) : undefined,
+        content: assistantEnvelope(en
+          ? "I can turn this into a confirmation draft, but I will not leave normal chat or create a rule until you choose the next step."
+          : "我可以把這段轉成確認單草稿，但現在先不跳離一般聊天，也不自動建立規則；你選下一步。",
+        routed.rule_state || ruleState),
+        card: zerothGateCard(routed, text),
       }]);
-      return;
-    }
-    if (routed.intent === "create_confirmation") {
-      setTaskInput(text);
-      const created = await createTask(text, false, routed.intent, routed.draft_object_type || "task");
-      if (created) setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "Draft compiled. It is waiting for your review." : "草案已編譯，正在等待你檢查。"), card: taskCard(created) }]);
       return;
     }
     if (routed.intent === "data_center_query") {
@@ -681,7 +733,8 @@ export default function V2App() {
 
   function renderWorkflowCard(card: WorkflowCard) {
     if (card.state === "DISMISSED") return null;
-    return <section className={`workflow-card ${card.kind}`} aria-label={en ? "Workflow draft" : "待辦草案"}><header><span>{card.kind === "rule" ? (en ? "RULE DRAFT" : "規則草案") : card.kind === "task" ? (en ? "SCBKR DRAFT" : "責任鏈草案") : (en ? "DRAFT SUGGESTION" : "草案建議")}</span><b>{card.state}</b></header><h3>{card.title}</h3><p>{card.summary}</p>{Boolean(card.suggestedStores?.length) && <div className="store-chips">{card.suggestedStores?.map((store) => <span key={store}>{store}</span>)}</div>}<div className="workflow-actions">{card.kind === "suggestion" && <button onClick={() => void acceptSuggestion(card)}><Sparkles size={14} />{en ? "Create draft" : "建立草案"}</button>}{card.kind === "task" && card.taskId && <button onClick={() => void openTask(card.taskId!)}><SlidersHorizontal size={14} />{en ? "Open Workbench" : "前往工作台"}</button>}{card.kind === "rule" && card.ruleId && <button onClick={() => { setSelectedRule(card.ruleId!); setView("rules"); }}><FileKey size={14} />{en ? "Open Rule Center" : "前往規則中心"}</button>}<button className="quiet" onClick={() => dismissCard(card.id)}><X size={14} />{en ? "Dismiss" : "留在本次對話"}</button></div><small>{en ? "Not signed or stored." : "尚未簽名、尚未入庫。"}</small></section>;
+    const label = card.kind === "advisory" ? (en ? "ZEROTH GATE" : "第0原理建議閘") : card.kind === "rule" ? (en ? "RULE DRAFT" : "規則草案") : card.kind === "task" ? (en ? "SCBKR DRAFT" : "責任鏈草案") : (en ? "DRAFT SUGGESTION" : "草案建議");
+    return <section className={`workflow-card ${card.kind}`} aria-label={en ? "Workflow draft" : "待辦草案"}><header><span>{label}</span><b>{card.state}</b></header><h3>{card.title}</h3><p>{card.summary}</p>{Boolean(card.details?.length) && <ul className="workflow-details">{card.details?.map((item) => <li key={item}>{item}</li>)}</ul>}{Boolean(card.suggestedStores?.length) && <div className="store-chips">{card.suggestedStores?.map((store) => <span key={store}>{store}</span>)}</div>}<div className="workflow-actions">{card.kind === "advisory" && <><button onClick={() => void draftFromAdvisoryGate(card)}><Sparkles size={14} />{en ? "Draft confirmation" : "草擬確認單"}</button><button className="secondary" onClick={() => prepareBoundaryFollowup(card)}><ShieldCheck size={14} />{en ? "Add role and boundary" : "補角色與邊界"}</button></>}{card.kind === "suggestion" && <button onClick={() => void acceptSuggestion(card)}><Sparkles size={14} />{en ? "Create draft" : "建立草案"}</button>}{card.kind === "task" && card.taskId && <button onClick={() => void openTask(card.taskId!)}><SlidersHorizontal size={14} />{en ? "Open Workbench" : "前往工作台"}</button>}{card.kind === "rule" && card.ruleId && <button onClick={() => { setSelectedRule(card.ruleId!); setView("rules"); }}><FileKey size={14} />{en ? "Open Rule Center" : "前往規則中心"}</button>}<button className="quiet" onClick={() => dismissCard(card.id)}><X size={14} />{card.kind === "advisory" ? (en ? "Keep chatting" : "保持一般聊天") : (en ? "Dismiss" : "留在本次對話")}</button></div><small>{en ? "Not signed or stored. The model may draft; only the user can sign." : "尚未簽名、尚未入庫。模型可以草擬，只有使用者能簽名。"}</small></section>;
   }
 
   const nav = [
@@ -826,9 +879,9 @@ export default function V2App() {
       <header className="command-header"><div><span>SCBKR 2.3</span><h1>{en ? "One-line Workbench" : "一句話工作台"}</h1></div><div className="stage-chip"><Activity size={15} />{readableStatus(status, en)}</div></header>
       <div className={`rule-awareness-strip ${String(ruleState.awareness_state || "EMPTY").toLowerCase()}`}><span>{ruleState.awareness_state || "EMPTY"}</span><b>{ruleState.active_rulepack_id ? `${ruleState.active_rulepack_id} v${ruleState.active_rulepack_version}` : ruleState.active_rule_id ? `${ruleState.active_rule_id} v${ruleState.active_rule_version}` : (en ? "No active rule" : "尚無生效規則")}</b><em>{ruleState.responsibility_holder ? `${en ? "RESPONSIBILITY" : "責任歸屬"} · ${ruleState.responsibility_holder}` : (en ? "ASSISTANCE ONLY" : "僅供輔助對話")}</em></div>
       <RuleFlowSurface en={en} status={status} activeRules={activeRules} citations={citations} tokensAvoided={Number(tokenMetrics.estimated_tokens_avoided || task?.scbkr?.token_metrics?.estimated_tokens_avoided || 0)} planLevel={planLevel} />
-      <div className="command-modes" role="tablist" aria-label={en ? "Quick route" : "自然語言快速路由"}><button className={commandMode === "chat" ? "active" : ""} onClick={() => setCommandMode("chat")}><MessageSquare size={15} />{en ? "Auto route" : "自動分流"}</button><button className={commandMode === "web" ? "active" : ""} onClick={() => setCommandMode("web")}><Globe2 size={15} />{en ? "Verify web" : "上網查證"}</button><button className={commandMode === "search" ? "active" : ""} onClick={() => setCommandMode("search")}><Search size={15} />{en ? "Read stores" : "查四庫"}</button><button className={commandMode === "rule" ? "active" : ""} onClick={() => setCommandMode("rule")}><FileKey size={15} />{en ? "New rule" : "建規則"}</button></div>
+      <div className="command-modes" role="tablist" aria-label={en ? "Quick route" : "自然語言快速路由"}><button className={commandMode === "chat" ? "active" : ""} onClick={() => setCommandMode("chat")}><MessageSquare size={15} />{en ? "Chat" : "一般聊天"}</button><button className={commandMode === "web" ? "active" : ""} onClick={() => setCommandMode("web")}><Globe2 size={15} />{en ? "Verify web" : "上網查證"}</button><button className={commandMode === "search" ? "active" : ""} onClick={() => setCommandMode("search")}><Search size={15} />{en ? "Read stores" : "查四庫"}</button><button className={commandMode === "rule" ? "active" : ""} onClick={() => setCommandMode("rule")}><FileKey size={15} />{en ? "New rule" : "建規則"}</button></div>
       <div className="message-list" ref={messageListRef}>{messages.map((item, index) => <div key={`${item.role}-${index}`} className={`message ${item.role} ${item.card ? "has-card" : ""}`}><span>{item.role === "assistant" ? "SCBKR" : en ? "YOU" : "你"}</span><div>{item.content}</div>{item.card && renderWorkflowCard(item.card)}</div>)}</div>
-      <div className="chat-input"><label className="natural-input-label"><span>{commandMode === "chat" ? (en ? "One-line input" : "一句話輸入") : commandMode === "web" ? (en ? "Verified web query" : "上網查證") : commandMode === "search" ? (en ? "Signed-store question" : "四庫問題") : (en ? "Rule sentence" : "規則句")}</span><textarea aria-label={en ? "Natural language input" : "自然語言輸入"} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={commandMode === "chat" ? (en ? "Create a rule: require my signature before publishing." : "例如：幫我建立規則：發布前都要我簽名。") : commandMode === "web" ? (en ? "Verify current information about..." : "例如：查目前某項服務是否可用。") : commandMode === "search" ? (en ? "What do my signed rules say about publishing?" : "例如：四庫裡我對發布有什麼規則？") : (en ? "Before publishing, require my signature." : "例如：凡是要發布內容，都必須先讓我簽名。")} /></label><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Run" : "執行"}>{commandMode === "web" ? <Globe2 size={20} /> : commandMode === "search" ? <Search size={20} /> : commandMode === "rule" ? <FileKey size={20} /> : <Send size={20} />}</button></div>
+      <div className="chat-input"><label className="natural-input-label"><span>{commandMode === "chat" ? (en ? "Message" : "訊息") : commandMode === "web" ? (en ? "Verified web query" : "上網查證") : commandMode === "search" ? (en ? "Signed-store question" : "四庫問題") : (en ? "Rule sentence" : "規則句")}</span><textarea aria-label={en ? "Natural language input" : "自然語言輸入"} value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChat(); } }} placeholder={commandMode === "chat" ? (en ? "Ask anything, draft text, summarize a file, or tell me what should become a reusable rule..." : "像一般模型一樣輸入：聊天、寫文案、摘要文件；若要變成規則，我會先問你。") : commandMode === "web" ? (en ? "Verify current information about..." : "例如：查目前某項服務是否可用。") : commandMode === "search" ? (en ? "What do my signed rules say about publishing?" : "例如：四庫裡我對發布有什麼規則？") : (en ? "Before publishing, require my signature." : "例如：凡是要發布內容，都必須先讓我簽名。")} /></label><button className="icon-button send-button" onClick={() => void sendChat()} title={en ? "Run" : "執行"}>{commandMode === "web" ? <Globe2 size={20} /> : commandMode === "search" ? <Search size={20} /> : commandMode === "rule" ? <FileKey size={20} /> : <Send size={20} />}</button></div>
     </section>
   );
 

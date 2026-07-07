@@ -1,6 +1,7 @@
 {
   "name": "scbkr-local-responsibility-web",
   "version": "2.3.0",
+  "description": "SCBKR chat-first web UI with responsibility-chain rule drafts",
   "private": true,
   "type": "module",
   "scripts": {

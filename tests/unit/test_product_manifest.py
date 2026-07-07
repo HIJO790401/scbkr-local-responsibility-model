@@ -16,7 +16,7 @@ def test_product_manifest_is_bilingual_and_has_formal_four_stores():
 def test_localized_manifest_resolves_display_text_without_changing_internal_keys():
     manifest = localized_product_manifest("en-US")
     assert manifest["locale"] == "en"
-    assert manifest["name"] == "SCBKR Local Responsibility Chain System"
+    assert manifest["name"] == "SCBKR Chat and Responsibility Chain System"
     assert manifest["stores"] == ["vector", "corpus", "logic", "memory"]
 
 

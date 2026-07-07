@@ -148,10 +148,44 @@ small { color: #667d9b; }
 .workflow-card h3 { margin: 9px 0 5px; font-size: .92rem; }
 .workflow-card p { margin-bottom: 8px; color: #405f7f; font-size: .72rem; line-height: 1.5; }
 .workflow-card > small { display: block; margin-top: 8px; }
+.workflow-card.advisory {
+  border-color: #8fbaff;
+  background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%);
+  box-shadow: 0 12px 28px rgba(32, 103, 198, .14);
+}
+.workflow-card.advisory header span { color: #145fd0; }
+.workflow-card.advisory header b {
+  border: 1px solid #d6c8ff;
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #5d32bd;
+  background: #f5f1ff;
+}
+.workflow-details {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.workflow-details li {
+  border: 1px solid #d8e6f5;
+  border-radius: 5px;
+  padding: 7px 8px;
+  color: #315575;
+  background: #fbfdff;
+  font-size: .68rem;
+  line-height: 1.45;
+}
 .store-chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
 .store-chips span { border: 1px solid #a9c5df; border-radius: 3px; padding: 3px 6px; color: #345b80; background: #edf6ff; font-size: .6rem; }
 .workflow-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .workflow-actions button { min-height: 32px; padding: 6px 8px; font-size: .66rem; }
+.workflow-actions .secondary {
+  color: #185785;
+  border-color: #b9d5ef;
+  background: #f6fbff;
+}
 .workflow-actions .quiet { color: #617994; background: transparent; }
 .chat-input { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 7px; padding: 10px 13px; border-top: 1px solid rgba(143,190,230,.36); background: rgba(7, 25, 43, .88); backdrop-filter: blur(12px); }
 .natural-input-label { margin: 0; gap: 4px; color: #9dc4e4; font-size: .68rem; }

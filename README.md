@@ -7,41 +7,56 @@
 
 The authoritative product identity is defined in [`config/product_manifest.json`](config/product_manifest.json), while [`docs/SCBKR_MASTER_PLAN_FINAL.md`](docs/SCBKR_MASTER_PLAN_FINAL.md) is the master engineering and 2.0 roadmap contract. SCBKR is the control and compilation layer; the user-connected LM Studio, Ollama, or OpenAI-compatible model is a replaceable runtime.
 
-本地 AI 責任鏈工作台｜規則驅動 Runtime｜工具 Gate｜四庫引用｜手機配對
-Local AI responsibility-chain workbench | Rule-driven runtime | Tool gates | Four-store evidence | Mobile pairing
+一般 AI 聊天產品｜SCBKR 規則責任鏈｜本地優先四庫｜簽名與回放治理｜手機配對
+General AI chat product | SCBKR rule responsibility chain | Local-first four stores | Signature and replay governance | Mobile pairing
 
-SCBKR 不是一般聊天機器人。SCBKR 是一套本地 AI 責任鏈工作台。模型可以協助，但不能越權。使用者簽名後，責任鏈才成立。驗收後才可入庫。二次確認後才可寫入四庫。
+SCBKR 不是普通 chatbot，也不是純規則引擎。SCBKR 是「一般 AI 聊天產品 + 使用者規則責任鏈能力」。首頁是一般聊天；規則能力從聊天自然觸發，經第0原理建議閘、FREE 確認單草稿、Workbench 編輯、使用者簽名或雙簽模式後，才會進入規則中心與資料中心。
 
-SCBKR is not a general chatbot. It is a local AI responsibility-chain workbench. The model can assist, but it cannot overreach. Owner signature makes the responsibility chain valid. User review is required before storage, and storage requires second confirmation.
+SCBKR is not a generic chatbot and not a pure rule engine. It is a general AI chat product with user-defined responsibility-chain rules. The home surface is chat; reusable rules are proposed from conversation through the Zeroth Principle Advisory Gate, FREE confirmation drafts, Workbench review, user signature or dual-signature rule mode, and then Rule Center / Data Center governance.
 
-中文一句話：SCBKR 是一套本地 AI 責任鏈工作台，讓模型在生成、記憶、入庫與未來引用之前，必須先經過使用者確認單、簽名、驗收與二次確認。
+中文一句話：SCBKR 先讓使用者像一般大模型一樣聊天，再把「可重用、可引用、要承擔」的內容升級成 S/C/B/K/R 規則確認單。
 
-English one-line: SCBKR is a local AI responsibility-chain workbench that requires owner confirmation, signature, user review, and second confirmation before model output can become stored evidence or reusable memory.
+English one-line: SCBKR starts as normal AI chat, then upgrades reusable, citable, responsibility-bearing content into S/C/B/K/R confirmation sheets.
 
 ## 1. 快速理解｜Quick Overview
 
-- 中文：SCBKR 把「任務、流程、邊界、依據、驗收」整理成 S/C/B/K/R 確認單，要求使用者簽名後才允許模型生成。
-- English: SCBKR turns task, causal flow, boundaries, knowledge basis, and review criteria into an S/C/B/K/R confirmation sheet that must be owner-signed before generation.
-- 中文：它不是無條件自動代理，也不是雲端帳號服務；2.0 是規則驅動的本機 AI 控制層。
-- English: It is not an unrestricted autonomous agent or cloud account service; 2.0 is a rule-driven local AI control layer.
+- 中文：預設首頁是一般聊天；聊天可寫文案、摘要文件、讀四庫、查資料，也可以在使用者要求時升級成規則草稿。
+- English: The default home surface is normal chat for writing, summarizing, reading stores, searching, and optionally promoting content into rule drafts.
+- 中文：第0原理建議閘只在「變成規則、建立確認單、以後照這個做、可重複使用」等意圖出現時觸發；觸發後仍不自動建規則、不自動入庫。
+- English: The Zeroth Principle Advisory Gate appears only when reusable-rule intent is detected; it does not auto-create rules or store data.
+- 中文：模型可以聊天、摘要、草擬、建議與協作補欄位，但不能簽名、驗收、二次確認入庫、自動啟用規則或繞過 OwnerReview。
+- English: The model may chat, summarize, draft, suggest, and help fill fields, but it cannot sign, review, second-confirm storage, activate rules, or bypass OwnerReview.
 
 ## 2. 目前版本｜Current Version
 
-- 中文：目前版本為 `2.1.0`，階段為 `2.1-launch-candidate`。
-- English: Current version is `2.1.0`, stage `2.1-launch-candidate`.
-- 中文：這是可在本機運行的 2.0 公開版；安裝檔程式碼簽章、自動更新與商店封裝仍未提供，也不內建模型或 API key。
-- English: This is the locally runnable 2.0 public release. Installer code signing, auto-update, and store packaging are not yet provided; no model or API key is bundled.
+- 中文：產品版本為 `SCBKR 2.3`，階段為 `2.3-chat-first-ui-alignment`。
+- English: Product version is `SCBKR 2.3`, stage `2.3-chat-first-ui-alignment`.
+- 中文：Web 與 FastAPI Runtime 版本為 `2.3.0`；Desktop / Tauri metadata 仍保留既有 RC 線，避免混淆桌面殼版本與產品能力版本。
+- English: The Web and FastAPI runtime versions are `2.3.0`; Desktop / Tauri metadata remains on its existing RC line so shell metadata and product capability versions stay distinct.
+- 中文：安裝檔程式碼簽章、自動更新與商店封裝仍未提供，也不內建模型或 API key。
+- English: Installer code signing, auto-update, and store packaging are not yet provided; no model or API key is bundled.
 
-## 3. 2.0 目前能做什麼｜What 2.0 Can Do
+## 3. Chat-first Flow｜聊天優先流程
+
+- 中文：一般聊天 → 第0原理建議閘 → FREE 確認單草稿 → Workbench 協作編輯 → 使用者簽名 / 雙簽模式 → 規則中心 → 資料中心。
+- English: Normal chat → Zeroth Principle Advisory Gate → FREE confirmation draft → Workbench collaboration → user signature / dual-signature mode → Rule Center → Data Center.
+- 中文：FREE 可以生成確認單草稿、S/C/B/K/R 初稿、送到 Workbench、模型協作補草稿、使用者自簽、入庫為使用者自己的規則。
+- English: FREE can create confirmation drafts, S/C/B/K/R initial drafts, send them to Workbench, let the model assist with draft fields, allow user self-signature, and store user-owned rules.
+- 中文：NT$690 是責任鏈結構輔助層，不是確認單生成門檻。
+- English: NT$690 is the responsibility-structure assistance layer, not a paywall for creating confirmation drafts.
+- 中文：NT$3,300 是規則書閉環層，包含沈耀強制簽名 + 使用者簽名、成立 / 失效條件、風險、修復、回放、RulePack 與 OwnerReview。
+- English: NT$3,300 is the rulebook closure layer with ShenYao creator signature + user signature, formation / invalidation conditions, risks, repair paths, replay requirements, RulePacks, and OwnerReview.
+
+## 4. 2.3 目前能做什麼｜What 2.3 Can Do
 
 - 中文：建立 S/C/B/K/R 任務確認單、使用者簽名、生成、驗收、入庫請求、二次確認、Data Center 檢視與四庫引用。
 - English: It supports S/C/B/K/R task confirmation, owner signature, generation, review, storage request, second confirmation, Data Center viewing, and four-store evidence reuse.
 - 中文：模型只能提出草案或建議，不能自行簽名、驗收、入庫或修改已寫入資料。
 - English: The model may draft or suggest, but it cannot sign, review, store, or rewrite committed evidence by itself.
-- 中文：具名、版本化、簽名的規則可控制模型與工具；向量檢索只能找候選，不能取代正式引用。
-- English: Attributed, versioned, signed rules control models and tools; vector retrieval may find candidates but cannot replace authoritative citations.
+- 中文：具名、版本化、簽名、Active 的規則可控制模型與工具；向量檢索只能找候選，不能取代正式 K 依據。
+- English: Attributed, versioned, signed, Active rules control models and tools; vector retrieval may find candidates but cannot replace authoritative K evidence.
 
-## 4. Desktop Mode 與 LAN Companion Mode｜Desktop Mode and LAN Companion Mode
+## 5. Desktop Mode 與 LAN Companion Mode｜Desktop Mode and LAN Companion Mode
 
 ### Desktop Mode｜預設模式
 
@@ -59,7 +74,7 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 - 中文：LAN Companion Mode 不會預設開啟；配對碼 10 分鐘失效且只能使用一次，桌機可撤銷已配對裝置。
 - English: LAN Companion Mode is never enabled by default. Pairing codes expire after ten minutes, are one-time use, and paired devices can be revoked from the desktop.
 
-## 5. 完整責任鏈流程｜Responsibility Chain Flow
+## 6. 完整責任鏈流程｜Responsibility Chain Flow
 
 ![責任鏈流程](docs/images/responsibility-loop.png)
 ![Responsibility chain flow](docs/images/responsibility-loop-en.png)
@@ -67,7 +82,7 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 - 中文：輸入任務 → 產生確認單 → 使用者簽名 → 模型生成 → 使用者驗收 → 入庫建議 → 二次確認 → 寫入四庫 / Data Center。
 - English: Input task → build confirmation sheet → owner signature → model generation → user review → storage suggestion → second confirmation → write to four stores / Data Center.
 
-## 6. Workbench 與使用者簽名｜Workbench and Owner Signature
+## 7. Workbench 與使用者簽名｜Workbench and Owner Signature
 
 ![Workbench 使用者簽名](docs/images/workbench-owner-signature.png)
 ![Workbench owner signature](docs/images/workbench-owner-signature-en.png)
@@ -77,7 +92,7 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 - 中文：模型不能簽名，`confirmed_by` 必須是 `user`，signature 不可空。
 - English: The model cannot sign; `confirmed_by` must be `user`, and the signature cannot be empty.
 
-## 7. Data Center 與四庫｜Data Center and Four Stores
+## 8. Data Center 與四庫｜Data Center and Four Stores
 
 ![四庫引用](docs/images/four-store-evidence.png)
 ![Four-store evidence](docs/images/four-store-evidence-en.png)
@@ -89,7 +104,7 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 - 中文：Data Center 更新 / 刪除必須有使用者簽名；revoked / archived / superseded 資料不得作為可用引用。
 - English: Data Center update / delete requires user signature; revoked / archived / superseded evidence cannot be reused as available evidence.
 
-## 8. 本地模型支援｜Local Model Support
+## 9. 本地模型支援｜Local Model Support
 
 ![本地模型架構](docs/images/architecture.png)
 ![Local model architecture](docs/images/local-model-architecture-en.png)
@@ -99,7 +114,7 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 - 中文：外部 API 權限預設關閉；非 loopback 模型網址需要使用者開啟 external API guard。
 - English: External API permission is off by default; non-loopback model URLs require the user to enable the external API guard.
 
-## 9. Windows 安裝與啟動｜Windows Setup
+## 10. Windows 安裝與啟動｜Windows Setup
 
 - 中文：Desktop RC 預設啟動本機 sidecar：`http://127.0.0.1:8787`。
 - English: The Desktop RC starts the local sidecar by default at `http://127.0.0.1:8787`.
@@ -108,7 +123,7 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 - 中文：一般使用者不需要 Python、Node、npm、uvicorn、PowerShell、LM Studio、Ollama 或 API key 即可測試 sandbox 流程。
 - English: Normal users do not need Python, Node, npm, uvicorn, PowerShell, LM Studio, Ollama, or an API key to test the sandbox flow.
 
-## 10. 手機遙控｜Mobile Companion
+## 11. 手機遙控｜Mobile Companion
 
 ![Mobile Companion](docs/images/mobile-companion-en.png)
 
@@ -127,19 +142,19 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 - 中文：啟動方式：在 Windows 上執行 `powershell -ExecutionPolicy Bypass -File scripts/start_lan_companion_windows.ps1`，依畫面顯示的 URL 在手機瀏覽器開啟。
 - English: Start it on Windows with `powershell -ExecutionPolicy Bypass -File scripts/start_lan_companion_windows.ps1`, then open the displayed URL in the phone browser.
 
-## 11. 隱私與安全邊界｜Privacy and Safety Boundary
+## 12. 隱私與安全邊界｜Privacy and Safety Boundary
 
 - 中文：預設 Desktop Mode 僅本機可連，LAN Companion Mode 只適合可信任 Wi‑Fi。
 - English: Default Desktop Mode is local-only; LAN Companion Mode should only be used on trusted Wi‑Fi.
 - 中文：不要公開手機配對碼或已配對憑證；憑證不寫入 Git，也不固定寫死。
 - English: Do not publish pairing codes or paired-device credentials; credentials are never committed to Git or hard-coded.
 
-## 12. 與 Chatbot / Agent / RAG 的差異｜Difference from Chatbot / Agent / RAG
+## 13. 與 Chatbot / Agent / RAG 的差異｜Difference from Chatbot / Agent / RAG
 
 - 中文：Chatbot 重點是對話；Agent 重點是自動行動；RAG 重點是檢索增強。SCBKR 重點是責任鏈、簽名、驗收、入庫與未來引用邊界。
 - English: Chatbots focus on conversation; agents focus on autonomous action; RAG focuses on retrieval augmentation. SCBKR focuses on responsibility chain, signature, review, storage, and future reuse boundaries.
 
-## 13. 2.1 規則狀態與上線層｜2.1 Rule State and Launch Layer
+## 14. 2.1 規則狀態與上線層｜2.1 Rule State and Launch Layer
 
 ![2.0 Roadmap](docs/images/roadmap-2.0-en.png)
 
@@ -152,7 +167,7 @@ English one-line: SCBKR is a local AI responsibility-chain workbench that requir
 - 中文：訂閱提供 Runtime 執行資格，不散布私有規則原始碼。使用者仍可匯入自己擁有的規則；未啟用沈耀狀態時會明確顯示為獨立規則狀態。
 - English: Subscriptions grant runtime execution entitlement without distributing private rule source. Users may still import rules they own; without ShenYao state, the product clearly reports an independent rule state.
 
-## 14. 開發者快速啟動｜Developer Quick Start
+## 15. 開發者快速啟動｜Developer Quick Start
 
 ```bash
 python -m pytest -q
@@ -171,21 +186,21 @@ npm --prefix apps/desktop run check:release
 - 中文：API base 會依 runtime matrix 判斷：LAN Companion 頁面使用目前頁面 origin；localhost dev / preview 頁面仍連回 FastAPI sidecar `http://127.0.0.1:8787`；`VITE_SCBKR_API_URL` 永遠最高優先。
 - English: The API base follows a runtime matrix: LAN Companion pages use the current page origin, localhost dev / preview pages still call the FastAPI sidecar at `http://127.0.0.1:8787`, and `VITE_SCBKR_API_URL` always has the highest priority.
 
-## 15. 測試與驗收｜Testing and Validation
+## 16. 測試與驗收｜Testing and Validation
 
 - 中文：Release readiness 檢查包含 sidecar host/port、LAN token、web-dist 服務、frontend API base、Gate 保存、README 圖片與文件連結。
 - English: Release readiness checks cover sidecar host/port, LAN token, web-dist serving, frontend API base, gate preservation, README images, and documentation links.
 - 中文：Windows 上可執行 release build / smoke / LAN Companion smoke PowerShell 腳本。
 - English: On Windows, run the release build / smoke / LAN Companion smoke PowerShell scripts.
 
-## 16. 2.1 發布狀態｜2.1 Release Readiness
+## 17. 2.1 發布狀態｜2.1 Release Readiness
 
 - 中文：`2.1.0` 為上線候選版。產品內已提供上線中心與準備度檢查；正式送審仍需作者提供網域、Supabase、Stripe、搜尋服務、Partner Center、簽章及法律頁面資料。
 - English: `2.1.0` is a launch candidate. The app includes a launch center and readiness checks; store submission still requires owner-provided domain, Supabase, Stripe, search, Partner Center, signing, and legal configuration.
 - 中文：Desktop Mode 預設 local-only；LAN Companion Mode 需手動啟動並以一次性配對碼授權手機。
 - English: Desktop Mode is local-only by default; LAN Companion Mode requires manual launch and one-time code pairing.
 
-## 17. License / Author
+## 18. License / Author
 
 - 中文：作者：許文耀／沈耀888pi，語意防火牆。授權請以 repository license 為準。
 - English: Author: Wen-Yao Hsu / ShenYao888pi, Semantic Firewall. License follows the repository license.

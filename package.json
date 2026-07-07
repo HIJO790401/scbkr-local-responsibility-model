@@ -2,7 +2,7 @@
   "name": "scbkr-local-responsibility-model",
   "private": true,
   "version": "2.3.0",
-  "description": "SCBKR Local Responsibility Chain and Rule-Driven AI Control System",
+  "description": "SCBKR chat-first local responsibility-chain and user rule governance system",
   "scripts": {
     "setup": "sh scripts/setup.sh",
     "dev": "sh scripts/dev.sh",

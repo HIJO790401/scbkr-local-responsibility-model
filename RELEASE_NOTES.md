@@ -1,5 +1,15 @@
 # Release Notes
 
+## 2.3.0 - Chat-first UI Alignment
+
+- Repositioned SCBKR as a general AI chat product with responsibility-chain rule capability, not a pure rule-engine dashboard.
+- Restored the chat surface as the default home experience: normal messages remain normal chat unless the user chooses to promote them into a confirmation draft.
+- Added the Zeroth Principle Advisory Gate in the chat flow for reusable-rule intent, with actions to draft a confirmation sheet, keep chatting, or add role / boundary detail.
+- Kept FREE confirmation draft generation available: FREE may draft S/C/B/K/R and send drafts to Workbench, while user signature remains required before activation or storage.
+- Clarified plan semantics: NT$690 is responsibility-structure assistance; NT$3,300 is the rulebook closure layer with creator rule signature + user signature.
+- Preserved all backend gates: model cannot sign, edited drafts invalidate signature state, review and storage confirmation gates remain enforced, and vector retrieval remains candidate-only.
+- Updated product manifest and README language to align Web / API version `2.3.0` with the chat-first shell while keeping Desktop RC metadata as a separate release line.
+
 ## 2.0.0 - Rule-Driven Local AI Control Layer
 
 - Added the strict S/C/B/K/R compiler with a closed schema, one repair attempt, compiler reports, and owner-only signatures.
