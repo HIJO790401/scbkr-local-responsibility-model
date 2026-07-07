@@ -159,8 +159,11 @@ small { color: #667d9b; }
 .chat-input textarea { min-height: 54px; max-height: 140px; border-color: #3d6d94; padding: 9px 10px; color: #eef7ff; background: rgba(8, 29, 48, .9); resize: none; }
 .send-button { align-self: end; color: #fff; background: #1d6bb5; border-color: #1d6bb5; }
 .workbench-zone { padding: 13px; overflow: auto; background: rgba(244,249,254,.96); }
-.workbench-empty { display: grid; justify-items: start; border-top: 1px solid #bfd1e5; padding-top: 18px; }
+.workbench-empty { display: grid; justify-items: stretch; border-top: 1px solid #bfd1e5; padding-top: 18px; }
 .workbench-empty h3 { margin: 10px 0 0; font-size: .92rem; }
+.workbench-empty label,
+.workbench-empty textarea,
+.workbench-empty button { width: 100%; max-width: 100%; }
 .task-state { display: flex; justify-content: space-between; gap: 8px; border: 1px solid #c5d6e8; border-radius: 5px; margin-bottom: 8px; padding: 7px 8px; background: #fff; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .62rem; }
 .task-state span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-state b { color: #1e6a43; }

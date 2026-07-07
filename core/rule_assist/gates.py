@@ -6,6 +6,7 @@ contract for FREE / NT$690 / NT$3300 modes.
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -435,10 +436,67 @@ def _is_rule_form_task(text: str) -> bool:
     return any(token in lowered for token in ("規則表單", "規則", "表單", "確認單", "rule form", "policy", "checklist"))
 
 
+def _specific_rule_subject(text: str) -> str | None:
+    raw = (text or "").strip()
+    match = re.search(r"(?:建立|生成|制定|新增|寫)(?:一個|一份|這個)?(.{2,36}?規則)", raw)
+    if match:
+        return match.group(1).strip(" ：:，,。.")
+    if "退款" in raw and "客服" in raw:
+        return "客服退款規則"
+    if "退款" in raw:
+        return "退款規則"
+    return None
+
+
+def _split_rule_clauses(text: str) -> list[str]:
+    raw = (text or "").strip()
+    pieces = re.split(r"[，,。；;\n]+", raw)
+    clauses: list[str] = []
+    for piece in pieces:
+        item = piece.strip(" ：:、. ")
+        if not item:
+            continue
+        if "：" in item:
+            item = item.split("：", 1)[1].strip()
+        elif ":" in item:
+            item = item.split(":", 1)[1].strip()
+        item = item.strip(" ：:、. ")
+        if item and item not in clauses:
+            clauses.append(item)
+    return clauses
+
+
+def _extract_rule_constraints(text: str) -> dict[str, list[str]]:
+    clauses = _split_rule_clauses(text)
+    boundary_keywords = ("不得", "不可", "不能", "不准", "禁止", "OWNER_REVIEW", "超過", "超出", "除非", "若", "如果", "必須", "需要")
+    boundaries: list[str] = []
+    owner_review: list[str] = []
+    for clause in clauses:
+        if any(keyword in clause for keyword in boundary_keywords):
+            if "OWNER_REVIEW" in clause:
+                owner_review.append(f"{clause}；必須交由使用者審查，不得由模型自動通過。")
+            else:
+                boundaries.append(clause)
+    if "補償" in text and not any("補償" in item for item in boundaries):
+        boundaries.append("不得直接承諾補償，除非使用者另行簽名確認。")
+    if "退款" in text and not any("退款" in item for item in boundaries):
+        boundaries.append("退款相關決策不得由模型自動通過，必須依使用者規則與簽名流程處理。")
+    all_specific = _append_unique([], boundaries + owner_review)
+    return {
+        "boundaries": all_specific,
+        "owner_review": owner_review,
+        "acceptance": [f"輸出必須遵守：{item}" for item in all_specific],
+        "formation": [f"具體條件已寫入規則：{item}" for item in all_specific],
+        "failure": [f"未落實「{item}」時，規則草案失效並退回 OWNER_REVIEW。" for item in all_specific],
+        "repair": [f"回到使用者原句補齊並重審：{item}" for item in all_specific],
+    }
+
+
 def _semantic_task_profile(text: str) -> dict[str, Any]:
     raw = (text or "").strip()
     business_copy = _is_business_copy_task(raw)
     rule_form = _is_rule_form_task(raw)
+    specific_rule = _extract_rule_constraints(raw)
     if business_copy and rule_form:
         return {
             "subject": "商業文案規則表單",
@@ -488,8 +546,10 @@ def _semantic_task_profile(text: str) -> dict[str, Any]:
             ],
         }
     if rule_form:
+        subject = _specific_rule_subject(raw) or raw[:48] or "使用者規則確認單"
+        specific_boundaries = specific_rule["boundaries"]
         return {
-            "subject": raw[:48] or "使用者規則確認單",
+            "subject": subject,
             "goal": "把使用者原句整理成可簽名、可驗收、可回放的 SCBKR 規則草案。",
             "outputs": ["規則確認單", "成立條件", "失效條件", "驗收標準"],
             "logic": [
@@ -497,20 +557,20 @@ def _semantic_task_profile(text: str) -> dict[str, Any]:
                 "再拆成 S/C/B/K/R 五鏈草案。",
                 "使用者簽名後才可進入生成、驗收或入庫。",
             ],
-            "boundaries": [
+            "boundaries": _append_unique([
                 "不得把未簽名草案當成已啟用規則。",
                 "不得替使用者簽名、驗收或入庫。",
                 "不得偽造四庫引用或外部依據。",
-            ],
+            ], specific_boundaries),
             "basis": ["使用者原始指令", "SCBKR 五鏈語法", "第0原理"],
-            "acceptance": [
+            "acceptance": _append_unique([
                 "S/C/B/K/R 欄位可被普通使用者讀懂。",
                 "成立條件與失效條件明確。",
                 "使用者簽名後才成立。",
-            ],
-            "formation": ["使用者有明確規則意圖", "五鏈欄位完整", "使用者完成簽名"],
-            "failure": ["主語不明", "邊界不明", "依據不明", "模型代簽或宣稱 CLOSE"],
-            "repair": ["補主語", "補邊界", "補依據", "補驗收與簽名條件"],
+            ], specific_rule["acceptance"]),
+            "formation": _append_unique(["使用者有明確規則意圖", "五鏈欄位完整", "使用者完成簽名"], specific_rule["formation"]),
+            "failure": _append_unique(["主語不明", "邊界不明", "依據不明", "模型代簽或宣稱 CLOSE"], specific_rule["failure"]),
+            "repair": _append_unique(["補主語", "補邊界", "補依據", "補驗收與簽名條件"], specific_rule["repair"]),
         }
     return {
         "subject": raw[:48] or "SCBKR 任務確認單",
@@ -574,6 +634,8 @@ def apply_rule_assist_to_scbkr(raw_input: str, scbkr: dict[str, Any], assessment
     draft.setdefault("K", {})
     draft.setdefault("R", {})
     draft["S"]["task_subject"] = draft["S"].get("task_subject") or profile["subject"]
+    if _is_rule_form_task(raw_input):
+        draft["S"]["task_subject"] = profile["subject"]
     if _is_business_copy_task(raw_input) and _is_rule_form_task(raw_input):
         draft["S"]["task_name"] = "商業文案規則表單確認草案"
         draft["S"]["task_subject"] = profile["subject"]

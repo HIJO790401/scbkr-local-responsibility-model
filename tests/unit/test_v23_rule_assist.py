@@ -62,6 +62,30 @@ def test_nt3300_compiles_business_copy_rule_form_with_conditions(tmp_path, monke
     assert scbkr["R"]["closure_state"] == "CLOSE_CANDIDATE_ONLY_BEFORE_OWNER_SIGNATURE"
 
 
+def test_nt3300_compiles_specific_customer_refund_rule_conditions(tmp_path, monkeypatch):
+    local_main = fresh_main(tmp_path, monkeypatch)
+    local_main.MODEL_SETTINGS["enabled"] = False
+    client = TestClient(local_main.app)
+    client.post("/api/rule-assist/settings", json={"plan_level": "NT3300"})
+    task = client.post(
+        "/api/tasks/create",
+        json={
+            "raw_input": "幫我建立一個客服退款規則：超過七天不可自動退款，若客戶有醫療或家庭急事要進 OWNER_REVIEW，不得直接承諾補償。",
+            "task_type": "general",
+            "create_scbkr_draft": True,
+        },
+    ).json()
+
+    scbkr = task["scbkr"]
+    assert scbkr["S"]["task_subject"] == "客服退款規則"
+    assert any("超過七天不可自動退款" in item for item in scbkr["B"]["stop_conditions"])
+    assert any("OWNER_REVIEW" in item for item in scbkr["B"]["stop_conditions"])
+    assert any("不得直接承諾補償" in item for item in scbkr["B"]["stop_conditions"])
+    assert any("超過七天不可自動退款" in item for item in scbkr["B"]["formation_conditions"])
+    assert any("OWNER_REVIEW" in item for item in scbkr["R"]["failure_conditions"])
+    assert any("不得直接承諾補償" in item for item in scbkr["R"]["repair_path"])
+
+
 def test_patch_draft_can_rewrite_b_and_k_layers_with_rule_assist(tmp_path, monkeypatch):
     local_main = fresh_main(tmp_path, monkeypatch)
     local_main.MODEL_SETTINGS["enabled"] = False

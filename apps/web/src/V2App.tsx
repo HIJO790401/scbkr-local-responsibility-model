@@ -425,8 +425,13 @@ export default function V2App() {
     }
     if (commandMode === "rule") {
       const result = await createNaturalRule(text);
-      if (result) {
-        setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "An unsigned rule draft is ready." : "未簽名規則草案已建立。", result.rule_state || ruleState), card: ruleCard(result) }]);
+      const created = await createTask(text, false, "create_new_rule_confirmation", "rule");
+      if (result || created) {
+        setMessages((current) => [...current, {
+          role: "assistant",
+          content: assistantEnvelope(en ? "Unsigned rule draft and SCBKR review sheet are ready." : "未簽名規則草案與 SCBKR 確認單已建立。請到工作台檢查 S/C/B/K/R 後再簽名。", result?.rule_state || ruleState),
+          card: created ? taskCard(created) : result ? ruleCard(result) : undefined,
+        }]);
       }
       return;
     }
@@ -434,7 +439,12 @@ export default function V2App() {
     if (!routed) return;
     if (routed.intent === "create_new_rule_confirmation") {
       const drafted = await createNaturalRule(text);
-      if (drafted) setMessages((current) => [...current, { role: "assistant", content: assistantEnvelope(en ? "I created an unsigned rule draft. You remain the only signer and activator." : "我已建立未簽名規則草案。只有你能簽名與啟用。", drafted.rule_state || ruleState), card: ruleCard(drafted) }]);
+      const created = await createTask(text, false, routed.intent, "rule");
+      if (drafted || created) setMessages((current) => [...current, {
+        role: "assistant",
+        content: assistantEnvelope(en ? "I created an unsigned rule draft and SCBKR review sheet. You remain the only signer and activator." : "我已建立未簽名規則草案與 SCBKR 確認單。只有你能簽名與啟用。", drafted?.rule_state || ruleState),
+        card: created ? taskCard(created) : drafted ? ruleCard(drafted) : undefined,
+      }]);
       return;
     }
     if (routed.intent === "create_confirmation") {
