@@ -168,6 +168,23 @@ def classify_user_input(text: str) -> dict[str, Any]:
             "model_call_allowed": False,
         }
     help_rule_question = any(token in normalized for token in ("怎麼建立規則", "如何建立規則", "怎麼生成規則", "如何生成規則", "怎麼建規則"))
+    create_rule_pattern = (
+        not help_rule_question
+        and any(verb in normalized for verb in ("生成", "建立", "新增", "制定", "做成", "整理成", "變成"))
+        and any(noun in normalized for noun in ("規則", "規則書", "規則包", "規則表單"))
+    )
+    if create_rule_pattern:
+        return {
+            "mode": "generate_rule",
+            "confidence": 0.93,
+            "matched_triggers": ["create_rule_pattern"],
+            "reason": "使用者要求生成某主題規則/規則書，必須進五維規則草擬流程。",
+            "requires_four_store": False,
+            "requires_signature": True,
+            "model_call_allowed": True,
+            "storage_write_allowed": False,
+            "tool_execution_allowed": False,
+        }
 
     checks: list[tuple[str, tuple[str, ...], float, str]] = [
         ("high_risk_action", HIGH_RISK_TRIGGERS, 0.98, "高風險動作必須停在確認與簽名流程。"),

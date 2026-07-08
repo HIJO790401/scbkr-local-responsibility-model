@@ -16,6 +16,7 @@ def test_hard_router_classifies_all_rule_os_modes():
     cases = {
         "你好，今天聊聊": "general_chat",
         "我要一個美容院商業文案，幫我生成規則。": "generate_rule",
+        "幫我生成債務民事案件規則書": "generate_rule",
         "幫我寫臉部保養貼文": "answer_with_rules",
         "B 不對，幫我修改規則": "modify_existing_rule",
         "確認入庫並啟用規則": "confirm_storage",
@@ -130,3 +131,28 @@ def test_free_690_3300_are_depth_not_button_only(tmp_path, monkeypatch):
     assert "responsibility_chain_assist" in nt3300
     assert "rulebook_closure" in nt3300
     assert nt3300["R"]["formal_citation_allowed"] == "only_when_signed_reviewed_active_logic_or_corpus_or_memory"
+
+
+def test_debt_civil_rulebook_phrase_enters_rule_drafting_and_fills_legal_boundaries(tmp_path, monkeypatch):
+    local_main = fresh_main(tmp_path, monkeypatch)
+    local_main.MODEL_SETTINGS["enabled"] = False
+    client = TestClient(local_main.app)
+    client.post("/api/rule-assist/settings", json={"plan_level": "NT3300"})
+
+    task = client.post(
+        "/api/tasks/create",
+        json={
+            "raw_input": "幫我生成債務民事案件規則書",
+            "task_type": "general",
+            "create_scbkr_draft": True,
+        },
+    ).json()
+    scbkr = task["scbkr"]
+
+    assert task["input_classification"]["mode"] == "generate_rule"
+    assert scbkr["S"]["task_subject"] == "債務民事案件規則書"
+    assert any("當事人身分" in item for item in scbkr["B"]["stop_conditions"])
+    assert any("不得編造借款金額" in item for item in scbkr["B"]["stop_conditions"])
+    assert any("法院通知" in item for item in scbkr["K"]["references"])
+    assert any("程序階段" in item for item in scbkr["R"]["formation_conditions"])
+    assert any("送出法律文件" in item for item in scbkr["R"]["failure_conditions"])

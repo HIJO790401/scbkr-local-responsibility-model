@@ -44,10 +44,21 @@ def _is_beauty_copy_rule(raw_input: str) -> bool:
     )
 
 
+def _is_debt_civil_rule(raw_input: str) -> bool:
+    text = raw_input or ""
+    return any(token in text for token in ("債務", "借款", "欠款", "民事案件", "民事", "支付命令", "本票", "強制執行", "催收")) and any(
+        token in text for token in ("規則", "規則書", "案件", "起訴", "答辯", "證據", "流程")
+    )
+
+
 def _task_label(raw_input: str) -> str:
+    if _is_debt_civil_rule(raw_input):
+        if "規則書" in raw_input:
+            return "債務民事案件規則書"
+        return "債務民事案件規則"
     if "商業文案" in raw_input and ("規則表單" in raw_input or "表單" in raw_input):
         return "商業文案規則表單"
-    match = re.search(r"(?:建立|生成|制定|新增|寫)(?:一個|一份|這個)?(.{2,36}?規則)", raw_input or "")
+    match = re.search(r"(?:建立|生成|制定|新增|寫)(?:一個|一份|這個)?(.{2,36}?規則(?:書|包|表單)?)", raw_input or "")
     if match:
         return match.group(1).strip(" ：:，,。.")
     if _is_beauty_copy_rule(raw_input):
@@ -95,6 +106,36 @@ def _base_rule_fields(raw_input: str) -> dict[str, list[str]]:
             [
                 "文案必須標示為草稿，除非使用者完成驗收。",
                 "文案不得含未提供的價格、療效保證或自動發布承諾。",
+            ]
+        )
+    if _is_debt_civil_rule(raw_input):
+        forbidden.extend(
+            [
+                "不得把模型草稿當成正式法律意見、正式訴狀、正式答辯或已送件文件。",
+                "不得編造借款金額、利率、日期、對話紀錄、還款紀錄、法院案號、法條或裁判結果。",
+                "不得自動寄送存證信函、提交法院文件、聯絡對造、刪除證據或執行付款。",
+                "不得在未確認管轄、時效、證據來源與當事人身分前宣稱規則閉環。",
+            ]
+        )
+        stop.extend(
+            [
+                "缺少當事人身分、債務來源、金額、日期、還款紀錄、證據清單或目前程序階段時，只能生成待確認草稿。",
+                "涉及起訴、答辯、支付命令、強制執行、和解條件或對外送件時，必須要求使用者逐項確認並簽名。",
+                "任何法律依據、法條、法院流程或期限未由使用者提供或正式查證時，不得作為正式依據。",
+            ]
+        )
+        basis.extend(
+            [
+                "使用者確認的借據、契約、本票、轉帳紀錄、對話紀錄、還款紀錄與催告資料",
+                "使用者確認的法院通知、案號、程序階段與送達日期",
+                "正式查證後的法規、法院流程或律師/專業人員確認資料",
+            ]
+        )
+        acceptance.extend(
+            [
+                "表單必須列出案件角色、債務原因、請求目標、證據來源、程序階段與禁止越權事項。",
+                "缺少正式資料時，輸出必須標示為待確認草稿。",
+                "模型只能協助整理與草擬，不得代替使用者作法律終判或自動送件。",
             ]
         )
     return {"label": [label], "forbidden": forbidden, "stop": stop, "basis": basis, "acceptance": acceptance}
@@ -147,6 +188,14 @@ def _apply_nt690(raw_input: str, draft: dict[str, Any]) -> None:
     ]
     if _is_beauty_copy_rule(raw_input):
         missing.extend(["需補美容院服務項目、價格來源、活動期限、品牌語氣、禁用醫療宣稱。"])
+    if _is_debt_civil_rule(raw_input):
+        missing.extend(
+            [
+                "需補當事人身分、債務原因、金額、日期、利率、還款紀錄與證據清單。",
+                "需補目前程序階段：尚未起訴、調解、支付命令、訴訟中、判決後或強制執行。",
+                "需確認任何法院文件、案號、期限、法條與送達日期是否有正式來源。",
+            ]
+        )
     _append_unique(_ensure_list(draft["B"], "stop_conditions"), fields["stop"])
     draft["responsibility_chain_assist"] = {
         "plan_level": "NT690",
@@ -155,7 +204,15 @@ def _apply_nt690(raw_input: str, draft: dict[str, Any]) -> None:
             "這條規則要套用在哪些任務類型？",
             "哪些資料沒有正式確認時必須停下來問你？",
             "哪些動作需要你再次簽名？",
-        ],
+        ] + (
+            [
+                "這是債權人、債務人，還是第三方協助者的規則？",
+                "目前要處理的是催告、協商、起訴、答辯、支付命令、強制執行，還是證據整理？",
+                "哪些證據已確認可引用，哪些只是待補資料？",
+            ]
+            if _is_debt_civil_rule(raw_input)
+            else []
+        ),
         "incomplete_boundaries": fields["stop"],
         "insufficient_basis": ["沒有已簽名資料時，不得說成正式依據。"],
         "draft_only_conditions": ["資訊不足、資料未確認、未完成簽名時只能產生草稿。"],
@@ -191,6 +248,21 @@ def _apply_nt3300(raw_input: str, draft: dict[str, Any]) -> None:
     if _is_beauty_copy_rule(raw_input):
         formation.extend(["美容院服務、受眾、通路、品牌語氣與禁止宣稱已確認。"])
         failure.extend(["出現誇大療效、編造價格、未提供客戶見證或自動發布承諾。"])
+    if _is_debt_civil_rule(raw_input):
+        formation.extend(
+            [
+                "當事人身分、債務原因、請求目標、金額、日期、證據來源與程序階段已確認。",
+                "法律依據、法院流程、期限與送件條件已有正式來源或使用者確認。",
+                "任何對外送件、聯絡對造、付款、刪除證據或正式法律行動都已取得使用者簽名。",
+            ]
+        )
+        failure.extend(
+            [
+                "模型編造金額、利率、期限、法院案號、法條、裁判結果或證據內容。",
+                "未確認程序階段、時效、管轄、送達日期或文件來源就宣稱可正式引用。",
+                "未經使用者簽名即送出法律文件、聯絡對造、承諾和解或執行付款。",
+            ]
+        )
     repair = [
         "回到缺失維度補資料。",
         "重新產生五維草稿。",
