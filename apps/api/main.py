@@ -413,7 +413,20 @@ def route_chat_intent(message: str) -> dict[str, Any]:
         "workbench草案", "scbkr確認單", "scbkr任務", "確認單草案",
     )
     suggest_terms = ("我想做", "我要處理", "以後要重用", "變成規則", "規劃一個流程", "商業文案計畫", "滷肉飯文案")
-    if has_any(delete_terms):
+    rule_os_mode = str(rule_os_classification.get("mode") or "")
+    if rule_os_mode == "generate_rule":
+        intent = "create_new_rule_confirmation"
+    elif rule_os_mode == "answer_with_rules":
+        intent = "data_center_query"
+    elif rule_os_mode == "modify_existing_rule":
+        intent = "suggest_data_center_update_confirmation"
+    elif rule_os_mode == "confirm_storage":
+        intent = "create_confirmation"
+    elif rule_os_mode in {"tool_execution", "high_risk_action"} and has_any(memory_terms):
+        intent = "create_confirmation"
+    elif rule_os_mode in {"tool_execution", "high_risk_action"}:
+        intent = "normal_chat"
+    elif has_any(delete_terms):
         intent = "create_data_center_delete_confirmation" if has_any(("確認單", "建立", "生成")) else "suggest_data_center_delete_confirmation"
     elif has_any(update_terms):
         intent = "create_data_center_update_confirmation" if has_any(("確認單", "建立", "生成")) else "suggest_data_center_update_confirmation"
@@ -600,6 +613,24 @@ def _build_four_store_context(raw_input: str, task_id: str | None = None) -> dic
     return {"retrieval_first": True, "query": raw_input, "retrieval_result": retrieval, "hits": citations, "adopted_hits": citations, "candidate_hits": evidence_packet["candidates"], "rejected_hits": rejected, "conflicts": conflicts, "no_confirmed_rules": not citations, "must_cite_confirmed_rules": [h for h in citations if h.get("must_cite")], "evidence_packet": evidence_packet}
 
 
+def _deferred_four_store_context(raw_input: str) -> dict[str, Any]:
+    evidence_packet = build_evidence_packet({"adopted_hits": []})
+    return {
+        "retrieval_first": True,
+        "retrieval_deferred": True,
+        "query": raw_input,
+        "retrieval_result": {"backend": "deferred_for_fast_workbench_entry", "candidates": []},
+        "hits": [],
+        "adopted_hits": [],
+        "candidate_hits": [],
+        "rejected_hits": [],
+        "conflicts": [],
+        "no_confirmed_rules": True,
+        "must_cite_confirmed_rules": [],
+        "evidence_packet": evidence_packet,
+    }
+
+
 def _validate_task_understanding(candidate: Any) -> dict[str, Any]:
     if not isinstance(candidate, dict):
         raise ValueError("task understanding must be object")
@@ -615,6 +646,7 @@ def _model_authored_scbkr_draft(
     task_type: str,
     retrieval_context: dict[str, Any] | None = None,
     rule_assist_assessment: dict[str, Any] | None = None,
+    defer_model_call: bool = False,
 ) -> tuple[dict[str, Any], bool, str | None]:
     understanding = None
     skipped_reason = None
@@ -623,7 +655,9 @@ def _model_authored_scbkr_draft(
     compiler_repairs = 0
     messages: list[dict[str, Any]] = []
     provider_usages: list[dict[str, Any]] = []
-    if MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("mode") != "sandbox":
+    if defer_model_call:
+        skipped_reason = "model_deferred_for_workbench"
+    elif MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("mode") != "sandbox":
         try:
             if _model_draft_requires_external_api_permission(MODEL_SETTINGS) and PERMISSIONS.get("external_api") is not True:
                 skipped_reason = "external_api_permission_disabled"
@@ -1203,6 +1237,49 @@ def validate_rule_overlay(payload: dict[str, Any]) -> dict[str, Any]:
 @app.get("/api/rules")
 def list_rules() -> dict[str, Any]:
     rules = _rule_registry().list_rules()
+    compiled_rules: list[dict[str, Any]] = []
+    for task in list_persisted_tasks(limit=1000):
+        compiled = task.get("compiled_rule") or {}
+        if not compiled:
+            continue
+        scbkr = task.get("scbkr") or {}
+        storage_items = task.get("storage_items") or []
+        storage_targets = sorted({str(item.get("target")) for item in storage_items if item.get("target")})
+        status = "active" if compiled.get("active") and task.get("review_passed") is True else "draft"
+        compiled_rules.append(
+            {
+                "rule_id": compiled.get("rule_id") or f"local-rule:{task.get('task_id')}",
+                "rule_name": compiled.get("title") or task.get("task_name") or "Stored SCBKR rule",
+                "rule_text": (storage_items[0].get("payload", {}).get("content") if storage_items else None)
+                or (scbkr.get("S") or {}).get("task_subject")
+                or task.get("raw_input"),
+                "rule_author": (scbkr.get("confirmed_by") or "user"),
+                "rule_source": "compiled_four_store_rule",
+                "rule_version": f"v{compiled.get('version') or 1}.0",
+                "rule_scope": compiled.get("match_conditions") or {},
+                "allowed_tools": [],
+                "denied_tools": ["auto_publish", "auto_email", "auto_store_without_signature"],
+                "automation_level": "manual",
+                "risk_level": "medium",
+                "activation_status": status,
+                "signature_status": compiled.get("signature_status"),
+                "review_passed": compiled.get("review_passed") is True,
+                "storage_confirmed": task.get("storage_confirmed") is True,
+                "compiled_rule": compiled,
+                "scbkr_summary": {key: scbkr.get(key) for key in ("S", "C", "B", "K", "R")},
+                "four_store_locations": storage_targets,
+                "version_history": [
+                    {"version": "v1.0", "status": status, "note": "Compiled from owner-signed SCBKR workbench flow."}
+                ],
+                "citation_policy": compiled.get("citation_policy"),
+                "created_at": task.get("created_at"),
+                "updated_at": task.get("storage_result", {}).get("written_items", [{}])[0].get("stored_at")
+                if task.get("storage_result", {}).get("written_items")
+                else task.get("created_at"),
+            }
+        )
+    known = {rule.get("rule_id") for rule in rules}
+    rules = rules + [rule for rule in compiled_rules if rule.get("rule_id") not in known]
     return {"rules": rules, "count": len(rules), "registry_version": "scbkr.rule-registry.v2"}
 
 
@@ -1778,8 +1855,7 @@ def accept_chat_suggestion(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@app.post("/api/tasks/create")
-def create_task(payload: dict[str, Any]) -> dict[str, Any]:
+def _create_task_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     raw_input = str(payload.get("raw_input", "")).strip()
     if not raw_input:
         raise HTTPException(status_code=400, detail="raw_input is required")
@@ -1803,10 +1879,17 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
         "rule_os_mode": input_classification.get("mode"),
     }
     if payload.get("create_scbkr_draft") is True:
-        task["data_center_context"] = _build_four_store_context(raw_input, task_id)
+        defer_model_draft = payload.get("defer_model_draft") is True
+        task["data_center_context"] = _deferred_four_store_context(raw_input) if defer_model_draft else _build_four_store_context(raw_input, task_id)
         task["data_center_context"].update({"advisory": True, "retrieval_required": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": len(task["data_center_context"].get("hits", []))})
         task["rule_assist"] = _assess_rule_assist(raw_input, locale=_response_locale(raw_input, None), target_mode=str(payload.get("object_type") or "task"), four_store_context=task["data_center_context"])
-        task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task["task_type"], task["data_center_context"], task["rule_assist"])
+        task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(
+            raw_input,
+            task["task_type"],
+            task["data_center_context"],
+            task["rule_assist"],
+            defer_model_call=defer_model_draft,
+        )
         task["draft_object"] = build_scbkr_draft_object(
             user_request_raw=raw_input,
             scbkr=task["scbkr"],
@@ -1832,6 +1915,23 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
     save_task(task)
     _append_task_event("task_created", task, status_after=task["status"], payload={"task_type": task["task_type"]})
     return task
+
+
+@app.post("/api/tasks/create")
+def create_task(payload: dict[str, Any]) -> dict[str, Any]:
+    return _create_task_from_payload(payload)
+
+
+@app.post("/api/tasks/create-fast")
+async def create_task_fast(request: Request) -> dict[str, Any]:
+    body = (await request.body()).decode("utf-8").strip()
+    try:
+        payload = json.loads(body) if body else {}
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid task payload") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="task payload must be an object")
+    return _create_task_from_payload(payload)
 
 
 @app.post("/api/tasks/{task_id}/scbkr")

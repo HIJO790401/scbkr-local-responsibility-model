@@ -43,6 +43,8 @@ def _formal(hit: dict[str, Any]) -> bool:
 
 def _task_type(user_input: str) -> str:
     text = (user_input or "").lower()
+    if any(token in text for token in ("新品上市", "上市推廣", "新品推廣", "發布貼文", "上市貼文", "product launch", "launch post", "launch marketing", "go-to-market", "gtm")):
+        return "product_launch_marketing_copy"
     if any(token in text for token in ("美容", "臉部", "脸部", "保養", "保养", "文案", "貼文", "贴文", "copy", "beauty", "salon", "facial", "skincare", "skin care", "marketing post")):
         return "beauty_salon_marketing_copy"
     if any(token in text for token in ("債務", "债务", "民事", "借款", "欠款", "催告", "支付命令", "強制執行", "强制执行", "debt", "civil", "loan", "owed", "demand", "payment order", "enforcement", "lawsuit", "claim")):
@@ -56,12 +58,14 @@ def _label_for_task(task_type: str, locale: str | None) -> str:
     if _locale_is_en(locale):
         return {
             "beauty_salon_marketing_copy": "beauty salon marketing copy",
+            "product_launch_marketing_copy": "product launch marketing copy",
             "debt_civil_case_draft": "debt civil case draft",
             "email_draft": "email draft",
             "general_answer": "general answer",
         }.get(task_type, task_type)
     return {
         "beauty_salon_marketing_copy": "美容院商業文案",
+        "product_launch_marketing_copy": "新品上市推廣文案",
         "debt_civil_case_draft": "債務民事案件草稿",
         "email_draft": "Email 草稿",
         "general_answer": "一般回答",
@@ -114,6 +118,22 @@ def _extend_task_policy(policy: dict[str, list[str]], task_type: str, locale: st
             policy["stop_conditions"].extend(
                 ["Ask or mark pending confirmation when price, effect, promotion deadline, or customer case data is required."]
             )
+        if task_type == "product_launch_marketing_copy":
+            policy["forbidden_actions"].extend(
+                [
+                    "Do not invent prices, discounts, dates, inventory, endorsements, claims, or launch status.",
+                    "Do not claim the product has been published, listed, emailed, or stored.",
+                ]
+            )
+            policy["output_limits"].extend(
+                [
+                    "Product launch copy must stay within confirmed product facts, audience, channel, and offer boundaries.",
+                    "If price, launch date, benefit proof, or channel is missing, mark it pending confirmation.",
+                ]
+            )
+            policy["stop_conditions"].extend(
+                ["Ask or mark pending confirmation when product specs, price, promotion period, proof, or publishing channel is required."]
+            )
         if task_type == "debt_civil_case_draft":
             policy["forbidden_actions"].extend(
                 [
@@ -139,6 +159,10 @@ def _extend_task_policy(policy: dict[str, list[str]], task_type: str, locale: st
         policy["forbidden_actions"].extend(["不得誇大療效。", "不得編造價格、優惠、療程時間或客戶見證。"])
         policy["output_limits"].extend(["美容文案不得暗示醫療效果或保證結果。", "沒有價格資料時不得寫價格。"])
         policy["stop_conditions"].extend(["需要價格、療效、優惠期限或客戶案例時必須追問或標待確認。"])
+    if task_type == "product_launch_marketing_copy":
+        policy["forbidden_actions"].extend(["不得編造價格、優惠、上市日期、庫存、代言、成效證明或已發布狀態。", "不得宣稱已發布、已上架、已寄出或已入庫。"])
+        policy["output_limits"].extend(["新品上市文案只能依已確認的產品事實、受眾、通路與優惠邊界撰寫。", "缺少價格、上市日期、賣點證據或發布通路時必須標示待確認。"])
+        policy["stop_conditions"].extend(["需要產品規格、價格、活動期限、成效證據或發布通路時必須追問或標待確認。"])
     if task_type == "debt_civil_case_draft":
         policy["forbidden_actions"].extend(
             [
@@ -303,6 +327,14 @@ def build_rule_package_local_reply(user_input: str, package: dict[str, Any], loc
     applied = bool(package.get("matched_rules"))
     if _locale_is_en(locale):
         if applied:
+            if task_type == "product_launch_marketing_copy":
+                return (
+                    "Applied your product launch marketing rule.\n\n"
+                    "Draft output:\n"
+                    "- Lead with the confirmed product value and launch audience.\n"
+                    "- Keep price, discount, proof, launch date, and channel as pending confirmation unless they are in the local rule package.\n"
+                    "- This is not published, emailed, listed, or stored. Owner review is still required."
+                )
             if task_type == "debt_civil_case_draft":
                 return (
                     "Applied your debt civil case rule.\n\n"
@@ -326,6 +358,14 @@ def build_rule_package_local_reply(user_input: str, package: dict[str, Any], loc
             "今天想讓肌膚休息一下，就從一段溫柔的臉部保養開始。"
             "本次內容只描述保養體驗與預約引導，不寫未確認價格、不誇大療效、不保證結果，也不會自動發布。\n\n"
             "待確認：服務項目、價格、活動期限、品牌語氣與發布通路。"
+        )
+    if applied and task_type == "product_launch_marketing_copy":
+        return (
+            "已套用你的新品上市推廣文案規則。\n\n"
+            "草稿：\n"
+            "新品上市主打已確認的核心賣點與目標受眾，內容可用於社群貼文草稿。"
+            "目前不寫未確認價格、不宣稱已發布、不編造優惠期限、不補不存在的成效證明。\n\n"
+            "待確認：產品名稱、主要賣點、目標客群、通路、價格、上市日期與發布平台。"
         )
     if applied and task_type == "debt_civil_case_draft":
         return (

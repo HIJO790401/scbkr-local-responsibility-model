@@ -51,6 +51,24 @@ def _is_debt_civil_rule(raw_input: str) -> bool:
     )
 
 
+def _is_product_launch_rule(raw_input: str) -> bool:
+    text = (raw_input or "").lower()
+    return any(
+        token in text
+        for token in (
+            "新品上市",
+            "上市推廣",
+            "新品推廣",
+            "上市貼文",
+            "launch post",
+            "product launch",
+            "launch marketing",
+            "go-to-market",
+            "gtm",
+        )
+    ) and any(token in text for token in ("規則", "規則書", "計畫", "文案", "貼文", "rule", "rulebook", "plan", "copy", "post"))
+
+
 def _task_label(raw_input: str) -> str:
     if _is_debt_civil_rule(raw_input):
         if any(token in (raw_input or "").lower() for token in ("debt", "civil", "loan", "demand", "rulebook")):
@@ -60,8 +78,15 @@ def _task_label(raw_input: str) -> str:
         return "債務民事案件規則"
     if _is_beauty_copy_rule(raw_input) and any(token in (raw_input or "").lower() for token in ("beauty", "salon", "facial", "skincare", "copy", "marketing")):
         return "beauty salon marketing copy rule"
+    if _is_product_launch_rule(raw_input):
+        if any(token in (raw_input or "").lower() for token in ("product launch", "launch marketing", "rulebook", "launch post")):
+            return "product launch marketing rulebook" if "rulebook" in (raw_input or "").lower() else "product launch marketing rule"
+        return "新品上市推廣規則"
     if "商業文案" in raw_input and ("規則表單" in raw_input or "表單" in raw_input):
         return "商業文案規則表單"
+    english_rule = re.search(r"(?:create|build|make|generate|draft|compile)\s+(?:a|an|the|my)?\s*([a-z0-9][a-z0-9 \-/]{2,56}?\s+rule(?:book|pack| form)?)", raw_input or "", re.IGNORECASE)
+    if english_rule:
+        return english_rule.group(1).strip()
     match = re.search(r"(?:建立|生成|制定|新增|寫)(?:一個|一份|這個)?(.{2,36}?規則(?:書|包|表單)?)", raw_input or "")
     if match:
         return match.group(1).strip(" ：:，,。.")
@@ -110,6 +135,34 @@ def _base_rule_fields(raw_input: str) -> dict[str, list[str]]:
             [
                 "文案必須標示為草稿，除非使用者完成驗收。",
                 "文案不得含未提供的價格、療效保證或自動發布承諾。",
+            ]
+        )
+    if _is_product_launch_rule(raw_input):
+        forbidden.extend(
+            [
+                "不得編造產品規格、價格、優惠、上市日期、庫存、代言、成效證明或已發布狀態。",
+                "Do not invent product specs, prices, discounts, launch dates, inventory, endorsements, proof, or published status.",
+                "不得自動發布、寄送、上架、入庫或宣稱已完成對外動作。",
+            ]
+        )
+        stop.extend(
+            [
+                "缺少產品名稱、主要賣點、目標客群、通路、價格或上市日期時，只能產生待確認草稿。",
+                "If product name, value proposition, audience, channel, price, or launch date is missing, output only a pending-confirmation draft.",
+                "涉及價格、優惠、活動期限、投放預算、法規宣稱或發布通路時，必須要求使用者提供正式資料。",
+            ]
+        )
+        basis.extend(
+            [
+                "使用者確認的產品規格、上市計畫、受眾設定、價格表與通路資料",
+                "User-confirmed product specs, launch plan, audience, price table, and channel data",
+            ]
+        )
+        acceptance.extend(
+            [
+                "推廣文案必須標示為草稿，除非使用者完成驗收。",
+                "文案不得含未提供的價格、優惠、成效證明或自動發布承諾。",
+                "Launch copy must stay draft-only until owner review passes.",
             ]
         )
     if _is_debt_civil_rule(raw_input):
@@ -198,6 +251,8 @@ def _apply_nt690(raw_input: str, draft: dict[str, Any]) -> None:
     ]
     if _is_beauty_copy_rule(raw_input):
         missing.extend(["需補美容院服務項目、價格來源、活動期限、品牌語氣、禁用醫療宣稱。"])
+    if _is_product_launch_rule(raw_input):
+        missing.extend(["需補產品名稱、主要賣點、目標客群、發布通路、價格來源、上市日期與不可宣稱事項。"])
     if _is_debt_civil_rule(raw_input):
         missing.extend(
             [
@@ -221,6 +276,14 @@ def _apply_nt690(raw_input: str, draft: dict[str, Any]) -> None:
                 "哪些證據已確認可引用，哪些只是待補資料？",
             ]
             if _is_debt_civil_rule(raw_input)
+            else []
+        ) + (
+            [
+                "這個新品上市規則要套用於哪些通路：社群、EDM、廣告文案、Landing Page，還是全部？",
+                "哪些價格、優惠、上市日期與產品規格已確認可引用？",
+                "哪些宣稱必須停下來交給你確認？",
+            ]
+            if _is_product_launch_rule(raw_input)
             else []
         ),
         "incomplete_boundaries": fields["stop"],
@@ -258,6 +321,9 @@ def _apply_nt3300(raw_input: str, draft: dict[str, Any]) -> None:
     if _is_beauty_copy_rule(raw_input):
         formation.extend(["美容院服務、受眾、通路、品牌語氣與禁止宣稱已確認。"])
         failure.extend(["出現誇大療效、編造價格、未提供客戶見證或自動發布承諾。"])
+    if _is_product_launch_rule(raw_input):
+        formation.extend(["新品名稱、產品賣點、目標受眾、通路、價格/優惠來源與發布邊界已確認。"])
+        failure.extend(["出現編造價格、上市日期、成效證明、代言、庫存或宣稱已發布/已寄出/已上架。"])
     if _is_debt_civil_rule(raw_input):
         formation.extend(
             [

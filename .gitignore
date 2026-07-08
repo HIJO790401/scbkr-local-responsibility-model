@@ -14,7 +14,16 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 data/scbkr.sqlite3
+data/scbkr.sqlite3-*
 data/runtime-settings.json
+data/corpus/*
+!data/corpus/.gitkeep
+data/logic/*
+!data/logic/.gitkeep
+data/memory/*
+!data/memory/.gitkeep
+data/vector/*
+data/rule_registry/*
 
 .env
 .env.*

@@ -18,6 +18,21 @@ SCBKR is not a generic chatbot and not a pure rule engine. It is a general AI ch
 
 English one-line: SCBKR starts as normal AI chat, then upgrades reusable, citable, responsibility-bearing content into S/C/B/K/R confirmation sheets.
 
+## Productized Runnable Build｜完整可運行版
+
+- 中文：目前前端已收束為四個主產品頁：一般聊天、SCBKR 工作台、規則中心、資料中心；手機版改為單欄主流程，避免桌機三欄介面擠壓。
+- English: The current frontend is organized around four product pages: Chat, SCBKR Workbench, Rule Center, and Data Center; mobile now uses a single-column primary flow instead of squeezing the desktop three-column layout.
+- 中文：聊天偵測到「幫我生成規則」時會先顯示第0原理建議閘；使用者按「草擬確認單」後立即進工作台，先顯示可編輯 S/C/B/K/R 草稿，再由後端正式 task 覆蓋。
+- English: When chat detects rule-generation intent, it shows the Zeroth Principle Advisory Gate; pressing “Draft confirmation” immediately opens the Workbench with editable S/C/B/K/R, then replaces the provisional draft with the formal backend task.
+- 中文：模型可草擬與補欄位，但不能簽名、驗收、入庫或啟用規則；正式引用只允許 signed / reviewed / active 的本地規則與資料。
+- English: The model may draft and fill fields, but it cannot sign, review, store, or activate rules; formal citation is limited to signed / reviewed / active local rules and evidence.
+- 中文：回答前會產生最小 `current_rule_package`，標記 `chat_context_used: false`，避免把完整記憶庫塞給模型；VECTOR 僅能做候選召回，不能當正式 K 依據。
+- English: Before answering, SCBKR compiles a minimal `current_rule_package` with `chat_context_used: false`, avoiding full-memory prompts; VECTOR is recall-only and cannot be formal K evidence.
+- 中文：本機開發啟動：`python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8787`，另開一個視窗執行 `npm --prefix apps/web run dev`。
+- English: Local development: run `python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8787`, then run `npm --prefix apps/web run dev` in another terminal.
+- 中文：驗收命令：`python -m pytest -q`、`npm --prefix apps/web run test:ui`、`npm --prefix apps/web run build`。
+- English: Acceptance commands: `python -m pytest -q`, `npm --prefix apps/web run test:ui`, and `npm --prefix apps/web run build`.
+
 ## 1. 快速理解｜Quick Overview
 
 - 中文：預設首頁是一般聊天；聊天可寫文案、摘要文件、讀四庫、查資料，也可以在使用者要求時升級成規則草稿。

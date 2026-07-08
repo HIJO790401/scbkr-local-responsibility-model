@@ -31,8 +31,10 @@ def _runtime_sqlite_path(sqlite_path: str | Path | None = None) -> Path:
 def _connect(sqlite_path: str | Path | None = None) -> sqlite3.Connection:
     sqlite_path = _runtime_sqlite_path(sqlite_path)
     sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(sqlite_path)
+    conn = sqlite3.connect(sqlite_path, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 

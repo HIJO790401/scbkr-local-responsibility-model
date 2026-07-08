@@ -15,7 +15,9 @@ def test_p15_navigation_and_chat_first_contract():
     for label in ["一般聊天", "上網查證", "查四庫", "建規則", "第0原理建議閘", "草擬確認單", "補角色與邊界", "保持一般聊天"]:
         assert label in APP
     assert 'setView("workbench")' in APP
-    assert "未簽名規則草案與 SCBKR 確認單已建立" in APP
+    assert "未簽名 SCBKR 確認單已建立，已進入工作台" in APP
+    assert "FREE 草稿層確認單已建立，已進入工作台" in APP
+    assert "defer_model_draft" in APP
 
 
 def test_p15_workbench_has_readable_scbkr_dimensions_and_patch_flow():

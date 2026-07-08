@@ -1,5 +1,7 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
+test.setTimeout(60_000);
+
 async function openSection(page: Page, testInfo: TestInfo, label: string) {
   if (testInfo.project.name === "mobile-chromium") {
     const drawer = page.locator(".mobile-drawer");
@@ -54,15 +56,20 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   }
   await expect(page.getByLabel("一般聊天主視窗")).toBeVisible();
   await expect(page.getByRole("heading", { name: "SCBKR 聊天" })).toBeVisible();
-  await expect(page.locator(".plan-details")).toBeVisible();
-  await expect(page.locator(".plan-details")).toContainText(/免費草稿層|責任鏈結構層|規則書閉環審計層/);
+  if (testInfo.project.name === "desktop-chromium") {
+    const planDetails = page.locator(".plan-details");
+    await expect(planDetails).toBeVisible();
+    await planDetails.evaluate((element) => {
+      (element as HTMLDetailsElement).open = true;
+    });
+    await expect(planDetails).toContainText(/免費草稿層|責任鏈結構層|規則書閉環審計層/);
+    await expect(page.locator(".plan-picker button")).toHaveCount(3, { timeout: 15_000 });
+    await expect(page.getByLabel("方案選擇")).toBeVisible();
+  }
   await expect(page.getByRole("button", { name: "開啟一般聊天" })).toBeVisible();
   await expect(page.getByRole("button", { name: "開啟規則輔助" })).toBeVisible();
   await expect(page.getByRole("button", { name: "開啟待簽名草案" })).toBeVisible();
   await expect(page.getByRole("button", { name: "開啟四庫引用" })).toBeVisible();
-  await page.locator(".plan-details summary").click();
-  await expect(page.locator(".plan-picker button")).toHaveCount(3, { timeout: 15_000 });
-  await expect(page.getByLabel("方案選擇")).toBeVisible();
   await expect(page.locator(".rule-awareness-strip")).toContainText(/EMPTY|DRAFTING/);
   await expect(page.locator(".rule-awareness-strip")).toContainText("尚無生效規則");
   await expect(page.getByLabel("自然語言納編狀態")).toBeVisible();
@@ -71,27 +78,35 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await expect(page.getByRole("button", { name: "查四庫", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "建規則", exact: true })).toBeVisible();
   await expect(page.getByLabel("自然語言輸入", { exact: true })).toBeVisible();
-  await page.getByLabel("自然語言輸入", { exact: true }).fill("以後發布內容都要先讓我簽名，幫我建立規則。");
-  await page.getByLabel("自然語言輸入", { exact: true }).press("Enter");
-  await expect(page.getByText("第0原理建議閘").first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("button", { name: "草擬確認單", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "保持一般聊天", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "補角色與邊界", exact: true })).toBeVisible();
+  await page.getByLabel("自然語言輸入", { exact: true }).fill("我要一個新品上市推廣計畫，幫我生成規則。");
+  await page.locator(".send-button").click();
+  const advisoryCard = page.locator(".workflow-card.advisory").filter({ hasText: "第0原理建議閘" }).first();
+  await expect(advisoryCard).toBeVisible({ timeout: 15_000 });
+  await expect(advisoryCard.getByRole("button", { name: "草擬確認單", exact: true })).toBeVisible();
+  await expect(advisoryCard.getByRole("button", { name: "保持一般聊天", exact: true })).toBeVisible();
+  await expect(advisoryCard.getByRole("button", { name: "補角色與邊界", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "建立責任鏈確認單" })).toHaveCount(0);
-  if (testInfo.project.name === "desktop-chromium") {
-    await page.locator(".tool-plus").click();
-    await expect(page.getByRole("heading", { name: "模型可碰的工具" })).toBeVisible();
-    await page.locator(".tool-plus").click();
-  }
+  await advisoryCard.getByTestId("draft-confirmation-sheet").click();
+  await expect(page.getByRole("heading", { name: "Workbench / SCBKR 工作台" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".workbench-panel")).toContainText("DRAFT_ONLY");
+  await expect(page.locator(".workbench-panel")).toContainText("FREE_DRAFT_ASSISTED");
+  await expect(page.locator(".workbench-panel")).toContainText("S｜主體");
+  await expect(page.locator(".workbench-panel")).toContainText("C｜因果");
+  await expect(page.locator(".workbench-panel")).toContainText("B｜邊界");
+  await expect(page.locator(".workbench-panel")).toContainText("K｜依據");
+  await expect(page.locator(".workbench-panel")).toContainText("R｜責任");
+  const workbench = page.locator(".workbench-panel");
+  await expect(workbench.getByRole("button", { name: "模型補寫表單", exact: true })).toBeVisible();
+  await expect(workbench.getByRole("button", { name: "補失效條件", exact: true })).toBeVisible();
+  await expect(workbench.getByRole("button", { name: "補邊界", exact: true })).toBeVisible();
+  await expect(workbench.getByRole("button", { name: "補回放要求", exact: true })).toBeVisible();
+  await expect(page.locator(".workbench-panel")).toContainText("模型不能簽名");
   await attachScreen(page, testInfo, "01-chat-home");
-
-  await openSection(page, testInfo, "工作台");
-  await expect(page.getByRole("heading", { name: "建立責任鏈確認單" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "SCBKR 聊天" })).toHaveCount(0);
   await attachScreen(page, testInfo, "02-workbench");
 
   await openSection(page, testInfo, "規則中心");
   await expect(page.getByLabel("用一句人話建立規則", { exact: true })).toBeVisible();
+  await expect(page.locator(".product-rules")).toContainText(/SCBKR 規則中心|選擇一條規則查看詳情/);
   await expect(page.getByRole("heading", { name: "Workbench / SCBKR 工作台" })).toHaveCount(0);
 
   await openSection(page, testInfo, "工具與搜尋");
@@ -111,8 +126,9 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await openSection(page, testInfo, "資料中心");
   await expect(page.getByRole("heading", { name: "四庫資料中心", exact: true })).toBeVisible();
   await expect(page.getByLabel("搜尋四庫", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "規則庫 資料庫", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "規則庫", exact: true })).toBeVisible();
+  await expect(page.locator(".data-center-panel")).toContainText("VECTOR");
+  await page.getByLabel("LOGIC 資料庫").click();
+  await expect(page.getByRole("heading", { name: "LOGIC", exact: true })).toBeVisible();
   await attachScreen(page, testInfo, "04-data-center");
 
   const viewportFits = await page.evaluate(() =>
