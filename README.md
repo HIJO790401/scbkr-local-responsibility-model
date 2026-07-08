@@ -1,221 +1,329 @@
-# SCBKR 本地責任鏈模型
-# SCBKR Local Responsibility Chain Model
+# SCBKR 本地 AI 責任鏈 Runtime  
+# SCBKR Local-first AI Responsibility Chain Runtime
 
-![SCBKR 本地責任鏈模型](docs/images/scbkr-hero.png)
+> **SCBKR：讓 AI 不必每次重想。**  
+> **SCBKR: Stop making AI rethink everything.**
 
-正式產品身分由 [`config/product_manifest.json`](config/product_manifest.json) 定義；工程與 2.0 路線以 [`docs/SCBKR_MASTER_PLAN_FINAL.md`](docs/SCBKR_MASTER_PLAN_FINAL.md) 為母規格。SCBKR 是控制與編譯層，使用者連接的 LM Studio、Ollama 或 OpenAI-compatible 模型是可替換 Runtime。
+由 **許文耀 / 沈耀 SCBKR Kernel** 驅動的本地 AI 責任鏈系統。  
+把使用者的判斷編譯成可簽名、可入庫、可引用的本地規則，讓模型不再依賴長上下文亂猜。
 
-The authoritative product identity is defined in [`config/product_manifest.json`](config/product_manifest.json), while [`docs/SCBKR_MASTER_PLAN_FINAL.md`](docs/SCBKR_MASTER_PLAN_FINAL.md) is the master engineering and 2.0 roadmap contract. SCBKR is the control and compilation layer; the user-connected LM Studio, Ollama, or OpenAI-compatible model is a replaceable runtime.
+A local-first AI responsibility-chain runtime powered by the **Wen-Yao Hsu / ShenYao SCBKR Kernel**.  
+It turns user judgments into signed, local, citable rules — so models reason from four-store rule packages instead of polluted long context.
 
-一般 AI 聊天產品｜SCBKR 規則責任鏈｜本地優先四庫｜簽名與回放治理｜手機配對
-General AI chat product | SCBKR rule responsibility chain | Local-first four stores | Signature and replay governance | Mobile pairing
+---
 
-SCBKR 不是普通 chatbot，也不是純規則引擎。SCBKR 是「一般 AI 聊天產品 + 使用者規則責任鏈能力」。首頁是一般聊天；規則能力從聊天自然觸發，經第0原理建議閘、FREE 確認單草稿、Workbench 編輯、使用者簽名或雙簽模式後，才會進入規則中心與資料中心。
+## Current Audit｜目前實測
 
-SCBKR is not a generic chatbot and not a pure rule engine. It is a general AI chat product with user-defined responsibility-chain rules. The home surface is chat; reusable rules are proposed from conversation through the Zeroth Principle Advisory Gate, FREE confirmation drafts, Workbench review, user signature or dual-signature rule mode, and then Rule Center / Data Center governance.
+**Current measured context compression：97.9%**  
+**目前實測上下文壓縮率：97.9%**
 
-中文一句話：SCBKR 先讓使用者像一般大模型一樣聊天，再把「可重用、可引用、要承擔」的內容升級成 S/C/B/K/R 規則確認單。
+- Full Context：`107,394 tokens`
+- Rule Package：`2,257 tokens`
+- Compression：`97.9%`
+- Formal Basis：`signed_active_four_store_rules_only`
+- Chat Context Used as Formal Basis：`No`
+- Target Release：`≥98.06%`
 
-English one-line: SCBKR starts as normal AI chat, then upgrades reusable, citable, responsibility-bearing content into S/C/B/K/R confirmation sheets.
+SCBKR 不宣稱空泛節省。  
+每次正式回答都可以產生 Token / Cost Audit，檢查模型是否真的從完整上下文切換成最小 `current_rule_package`。
 
-## Productized Runnable Build｜完整可運行版
+SCBKR does not claim abstract savings.  
+Each formal answer can produce a Token / Cost Audit to verify whether the model actually moves from full-context reasoning to a minimal `current_rule_package`.
 
-- 中文：目前前端已收束為四個主產品頁：一般聊天、SCBKR 工作台、規則中心、資料中心；手機版改為單欄主流程，避免桌機三欄介面擠壓。
-- English: The current frontend is organized around four product pages: Chat, SCBKR Workbench, Rule Center, and Data Center; mobile now uses a single-column primary flow instead of squeezing the desktop three-column layout.
-- 中文：聊天偵測到「幫我生成規則」時會先顯示第0原理建議閘；使用者按「草擬確認單」後立即進工作台，先顯示可編輯 S/C/B/K/R 草稿，再由後端正式 task 覆蓋。
-- English: When chat detects rule-generation intent, it shows the Zeroth Principle Advisory Gate; pressing “Draft confirmation” immediately opens the Workbench with editable S/C/B/K/R, then replaces the provisional draft with the formal backend task.
-- 中文：模型可草擬與補欄位，但不能簽名、驗收、入庫或啟用規則；正式引用只允許 signed / reviewed / active 的本地規則與資料。
-- English: The model may draft and fill fields, but it cannot sign, review, store, or activate rules; formal citation is limited to signed / reviewed / active local rules and evidence.
-- 中文：回答前會產生最小 `current_rule_package`，標記 `chat_context_used: false`，避免把完整記憶庫塞給模型；VECTOR 僅能做候選召回，不能當正式 K 依據。
-- English: Before answering, SCBKR compiles a minimal `current_rule_package` with `chat_context_used: false`, avoiding full-memory prompts; VECTOR is recall-only and cannot be formal K evidence.
-- 中文：本機開發啟動：`python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8787`，另開一個視窗執行 `npm --prefix apps/web run dev`。
-- English: Local development: run `python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8787`, then run `npm --prefix apps/web run dev` in another terminal.
-- 中文：驗收命令：`python -m pytest -q`、`npm --prefix apps/web run test:ui`、`npm --prefix apps/web run build`。
-- English: Acceptance commands: `python -m pytest -q`, `npm --prefix apps/web run test:ui`, and `npm --prefix apps/web run build`.
+---
 
-## 1. 快速理解｜Quick Overview
+## Visual Overview｜圖卡總覽
 
-- 中文：預設首頁是一般聊天；聊天可寫文案、摘要文件、讀四庫、查資料，也可以在使用者要求時升級成規則草稿。
-- English: The default home surface is normal chat for writing, summarizing, reading stores, searching, and optionally promoting content into rule drafts.
-- 中文：第0原理建議閘只在「變成規則、建立確認單、以後照這個做、可重複使用」等意圖出現時觸發；觸發後仍不自動建規則、不自動入庫。
-- English: The Zeroth Principle Advisory Gate appears only when reusable-rule intent is detected; it does not auto-create rules or store data.
-- 中文：模型可以聊天、摘要、草擬、建議與協作補欄位，但不能簽名、驗收、二次確認入庫、自動啟用規則或繞過 OwnerReview。
-- English: The model may chat, summarize, draft, suggest, and help fill fields, but it cannot sign, review, second-confirm storage, activate rules, or bypass OwnerReview.
+### 1. AI Agent 的真正浪費  
+### The Real Waste of AI Agents
 
-## 2. 目前版本｜Current Version
+![AI Agent 的真正浪費](<docs/images/AI Agent 的真正浪費.png>)
 
-- 中文：產品版本為 `SCBKR 2.3`，階段為 `2.3-chat-first-ui-alignment`。
-- English: Product version is `SCBKR 2.3`, stage `2.3-chat-first-ui-alignment`.
-- 中文：Web 與 FastAPI Runtime 版本為 `2.3.0`；Desktop / Tauri metadata 仍保留既有 RC 線，避免混淆桌面殼版本與產品能力版本。
-- English: The Web and FastAPI runtime versions are `2.3.0`; Desktop / Tauri metadata remains on its existing RC line so shell metadata and product capability versions stay distinct.
-- 中文：安裝檔程式碼簽章、自動更新與商店封裝仍未提供，也不內建模型或 API key。
-- English: Installer code signing, auto-update, and store packaging are not yet provided; no model or API key is bundled.
+AI Agent 不是只耗電，是每次都在重想。  
+長上下文、重複推理、工具亂跑、GPU 空轉。真正的浪費，是沒有責任鏈。
 
-## 3. Chat-first Flow｜聊天優先流程
+AI Agents do not just consume power — they rethink everything.  
+Long context, repeated reasoning, tool over-calling, and GPU idle time are symptoms of a missing responsibility chain.
 
-- 中文：一般聊天 → 第0原理建議閘 → FREE 確認單草稿 → Workbench 協作編輯 → 使用者簽名 / 雙簽模式 → 規則中心 → 資料中心。
-- English: Normal chat → Zeroth Principle Advisory Gate → FREE confirmation draft → Workbench collaboration → user signature / dual-signature mode → Rule Center → Data Center.
-- 中文：FREE 可以生成確認單草稿、S/C/B/K/R 初稿、送到 Workbench、模型協作補草稿、使用者自簽、入庫為使用者自己的規則。
-- English: FREE can create confirmation drafts, S/C/B/K/R initial drafts, send them to Workbench, let the model assist with draft fields, allow user self-signature, and store user-owned rules.
-- 中文：NT$690 是責任鏈結構輔助層，不是確認單生成門檻。
-- English: NT$690 is the responsibility-structure assistance layer, not a paywall for creating confirmation drafts.
-- 中文：NT$3,300 是規則書閉環層，包含沈耀強制簽名 + 使用者簽名、成立 / 失效條件、風險、修復、回放、RulePack 與 OwnerReview。
-- English: NT$3,300 is the rulebook closure layer with ShenYao creator signature + user signature, formation / invalidation conditions, risks, repair paths, replay requirements, RulePacks, and OwnerReview.
+---
 
-## 4. 2.3 目前能做什麼｜What 2.3 Can Do
+### 2. SCBKR 的核心解法  
+### The Core SCBKR Solution
 
-- 中文：建立 S/C/B/K/R 任務確認單、使用者簽名、生成、驗收、入庫請求、二次確認、Data Center 檢視與四庫引用。
-- English: It supports S/C/B/K/R task confirmation, owner signature, generation, review, storage request, second confirmation, Data Center viewing, and four-store evidence reuse.
-- 中文：模型只能提出草案或建議，不能自行簽名、驗收、入庫或修改已寫入資料。
-- English: The model may draft or suggest, but it cannot sign, review, store, or rewrite committed evidence by itself.
-- 中文：具名、版本化、簽名、Active 的規則可控制模型與工具；向量檢索只能找候選，不能取代正式 K 依據。
-- English: Attributed, versioned, signed, Active rules control models and tools; vector retrieval may find candidates but cannot replace authoritative K evidence.
+![SCBKR 的核心解法](<docs/images/SCBKR 的核心解法.png>)
 
-## 5. Desktop Mode 與 LAN Companion Mode｜Desktop Mode and LAN Companion Mode
+不要把整個世界丟給模型。  
+SCBKR 把使用者判斷變成本地規則；簽名後入四庫；之後只給模型最小規則包。
 
-### Desktop Mode｜預設模式
+Stop feeding the whole world to the model.  
+SCBKR turns user judgments into local rules; after signature and four-store commit, the model only receives the minimal rule package.
 
-- 中文：Windows Desktop RC 預設綁定 `http://127.0.0.1:8787`，只能本機電腦連線，這是最安全模式。
-- English: The Windows Desktop RC binds to `http://127.0.0.1:8787` by default; only the local computer can connect, which is the safest mode.
-- 中文：預設模式下，手機不能直接用 `192.168.x.x` 連入。
-- English: In default mode, a phone cannot directly connect through `192.168.x.x`.
+---
 
-### LAN Companion Mode｜使用者手動開啟
+### 3. 四庫才是正式判斷標準  
+### Four Stores Define the Formal Basis
 
-- 中文：使用者手動啟動 LAN Companion Mode 後，sidecar 才可綁定 `0.0.0.0:8787`。
-- English: Only after the user manually starts LAN Companion Mode may the sidecar bind to `0.0.0.0:8787`.
-- 中文：手機可在同 Wi-Fi / LAN 開啟 `http://192.168.x.x:8787/`，再輸入桌機產生的 6 位數一次性配對碼。
-- English: A phone on the same Wi-Fi / LAN opens `http://192.168.x.x:8787/` and enters the one-time six-digit code generated on the desktop.
-- 中文：LAN Companion Mode 不會預設開啟；配對碼 10 分鐘失效且只能使用一次，桌機可撤銷已配對裝置。
-- English: LAN Companion Mode is never enabled by default. Pairing codes expire after ten minutes, are one-time use, and paired devices can be revoked from the desktop.
+![四庫才是正式判斷標準](<docs/images/四庫才是正式判斷標準.png>)
 
-## 6. 完整責任鏈流程｜Responsibility Chain Flow
+SCBKR 不把所有資料都塞給模型。  
+它把正式依據拆成四庫：
 
-![責任鏈流程](docs/images/responsibility-loop.png)
-![Responsibility chain flow](docs/images/responsibility-loop-en.png)
+SCBKR does not dump all data into the model.  
+It separates formal authority into four stores:
 
-- 中文：輸入任務 → 產生確認單 → 使用者簽名 → 模型生成 → 使用者驗收 → 入庫建議 → 二次確認 → 寫入四庫 / Data Center。
-- English: Input task → build confirmation sheet → owner signature → model generation → user review → storage suggestion → second confirmation → write to four stores / Data Center.
+| Store | 中文 | English |
+|---|---|---|
+| LOGIC | 已簽名、已啟用的本地規則 | Signed and active local rules |
+| CORPUS | 使用者確認的正式資料 | Verified user-confirmed data |
+| MEMORY | 使用者長期偏好與限制 | Long-term user preferences and constraints |
+| VECTOR | 只召回，不作正式依據 | Recall only, not formal basis |
 
-## 7. Workbench 與使用者簽名｜Workbench and Owner Signature
+**Chat context is not formal basis.**  
+**聊天上下文不是正式依據。**
 
-![Workbench 使用者簽名](docs/images/workbench-owner-signature.png)
-![Workbench owner signature](docs/images/workbench-owner-signature-en.png)
+---
 
-- 中文：Workbench 是使用者檢查與修改 S/C/B/K/R 的地方；任何修改都會使舊簽名與下游生成、驗收、入庫狀態作廢。
-- English: The Workbench is where the user reviews and edits S/C/B/K/R; any edit invalidates the old signature and downstream generation, review, and storage state.
-- 中文：模型不能簽名，`confirmed_by` 必須是 `user`，signature 不可空。
-- English: The model cannot sign; `confirmed_by` must be `user`, and the signature cannot be empty.
+### 4. Token Audit 實測數字  
+### Measured Token / Cost Audit
 
-## 8. Data Center 與四庫｜Data Center and Four Stores
+![Token Audit 實測數字](<docs/images/Token Audit 實測數字.png>)
 
-![四庫引用](docs/images/four-store-evidence.png)
-![Four-store evidence](docs/images/four-store-evidence-en.png)
+目前實測：
 
-- 中文：四庫只能是 `vector`、`corpus`、`logic`、`memory`。
-- English: The only allowed stores are `vector`, `corpus`, `logic`, and `memory`.
-- 中文：`exports` 不是 storage target，也不得恢復為 storage target。
-- English: `exports` is not a storage target and must not be restored as one.
-- 中文：Data Center 更新 / 刪除必須有使用者簽名；revoked / archived / superseded 資料不得作為可用引用。
-- English: Data Center update / delete requires user signature; revoked / archived / superseded evidence cannot be reused as available evidence.
+Current audit:
 
-## 9. 本地模型支援｜Local Model Support
+| Metric | Value |
+|---|---:|
+| Full Context | `107,394 tokens` |
+| Rule Package | `2,257 tokens` |
+| Compression | `97.9%` |
+| Chat context as formal basis | `No` |
+| Target | `≥98.06%` |
 
-![本地模型架構](docs/images/architecture.png)
-![Local model architecture](docs/images/local-model-architecture-en.png)
+這代表模型不再每次讀完整上下文，而是讀取最小正式規則包。
 
-- 中文：2.0 支援 sandbox、本地 LLM、LM Studio、Ollama 或 OpenAI-compatible endpoint 設定。
-- English: 2.0 supports sandbox, local LLM, LM Studio, Ollama, or an OpenAI-compatible endpoint.
-- 中文：外部 API 權限預設關閉；非 loopback 模型網址需要使用者開啟 external API guard。
-- English: External API permission is off by default; non-loopback model URLs require the user to enable the external API guard.
+This means the model no longer reads the full context every time; it reads the minimal formal rule package.
 
-## 10. Windows 安裝與啟動｜Windows Setup
+---
 
-- 中文：Desktop RC 預設啟動本機 sidecar：`http://127.0.0.1:8787`。
-- English: The Desktop RC starts the local sidecar by default at `http://127.0.0.1:8787`.
-- 中文：健康檢查：`curl http://127.0.0.1:8787/health`。
-- English: Health check: `curl http://127.0.0.1:8787/health`.
-- 中文：一般使用者不需要 Python、Node、npm、uvicorn、PowerShell、LM Studio、Ollama 或 API key 即可測試 sandbox 流程。
-- English: Normal users do not need Python, Node, npm, uvicorn, PowerShell, LM Studio, Ollama, or an API key to test the sandbox flow.
+### 5. 模型只草擬，使用者才簽名  
+### The Model Drafts. The User Signs.
 
-## 11. 手機遙控｜Mobile Companion
+![模型只草擬，使用者才簽名](<docs/images/模型只草擬，使用者才簽名.png>)
 
-![Mobile Companion](docs/images/mobile-companion-en.png)
+模型不能簽名。  
+模型不能入庫。  
+模型不能啟用。  
+模型不能終裁。  
+使用者簽名後，規則才成立。
 
-- 中文：手機不是直接連本地 LLM。
-- English: The phone does not connect directly to the local LLM.
-- 中文：手機只是操作入口。
-- English: The phone is only an operation entry point.
-- 中文：手機瀏覽器先連到電腦上的 SCBKR LAN Companion Web UI。
-- English: The phone browser connects to the SCBKR LAN Companion Web UI running on the computer.
-- 中文：手機 → SCBKR 後端 → 本地 LLM。所有模型呼叫仍由電腦上的 SCBKR 後端執行。
-- English: Phone → SCBKR backend → local LLM. All model calls are still executed by the SCBKR backend on the computer.
-- 中文：本地 LLM / LM Studio / Ollama / OpenAI-compatible API 仍由電腦端設定。
-- English: Local LLM / LM Studio / Ollama / OpenAI-compatible API settings remain computer-side settings.
-- 中文：手機端不能繞過使用者簽名、驗收、二次確認、Data Center Gate 或四庫限制。
-- English: The phone cannot bypass owner signature, user review, second confirmation, the Data Center Gate, or four-store limits.
-- 中文：啟動方式：在 Windows 上執行 `powershell -ExecutionPolicy Bypass -File scripts/start_lan_companion_windows.ps1`，依畫面顯示的 URL 在手機瀏覽器開啟。
-- English: Start it on Windows with `powershell -ExecutionPolicy Bypass -File scripts/start_lan_companion_windows.ps1`, then open the displayed URL in the phone browser.
+The model cannot sign.  
+The model cannot store.  
+The model cannot activate.  
+The model cannot make final rulings.  
+A rule becomes valid only after user signature.
 
-## 12. 隱私與安全邊界｜Privacy and Safety Boundary
+**Kernel 提供結構，使用者承擔責任。**  
+**Kernel provides structure. The user owns responsibility.**
 
-- 中文：預設 Desktop Mode 僅本機可連，LAN Companion Mode 只適合可信任 Wi‑Fi。
-- English: Default Desktop Mode is local-only; LAN Companion Mode should only be used on trusted Wi‑Fi.
-- 中文：不要公開手機配對碼或已配對憑證；憑證不寫入 Git，也不固定寫死。
-- English: Do not publish pairing codes or paired-device credentials; credentials are never committed to Git or hard-coded.
+---
 
-## 13. 與 Chatbot / Agent / RAG 的差異｜Difference from Chatbot / Agent / RAG
+### 6. 一句產品定位  
+### Product Positioning
 
-- 中文：Chatbot 重點是對話；Agent 重點是自動行動；RAG 重點是檢索增強。SCBKR 重點是責任鏈、簽名、驗收、入庫與未來引用邊界。
-- English: Chatbots focus on conversation; agents focus on autonomous action; RAG focuses on retrieval augmentation. SCBKR focuses on responsibility chain, signature, review, storage, and future reuse boundaries.
+![一句產品定位](<docs/images/一句產品定位.png>)
 
-## 14. 2.1 規則狀態與上線層｜2.1 Rule State and Launch Layer
+SCBKR 不是更大的 Agent。  
+它是 Agent 前面的本地責任鏈節能層。
 
-![2.0 Roadmap](docs/images/roadmap-2.0-en.png)
+SCBKR is not a bigger Agent.  
+It is the local responsibility-chain layer before the Agent.
 
-- 中文：2.0 基礎能力仍包含 Rule Registry、使用者自有 RulePack 匯入、規則命中 Gate、五道工具權限 Gate、執行回放、嚴格 JSON 編譯器與 token 效率統計。
-- English: The 2.0 foundation still includes the Rule Registry, user-owned RulePack import, rule-match gates, five tool permission gates, execution replay, a strict JSON compiler, and token-efficiency metrics.
-- 中文：2.1 加入受保護的沈耀規則狀態 Runtime、版本／模式選擇、使用者規則覆寫驗算、真實網頁搜尋與閱讀、訂閱介面及上線準備中心。
-- English: 2.1 adds the protected ShenYao Rule State Runtime, version and mode selection, user-overlay validation, real web search and page reading, subscription surfaces, and a launch readiness center.
-- 中文：RuleStateManager 會在每次模型呼叫前注入 `EMPTY / DRAFTING / RULE_ACTIVE / RULEPACK_ACTIVE` 狀態；只有已驗證的沈耀 Runtime 可輸出「沈耀交我判的／主責歸耀／唯真長存」，失效或未授權狀態會自動阻擋。
-- English: RuleStateManager injects `EMPTY / DRAFTING / RULE_ACTIVE / RULEPACK_ACTIVE` before every model call. ShenYao ownership declarations are allowed only under a verified ShenYao runtime and are blocked after expiry or without authorization.
-- 中文：訂閱提供 Runtime 執行資格，不散布私有規則原始碼。使用者仍可匯入自己擁有的規則；未啟用沈耀狀態時會明確顯示為獨立規則狀態。
-- English: Subscriptions grant runtime execution entitlement without distributing private rule source. Users may still import rules they own; without ShenYao state, the product clearly reports an independent rule state.
+**Rule first. Context second. Responsibility always.**  
+**規則優先。上下文其次。責任永遠在場。**
 
-## 15. 開發者快速啟動｜Developer Quick Start
+---
+
+## What SCBKR Solves｜SCBKR 解決什麼
+
+AI Agent 的問題不只是模型太大，而是它每次都在重新判斷。
+
+The problem with AI Agents is not only model size.  
+The deeper problem is repeated reasoning.
+
+一般 AI Agent 會把聊天歷史、工具結果、檢索候選、舊記憶、未確認資料混在一起，反覆丟進模型重新推理。  
+這會造成：
+
+Typical AI Agents repeatedly push chat history, tool outputs, retrieval candidates, old memory, and unverified data back into the model.  
+This causes:
+
+- 高 token 成本  
+  High token cost
+
+- 上下文污染  
+  Context pollution
+
+- 工具過度呼叫  
+  Tool over-calling
+
+- GPU / 算力浪費  
+  GPU / compute waste
+
+- 責任鏈不清  
+  Unclear responsibility chain
+
+SCBKR 的做法相反：
+
+SCBKR does the opposite:
+
+1. 先把使用者判斷編譯成規則  
+   Compile user judgments into rules first
+
+2. 再由使用者編輯與簽名  
+   Let the user edit and sign
+
+3. 然後寫入本地四庫  
+   Commit into local four stores
+
+4. 最後只給模型最小 `current_rule_package`  
+   Then give the model only the minimal `current_rule_package`
+
+---
+
+## SCBKR Runtime Algorithm｜SCBKR 運行算法
+
+SCBKR 的核心不是讓模型變大，而是讓模型少猜。
+
+The core of SCBKR is not making the model bigger.  
+It is making the model guess less.
+
+### Flow｜流程
+
+1. **Input｜輸入**  
+   使用者輸入聊天、判斷、文案、程式或規則需求。  
+   The user enters a chat, judgment, copywriting task, coding request, or rule request.
+
+2. **Route｜路由**  
+   系統判斷任務類型：一般聊天、生成規則、寫程式、寫文案、正式判斷。  
+   The runtime classifies the task: chat, rule generation, coding, copywriting, or formal judgment.
+
+3. **Kernel Compile｜Kernel 編譯**  
+   若使用者要建立規則，系統載入本地 SCBKR Kernel，將輸入編譯成 S/C/B/K/R。  
+   If the user wants a rule, the local SCBKR Kernel compiles the input into S/C/B/K/R.
+
+4. **Validator｜驗證器**  
+   第0定理、成立條件、失效條件、責任鏈、回放、修復條件會被檢查。  
+   不合格不得入庫。  
+   The Zeroth Theorem, validity conditions, failure conditions, responsibility chain, replay, and repair path are checked.  
+   Invalid drafts cannot be stored.
+
+5. **User Signature｜使用者簽名**  
+   模型只能草擬。使用者簽名後，規則才成立。  
+   The model can only draft. The rule becomes valid only after user signature.
+
+6. **Four-Store Commit｜四庫入庫**  
+   規則與資料寫入本地四庫：LOGIC、CORPUS、MEMORY、VECTOR。  
+   Rules and data are committed into local stores: LOGIC, CORPUS, MEMORY, VECTOR.
+
+7. **Minimal Rule Package｜最小規則包**  
+   後續回答時，只載入命中的 `current_rule_package`。  
+   不再把完整聊天與記憶丟給模型。  
+   Future answers load only the matched `current_rule_package`.  
+   The full chat history and memory dump are no longer pushed into the model.
+
+8. **Formal Answer｜正式回答**  
+   模型根據已簽名、已啟用的本地規則回答。  
+   VECTOR 只召回，不作正式依據。  
+   The model answers based on signed and active local rules.  
+   VECTOR is recall-only and cannot be used as formal basis.
+
+---
+
+## Formula｜核心公式
+
+### Full Context Reasoning｜長上下文推理
+
+Full chat history  
++ full memory dump  
++ tool outputs  
++ retrieval candidates  
++ unverified data  
++ unsigned drafts  
+= high token cost + context pollution + repeated reasoning
+
+完整聊天歷史  
++ 完整記憶  
++ 工具輸出  
++ 檢索候選  
++ 未確認資料  
++ 未簽名草稿  
+= 高 token 成本 + 上下文污染 + 重複推理
+
+---
+
+### SCBKR Rule Package Reasoning｜SCBKR 規則包推理
+
+Signed rules  
++ citable data  
++ user preferences  
++ boundaries  
++ responsibility conditions  
++ failure conditions  
+= minimal context + replayable judgment + auditable responsibility
+
+已簽名規則  
++ 可引用資料  
++ 使用者偏好  
++ 邊界條件  
++ 責任條件  
++ 失效條件  
+= 最小上下文 + 可回放判斷 + 可審計責任鏈
+
+---
+
+## Plan Depth｜付費不是模板，是編譯深度
+
+SCBKR does not sell templates.  
+SCBKR sells compilation depth.
+
+SCBKR 不販售模板。  
+SCBKR 提供的是讓本地模型照責任鏈工作的編譯深度。
+
+| Plan | 中文 | English |
+|---|---|---|
+| FREE | 基本五維規則、使用者自簽、本地入庫、本地引用 | Basic S/C/B/K/R rules, user self-signature, local storage, local citation |
+| NT$690 | 責任鏈補強、缺資料追問、停止條件、模型不可越權提醒 | Responsibility-chain assistance, missing-data questions, stop conditions, model boundary warnings |
+| NT$3,300 | 規則書閉環、成立 / 失效條件、風險分級、修復、回放、雙簽、RulePack | Rulebook closure, validity / failure conditions, risk levels, repair paths, replay, dual signature, RulePack |
+
+---
+
+## Product Status｜目前狀態
+
+- Product runtime：Local-first SCBKR Runtime
+- Current audit：`97.9% context compression`
+- Target audit：`≥98.06%`
+- Formal basis：`signed_active_four_store_rules_only`
+- Chat context as formal basis：`No`
+- Model role：`draft_only`
+- User data：local-first
+- VECTOR：recall only, not formal basis
+
+---
+
+## Acceptance｜驗收命令
 
 ```bash
 python -m pytest -q
+npm --prefix apps/web run test:ui -- --reporter=line
 npm --prefix apps/web run build
-npm --prefix apps/desktop run check:skeleton
-npm --prefix apps/desktop run check:release
-```
+````
 
-- Windows 一鍵開啟完整本機 UI：`powershell -ExecutionPolicy Bypass -File scripts/start_ui_review_windows.ps1`
-- 桌機與手機版實機驗收：`powershell -ExecutionPolicy Bypass -File scripts/run_ui_acceptance_windows.ps1`
-- UI 驗收會啟動真實 FastAPI 與 Web UI、操作主要頁面、檢查瀏覽器錯誤與畫面溢出，並將各頁截圖附在 HTML 報告中。
-- UI acceptance starts the real FastAPI and Web UI, exercises primary pages, checks browser errors and viewport overflow, and attaches screenshots to an HTML report.
+---
 
-- 中文：本機 API 預設：`http://127.0.0.1:8787`。
-- English: Default local API: `http://127.0.0.1:8787`.
-- 中文：API base 會依 runtime matrix 判斷：LAN Companion 頁面使用目前頁面 origin；localhost dev / preview 頁面仍連回 FastAPI sidecar `http://127.0.0.1:8787`；`VITE_SCBKR_API_URL` 永遠最高優先。
-- English: The API base follows a runtime matrix: LAN Companion pages use the current page origin, localhost dev / preview pages still call the FastAPI sidecar at `http://127.0.0.1:8787`, and `VITE_SCBKR_API_URL` always has the highest priority.
+## Signature｜署名
 
-## 16. 測試與驗收｜Testing and Validation
+**SCBKR Local-first AI Responsibility Chain Runtime**
+**Powered by Wen-Yao Hsu / ShenYao SCBKR Kernel**
 
-- 中文：Release readiness 檢查包含 sidecar host/port、LAN token、web-dist 服務、frontend API base、Gate 保存、README 圖片與文件連結。
-- English: Release readiness checks cover sidecar host/port, LAN token, web-dist serving, frontend API base, gate preservation, README images, and documentation links.
-- 中文：Windows 上可執行 release build / smoke / LAN Companion smoke PowerShell 腳本。
-- English: On Windows, run the release build / smoke / LAN Companion smoke PowerShell scripts.
-
-## 17. 2.1 發布狀態｜2.1 Release Readiness
-
-- 中文：`2.1.0` 為上線候選版。產品內已提供上線中心與準備度檢查；正式送審仍需作者提供網域、Supabase、Stripe、搜尋服務、Partner Center、簽章及法律頁面資料。
-- English: `2.1.0` is a launch candidate. The app includes a launch center and readiness checks; store submission still requires owner-provided domain, Supabase, Stripe, search, Partner Center, signing, and legal configuration.
-- 中文：Desktop Mode 預設 local-only；LAN Companion Mode 需手動啟動並以一次性配對碼授權手機。
-- English: Desktop Mode is local-only by default; LAN Companion Mode requires manual launch and one-time code pairing.
-
-## 18. License / Author
-
-- 中文：作者：許文耀／沈耀888pi，語意防火牆。授權請以 repository license 為準。
-- English: Author: Wen-Yao Hsu / ShenYao888pi, Semantic Firewall. License follows the repository license.
+**SCBKR 本地 AI 責任鏈 Runtime**
+**由許文耀 / 沈耀 SCBKR Kernel 驅動**
