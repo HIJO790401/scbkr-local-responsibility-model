@@ -55,8 +55,8 @@ def test_external_api_permission_disabled_skips_remote_draft_call_and_falls_back
 
     assert called["value"] is False
     assert task["scbkr"]["fallback_used"] is False
-    assert task["scbkr"]["draft_model_call_skipped_reason"] == "external_api_permission_disabled"
-    assert task["draft_model_call_skipped_reason"] == "external_api_permission_disabled"
+    assert task["scbkr"]["draft_model_call_skipped_reason"] == "direct_scbkr_kernel_compiler"
+    assert task["draft_model_call_skipped_reason"] == "direct_scbkr_kernel_compiler"
     assert task["confirmed"] is False
     assert task["status"] == "waiting_user_confirm"
 
@@ -79,7 +79,7 @@ def test_external_api_permission_enabled_allows_valid_remote_draft_call(tmp_path
     monkeypatch.setattr(main, "_post_openai_compatible", model_response)
     task = create_task_with_draft(main)
     assert task["scbkr"]["fallback_used"] is False
-    assert "draft_model_call_skipped_reason" not in task["scbkr"]
+    assert task["scbkr"]["draft_model_call_skipped_reason"] == "direct_scbkr_kernel_compiler"
 
 
 def test_sandbox_and_loopback_draft_do_not_require_external_api_permission(tmp_path, monkeypatch):
@@ -105,7 +105,7 @@ def test_sandbox_and_loopback_draft_do_not_require_external_api_permission(tmp_p
     main.MODEL_SETTINGS.update({"enabled": True, "mode": "local", "provider": "lm_studio", "base_url": "http://localhost:1234/v1", "model_name": "local"})
     monkeypatch.setattr(main, "_post_openai_compatible", loopback_response)
     loopback_task = create_task_with_draft(main)
-    assert called["loopback"] is True
+    assert called["loopback"] is False
     assert loopback_task["scbkr"]["fallback_used"] is False
 
 

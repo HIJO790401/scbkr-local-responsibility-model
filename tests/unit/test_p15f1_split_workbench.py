@@ -36,10 +36,10 @@ def test_fake_model_valid_draft_is_written_to_task_and_workbench(monkeypatch):
     response = client.post("/api/tasks/create", json={"raw_input": "我要寫一個紫蘇梅冰沙開幕宣傳文案", "task_type": "general", "create_scbkr_draft": True})
     assert response.status_code == 200
     task = response.json()
-    assert task["scbkr"]["draft_source"] in {"model_assisted_structured", "scbkr_base_logic"}
+    assert task["scbkr"]["draft_source"] in {"model_assisted_structured", "scbkr_base_logic", "direct_scbkr_kernel_compiler"}
     assert task["scbkr"]["fallback_used"] is False
     readback = main.get_task(task["task_id"])
-    assert readback["scbkr"]["draft_source"] in {"model_assisted_structured", "scbkr_base_logic"}
+    assert readback["scbkr"]["draft_source"] in {"model_assisted_structured", "scbkr_base_logic", "direct_scbkr_kernel_compiler"}
 
 
 def test_remote_external_disabled_fallback_and_loopback_not_blocked(monkeypatch):
@@ -54,8 +54,8 @@ def test_remote_external_disabled_fallback_and_loopback_not_blocked(monkeypatch)
     assert r.status_code == 200
     assert called["value"] is False
     assert r.json()["scbkr"]["fallback_used"] is False
-    assert r.json()["scbkr"]["draft_source"] == "scbkr_base_logic"
-    assert r.json()["scbkr"]["draft_model_call_skipped_reason"] == "external_api_permission_disabled"
+    assert r.json()["scbkr"]["draft_source"] == "direct_scbkr_kernel_compiler"
+    assert r.json()["draft_model_call_skipped_reason"] == "direct_scbkr_kernel_compiler"
 
     fake = create_scbkr_draft("我要寫一個紫蘇梅冰沙開幕宣傳文案")
     monkeypatch.setitem(main.MODEL_SETTINGS, "base_url", "http://127.0.0.1:1234/v1")

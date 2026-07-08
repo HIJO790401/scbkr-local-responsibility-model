@@ -1,4 +1,4 @@
-"""P13-A/B/C FastAPI MVP runtime for the local SCBKR Web App.
+"""FastAPI runtime for the local-first SCBKR product.
 
 Tasks are cached in memory and persisted to local SQLite. Flow events are
 appended to a JSONL replay ledger; retrieval is advisory and no desktop runtime is initialized here.
@@ -114,6 +114,8 @@ from core.rule_os import (
     downgrade_answer_to_draft,
     rule_os_text,
 )
+from core.runtime.local_scbkr_runtime import compile_rule_from_input
+from core.audit.token_cost_audit import measure_context_compression
 
 LOCAL_DESKTOP_API_BASE_URL = "http://127.0.0.1:8787"
 LOCAL_DESKTOP_CORS_ORIGINS = [
@@ -1159,8 +1161,8 @@ def evaluate_rule_assist_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@app.post("/api/rule-assist/mock-chat")
-def rule_assist_mock_chat(payload: dict[str, Any]) -> dict[str, Any]:
+@app.post("/api/rule-assist/check-chat")
+def rule_assist_check_chat(payload: dict[str, Any]) -> dict[str, Any]:
     text = str(payload.get("message") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
@@ -1168,7 +1170,7 @@ def rule_assist_mock_chat(payload: dict[str, Any]) -> dict[str, Any]:
     context = _build_four_store_context(text, None)
     assessment = _assess_rule_assist(text, locale=locale, target_mode="chat", four_store_context=context)
     return {
-        "mode": "rule_assist_mock_chat",
+        "mode": "rule_assist_check_chat",
         "reply": build_local_rule_assist_reply(text, assessment, locale),
         "reply_source": "deterministic_rule_assist",
         "rule_assist": assessment,
@@ -1816,11 +1818,23 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
         reply = f"{reply}\n\nGate: this touches high-risk tools, publishing, storage, or external connection. I can draft only; owner signature is required before execution."
     reply = _rule_state_manager().decorate_reply(reply, locale)
     suggestion = _build_chat_suggestion(user_text) if mode == "general_chat" and any(trigger in user_text for trigger in SUGGESTION_TRIGGERS) else None
+    token_cost_audit = measure_context_compression(
+        {
+            "latest_user_message": user_text,
+            "chat_history": payload.get("chat_history") or payload.get("messages") or [],
+            "four_store_context": four_store_context,
+            "rule_assist": rule_assist,
+            "registered_rules": _rule_registry().list_rules(),
+            "storage_items_considered": list_persisted_storage_items(limit=1000),
+        },
+        current_rule_package,
+    )
     return {
         "mode": "general_chat",
         "route_mode": mode,
         "input_classification": input_classification,
         "current_rule_package": current_rule_package,
+        "token_cost_audit": token_cost_audit,
         "post_check": post_check,
         "reply": reply,
         "reply_source": source,
@@ -1882,14 +1896,19 @@ def _create_task_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         defer_model_draft = payload.get("defer_model_draft") is True
         task["data_center_context"] = _deferred_four_store_context(raw_input) if defer_model_draft else _build_four_store_context(raw_input, task_id)
         task["data_center_context"].update({"advisory": True, "retrieval_required": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": len(task["data_center_context"].get("hits", []))})
+        plan_level = str(payload.get("rule_assist_plan") or RULE_ASSIST_SETTINGS.get("plan_level", "FREE"))
+        task["rule_assist_plan"] = plan_level
         task["rule_assist"] = _assess_rule_assist(raw_input, locale=_response_locale(raw_input, None), target_mode=str(payload.get("object_type") or "task"), four_store_context=task["data_center_context"])
-        task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(
-            raw_input,
-            task["task_type"],
-            task["data_center_context"],
-            task["rule_assist"],
-            defer_model_call=defer_model_draft,
-        )
+        direct_runtime = compile_rule_from_input(raw_input, plan_level=plan_level, locale=_response_locale(raw_input, None))
+        task["kernel_runtime"] = {
+            "route": direct_runtime["route"],
+            "l0_gate": direct_runtime["l0_gate"],
+            "validator": direct_runtime["validator"],
+            "kernel_meta": direct_runtime["kernel_pack"].get("meta"),
+        }
+        task["scbkr"] = direct_runtime["draft"]
+        fallback_used = False
+        skipped_reason = "direct_scbkr_kernel_compiler"
         task["draft_object"] = build_scbkr_draft_object(
             user_request_raw=raw_input,
             scbkr=task["scbkr"],
@@ -1898,17 +1917,19 @@ def _create_task_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
             draft_id=task_id,
             evidence_context=task["data_center_context"],
         )
-        if skipped_reason:
-            task["draft_model_call_skipped_reason"] = skipped_reason
-        task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
+        task["draft_model_call_skipped_reason"] = skipped_reason
+        task["status"] = "waiting_user_confirm" if direct_runtime["validator"].get("passed") else "model_validation_failed"
         task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
         task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
+        task["draft_object"]["generated_under_kernel"] = task["scbkr"].get("meta", {}).get("generated_under_kernel")
+        task["draft_object"]["model_role"] = "draft_only"
+        task["draft_object"]["requires_user_signature"] = True
         task["confirmed"] = False
         TASKS[task_id] = task
         save_task(task)
         save_scbkr_confirmation(task_id, task["scbkr"])
         _append_task_event("task_created", task, status_after="waiting_scbkr", payload={"task_type": task["task_type"]})
-        _append_task_event("scbkr_draft_model_generated", task, status_before="waiting_scbkr", status_after=task["status"], payload={"fallback_used": fallback_used, "draft_model_call_skipped_reason": skipped_reason, "data_center_context_advisory": True})
+        _append_task_event("scbkr_direct_kernel_compiled", task, status_before="waiting_scbkr", status_after=task["status"], payload={"fallback_used": fallback_used, "draft_model_call_skipped_reason": skipped_reason, "data_center_context_advisory": True, "validator": direct_runtime["validator"]})
         _append_task_event("scbkr_draft_created", task, status_before="waiting_scbkr", status_after=task["status"], payload={"compatibility_event": True, "confirmation_status": task["scbkr"].get("confirmation_status")})
         return task
     TASKS[task_id] = task
@@ -1943,21 +1964,36 @@ def create_scbkr(task_id: str) -> dict[str, Any]:
     task["data_center_context"].update({"advisory": True, "retrieval_required": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": len(task["data_center_context"].get("hits", []))})
     task["rule_assist_plan"] = RULE_ASSIST_SETTINGS.get("plan_level", "FREE")
     task["rule_assist"] = _assess_rule_assist(task["raw_input"], locale=_response_locale(task["raw_input"], None), target_mode="task", four_store_context=task["data_center_context"])
-    task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(task["raw_input"], task["task_type"], task["data_center_context"], task["rule_assist"])
+    direct_runtime = compile_rule_from_input(
+        task["raw_input"],
+        plan_level=str(task["rule_assist_plan"] or "FREE"),
+        locale=_response_locale(task["raw_input"], None),
+    )
+    task["kernel_runtime"] = {
+        "route": direct_runtime["route"],
+        "l0_gate": direct_runtime["l0_gate"],
+        "validator": direct_runtime["validator"],
+        "kernel_meta": direct_runtime["kernel_pack"].get("meta"),
+    }
+    task["scbkr"] = direct_runtime["draft"]
+    fallback_used = False
+    skipped_reason = "direct_scbkr_kernel_compiler"
     task["draft_object"] = build_scbkr_draft_object(user_request_raw=task["raw_input"], scbkr=task["scbkr"], draft_id=task_id, evidence_context=task["data_center_context"])
     task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
     task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
-    if skipped_reason:
-        task["draft_model_call_skipped_reason"] = skipped_reason
-    task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
+    task["draft_object"]["generated_under_kernel"] = task["scbkr"].get("meta", {}).get("generated_under_kernel")
+    task["draft_object"]["model_role"] = "draft_only"
+    task["draft_object"]["requires_user_signature"] = True
+    task["draft_model_call_skipped_reason"] = skipped_reason
+    task["status"] = "waiting_user_confirm" if direct_runtime["validator"].get("passed") else "model_validation_failed"
     save_task(task)
     save_scbkr_confirmation(task_id, task["scbkr"])
     _append_task_event(
-        "scbkr_draft_model_generated",
+        "scbkr_direct_kernel_compiled",
         task,
         status_before=status_before,
         status_after=task["status"],
-        payload={"confirmation_status": task["scbkr"].get("confirmation_status"), "fallback_used": fallback_used, "draft_model_call_skipped_reason": skipped_reason, "data_center_context_advisory": True},
+        payload={"confirmation_status": task["scbkr"].get("confirmation_status"), "fallback_used": fallback_used, "draft_model_call_skipped_reason": skipped_reason, "data_center_context_advisory": True, "validator": direct_runtime["validator"]},
     )
     _append_task_event(
         "scbkr_draft_created",
@@ -1978,14 +2014,29 @@ def regenerate_scbkr_draft(task_id: str, payload: dict[str, Any]) -> dict[str, A
     task["data_center_context"] = _build_four_store_context(raw_input, task_id)
     task["rule_assist_plan"] = RULE_ASSIST_SETTINGS.get("plan_level", "FREE")
     task["rule_assist"] = _assess_rule_assist(raw_input, locale=_response_locale(raw_input, None), target_mode="task", four_store_context=task["data_center_context"])
-    task["scbkr"], fallback_used, skipped_reason = _model_authored_scbkr_draft(raw_input, task.get("task_type", "general"), task["data_center_context"], task["rule_assist"])
+    direct_runtime = compile_rule_from_input(
+        raw_input,
+        plan_level=str(task["rule_assist_plan"] or "FREE"),
+        locale=_response_locale(raw_input, None),
+    )
+    task["kernel_runtime"] = {
+        "route": direct_runtime["route"],
+        "l0_gate": direct_runtime["l0_gate"],
+        "validator": direct_runtime["validator"],
+        "kernel_meta": direct_runtime["kernel_pack"].get("meta"),
+    }
+    task["scbkr"] = direct_runtime["draft"]
+    fallback_used = False
+    skipped_reason = "direct_scbkr_kernel_compiler"
     task["draft_object"] = build_scbkr_draft_object(user_request_raw=raw_input, scbkr=task["scbkr"], draft_id=task_id, evidence_context=task["data_center_context"])
     task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
     task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
-    task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
+    task["draft_object"]["generated_under_kernel"] = task["scbkr"].get("meta", {}).get("generated_under_kernel")
+    task["draft_object"]["model_role"] = "draft_only"
+    task["draft_object"]["requires_user_signature"] = True
+    task["status"] = "waiting_user_confirm" if direct_runtime["validator"].get("passed") else "model_validation_failed"
     task["confirmed"] = False
-    if skipped_reason:
-        task["draft_model_call_skipped_reason"] = skipped_reason
+    task["draft_model_call_skipped_reason"] = skipped_reason
     save_task(task)
     save_scbkr_confirmation(task_id, task["scbkr"])
     _append_task_event("scbkr_draft_regenerated", task, status_before=status_before, status_after=task["status"], payload={"fallback_used": fallback_used, "fallback_reason": skipped_reason})

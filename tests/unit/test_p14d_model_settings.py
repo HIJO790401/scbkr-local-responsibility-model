@@ -72,7 +72,7 @@ def test_model_settings_page_contract_exists():
         "Model name",
         "儲存設定",
         "測試模型連線",
-        "切回 Sandbox",
+            "切回本機測試模型",
         "開啟模型生成權限",
         "先測試模型，再開啟生成權限。",
         "http://127.0.0.1:1234/v1",

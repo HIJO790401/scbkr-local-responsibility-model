@@ -78,7 +78,7 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await expect(page.getByRole("button", { name: "查四庫", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "建規則", exact: true })).toBeVisible();
   await expect(page.getByLabel("自然語言輸入", { exact: true })).toBeVisible();
-  await page.getByLabel("自然語言輸入", { exact: true }).fill("我要一個新品上市推廣計畫，幫我生成規則。");
+  await page.getByLabel("自然語言輸入", { exact: true }).fill("以後凡是朋友要求我先墊錢，我要先判斷這是不是風險轉嫁，把這個寫成我的本地規則。");
   await page.locator(".send-button").click();
   const advisoryCard = page.locator(".workflow-card.advisory").filter({ hasText: "第0原理建議閘" }).first();
   await expect(advisoryCard).toBeVisible({ timeout: 15_000 });
@@ -86,6 +86,8 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await expect(advisoryCard.getByRole("button", { name: "保持一般聊天", exact: true })).toBeVisible();
   await expect(advisoryCard.getByRole("button", { name: "補角色與邊界", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "建立責任鏈確認單" })).toHaveCount(0);
+  await expect(page.locator(".token-audit-panel")).toContainText("上下文壓縮審計");
+  await expect(page.locator(".token-audit-panel")).toContainText("聊天上下文作正式依據");
   await advisoryCard.getByTestId("draft-confirmation-sheet").click();
   await expect(page.getByRole("heading", { name: "Workbench / SCBKR 工作台" })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".workbench-panel")).toContainText("DRAFT_ONLY");

@@ -470,140 +470,13 @@ export default function V2App() {
     };
   }
 
-  function buildProvisionalTask(rawInput: string, objectType = "task"): TaskSummary {
-    const lower = rawInput.toLowerCase();
-    const productLaunch = rawInput.includes("新品") || lower.includes("product launch") || lower.includes("launch marketing");
-    const title = productLaunch
-      ? (en ? "Product launch marketing rule" : "新品上市推廣規則")
-      : rawInput.slice(0, 36) || (en ? "SCBKR confirmation sheet" : "SCBKR 確認單草稿");
-    const now = Date.now();
-    const objectLabel = objectType === "rule" ? (en ? "rule" : "規則") : (en ? "task" : "任務");
-    return {
-      task_id: `local-draft-${now}`,
-      task_name: title,
-      task_type: "general",
-      raw_input: rawInput,
-      status: "waiting_user_confirm",
-      confirmed: false,
-      review_passed: false,
-      storage_confirmed: false,
-      runtime: "browser-provisional-fast-draft",
-      rule_assist_plan: planLevel,
-      data_center_context: {
-        retrieval_deferred: true,
-        official_context_used: false,
-        vector_as_formal_basis: false,
-        chat_context_used: false,
-        hits: [],
-      },
-      draft_model_call_skipped_reason: "model_deferred_for_workbench",
-      draft_object: {
-        state: "waiting_user_confirm",
-        object_type: objectType,
-        proposed_title: title,
-        summary: rawInput,
-        suggested_store: objectType === "rule" ? ["logic"] : ["memory"],
-      },
-      scbkr: {
-        draft_source: "browser_provisional",
-        draft_model_call_skipped_reason: "model_deferred_for_workbench",
-        model_participated: false,
-        compiler_report: {
-          status: "base_logic",
-          attempts: 0,
-          repairs: 0,
-          errors: [],
-          model_used: false,
-        },
-        S: {
-          task_name: `${title} ${en ? "confirmation draft" : "確認草案"}`,
-          user_instruction: rawInput,
-          task_subject: title,
-          input_content: rawInput,
-          output_format: en ? "Reusable SCBKR draft, editable before signing." : "可重用 SCBKR 草稿，簽名前可逐欄編輯。",
-          interface_type: "SCBKR Workbench",
-          platform_type: "local-sidecar-api",
-          confirmation_status: "draft_only",
-          rule_os_dimension_contract: {
-            usage_conditions: [en ? "The owner must confirm the subject before signing." : "使用者簽名前必須確認主體。"],
-            gap_notes: [en ? "Waiting for the backend/model compiler to replace this provisional draft." : "等待後端/模型編譯器覆蓋正式草稿。"],
-          },
-        },
-        C: {
-          core_logic: en
-            ? "Turn the owner request into S/C/B/K/R. The model may draft fields but cannot sign, review, store, or enable the rule."
-            : "把使用者人話需求轉成 S/C/B/K/R；模型只能補寫欄位，不能簽名、驗收、入庫或啟用規則。",
-          flow_steps: [
-            en ? "Detect reusable rule intent." : "偵測可重用規則需求。",
-            en ? "Open the Workbench with an editable five-part draft." : "進入工作台並顯示可編輯五維草案。",
-            en ? "Owner signs, reviews, then confirms storage." : "使用者簽名、驗收，再二次確認入庫。",
-          ],
-          dependencies: [en ? "Owner input and signed local stores." : "使用者原句與已簽名本地四庫。"],
-          rule_os_dimension_contract: {
-            usage_conditions: [en ? "The draft is valid only as an editable confirmation sheet." : "此草案僅作可編輯確認單。"],
-            gap_notes: [en ? "Need model/backend completion for deeper wording." : "需要模型/後端補完整措辭。"],
-          },
-        },
-        B: {
-          stop_conditions: productLaunch
-            ? [
-              en ? "Do not invent prices, discounts, dates, inventory, launch status, or endorsements." : "不得編造價格、折扣、日期、庫存、上市狀態或背書。",
-              en ? "Do not claim the content was published, emailed, stored, or approved." : "不得宣稱已發布、已寄出、已入庫或已通過審核。",
-              en ? "VECTOR is recall only, never formal K basis." : "VECTOR 只做召回，不可作正式 K 依據。",
-            ]
-            : [
-              en ? "Do not perform high-risk actions without owner signature." : "未經使用者簽名不得執行高風險動作。",
-              en ? "Do not claim storage or activation before confirmation." : "二次確認前不得宣稱已入庫或已啟用。",
-            ],
-          data_write_scope: objectType === "rule" ? ["logic"] : ["memory"],
-          error_handling: en ? "If any boundary is missing, keep the draft unsigned." : "若邊界缺失，維持未簽名草稿。",
-          rule_os_dimension_contract: {
-            usage_conditions: [en ? "Boundaries must be readable before signature." : "簽名前邊界必須可讀。"],
-            gap_notes: [en ? "Add invalidation and replay details if needed." : "必要時補失效與回放條件。"],
-          },
-        },
-        K: {
-          references: [
-            en ? "Owner original instruction" : "使用者原始指令",
-            en ? "SCBKR five-dimension rule syntax" : "SCBKR 五維規則語法",
-            en ? "Signed, reviewed, active local stores only" : "僅引用已簽名、已驗收、Active 的本地四庫",
-          ],
-          evidence_policy: en ? "VECTOR candidates can suggest recall only and cannot be cited as formal basis." : "VECTOR 候選只能召回，不可被引用成正式依據。",
-          source_credibility: en ? "Provisional browser draft, awaiting formal compiler output." : "前端臨時草稿，等待正式編譯器覆蓋。",
-          rule_os_dimension_contract: {
-            usage_conditions: [en ? "K must come from owner-confirmed or signed sources." : "K 必須來自使用者確認或已簽名來源。"],
-            gap_notes: [en ? "Formal evidence is not loaded into the model yet." : "尚未把正式依據送入模型。"],
-          },
-        },
-        R: {
-          acceptance_criteria: [
-            en ? "The owner can inspect and edit S/C/B/K/R." : "使用者可逐欄檢查並編輯 S/C/B/K/R。",
-            en ? "The model cannot sign or store this draft." : "模型不能簽名或入庫此草案。",
-          ],
-          formation_conditions: [en ? "Owner confirms all five layers and signs." : "使用者確認五層並簽名後成立。"],
-          failure_conditions: [en ? "Missing subject, boundary, basis, responsibility, or owner signature." : "缺主體、邊界、依據、責任或使用者簽名即失效。"],
-          replay_requirements: [en ? "Record route, rule package, post-check, signature, review, and storage." : "記錄路由、規則包、post-check、簽名、驗收與入庫結果。"],
-          signature_status: "unsigned",
-          review_status: "not_reviewed",
-          rule_os_dimension_contract: {
-            usage_conditions: [en ? "Only the owner can accept responsibility." : "只有使用者可簽收責任。"],
-            gap_notes: [en ? "Waiting for owner signature." : "待使用者簽名。"],
-          },
-        },
-      },
-    };
-  }
-
   function openDraftTask(created: TaskSummary, navigate = true) {
     setTask(created);
     setOwnerSignature("");
     setDimensionEdits({});
     setTasks((current) => [
       created,
-      ...current.filter((item) =>
-        item.task_id !== created.task_id &&
-        !(item.task_id.startsWith("local-draft-") && item.raw_input === created.raw_input)
-      ),
+      ...current.filter((item) => item.task_id !== created.task_id),
     ]);
     if (navigate) setView("workbench");
   }
@@ -638,15 +511,13 @@ export default function V2App() {
     if (!instruction) { setDraftingCardId(""); return; }
     const routeIntent = String(card.suggestion?.route_intent || "create_confirmation");
     const isRule = routeIntent === "create_new_rule_confirmation" || card.objectType === "rule";
-    const provisional = buildProvisionalTask(instruction, isRule ? "rule" : (card.objectType || "task"));
-    openDraftTask(provisional);
     setMessages((current) => current.map((item) => item.card?.id === card.id ? {
       ...item,
       content: assistantEnvelope(en
-        ? "I opened the Workbench with an editable SCBKR draft. The backend/model compiler is syncing the formal task now."
-        : "已先進入工作台並建立可編輯 SCBKR 草稿；後端/模型編譯器正在同步正式 task。",
+        ? "SCBKR Kernel is compiling the confirmation sheet. I will open the Workbench after the validator passes."
+        : "SCBKR Kernel 正在編譯確認單；驗證通過後會進入工作台。",
       ruleState),
-      card: taskCard(provisional),
+      card: { ...item.card, state: en ? "Compiling" : "編譯中" },
     } : item));
     try {
       let created = await run(en ? "Draft confirmation sheet" : "草擬確認單", () => withTimeout(apiPlainPost<TaskSummary>("/api/tasks/create-fast", { raw_input: instruction, task_type: "general", intent: isRule ? "create_new_rule_confirmation" : "create_confirmation", object_type: isRule ? "rule" : (card.objectType || "task"), create_scbkr_draft: true, defer_model_draft: true, locale: replyLocale, rule_assist_plan: planLevel }), 2500, "task_create_response_timeout"));
@@ -727,6 +598,7 @@ export default function V2App() {
     }
     const reply = await run(en ? "Chat" : "模型回覆", () => api<any>("/api/chat/general", { method: "POST", body: JSON.stringify({ message: text, locale: replyLocale }) }));
     if (reply) {
+      if (reply.token_cost_audit) setTokenMetrics(reply.token_cost_audit);
       const suggestion = routed.suggestion || reply.suggestion;
       setMessages((current) => [...current, { role: "assistant", content: reply.reply, card: suggestion ? suggestionCard(suggestion, text) : undefined }]);
     }
@@ -735,7 +607,6 @@ export default function V2App() {
   async function createTask(input = taskInput, navigate = true, intent = "create_confirmation", objectType = "task") {
     if (!input.trim()) { setNotice(en ? "Task input required" : "請輸入任務內容"); return; }
     const trimmed = input.trim();
-    if (navigate) openDraftTask(buildProvisionalTask(trimmed, objectType));
     let created = await run(en ? "Compile draft" : "編譯草案", () => withTimeout(apiPlainPost<TaskSummary>("/api/tasks/create-fast", { raw_input: trimmed, task_type: "general", intent, object_type: objectType, create_scbkr_draft: true, defer_model_draft: true, locale: replyLocale, rule_assist_plan: planLevel }), 2500, "task_create_response_timeout"));
     if (!created) created = await recoverLatestTask(trimmed);
     if (created) openDraftTask(created, navigate);
@@ -907,9 +778,9 @@ export default function V2App() {
     if (updated) setRuleAssist(updated);
   }
 
-  async function runRuleAssistMock() {
+  async function runRuleAssistCheck() {
     const text = chatInput.trim() || (en ? "Hello, explain what this system can do." : "你好，說明這套系統可以怎麼建立規則。");
-    const result = await run(en ? "Run rule-assist mock" : "測試規則層回覆", () => api<any>("/api/rule-assist/mock-chat", { method: "POST", body: JSON.stringify({ message: text, locale: replyLocale }) }));
+    const result = await run(en ? "Run rule-assist check" : "測試規則層回覆", () => api<any>("/api/rule-assist/check-chat", { method: "POST", body: JSON.stringify({ message: text, locale: replyLocale }) }));
     if (result) setMessages((current) => [...current, { role: "user", content: text }, { role: "assistant", content: result.reply }]);
   }
 
@@ -947,10 +818,10 @@ export default function V2App() {
     if (cleared) { setModel(cleared); setModelForm((current) => ({ ...current, api_key: "" })); }
   }
 
-  async function switchSandboxModel() {
+  async function switchLocalTestModel() {
     const sandbox = { ...modelForm, provider: "sandbox_mock_model", mode: "sandbox", base_url: "", api_key: "", model_name: "sandbox_mock_model" };
     setModelForm(sandbox);
-    const saved = await run(en ? "Use Sandbox" : "切回 Sandbox", () => api<ModelSettings>("/api/settings/model", { method: "POST", body: JSON.stringify(sandbox) }));
+    const saved = await run(en ? "Use local test model" : "切回本機測試模型", () => api<ModelSettings>("/api/settings/model", { method: "POST", body: JSON.stringify(sandbox) }));
     if (saved) setModel(saved);
   }
 
@@ -1070,7 +941,7 @@ export default function V2App() {
         </div>
       </details>
       <label>{en ? "Answer language" : "模型輸出語言"}<select value={ruleAssist.locale || "auto"} onChange={(event) => void updateRuleAssistSettings({ locale: event.target.value })}><option value="auto">Auto</option><option value="zh-TW">繁體中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label>
-      <button className="primary-action" onClick={() => void runRuleAssistMock()}><Play size={15} />{en ? "Test rule layer" : "測試規則層回覆"}</button>
+      <button className="primary-action" onClick={() => void runRuleAssistCheck()}><Play size={15} />{en ? "Test rule layer" : "測試規則層回覆"}</button>
     </section>
   );
 
@@ -1101,6 +972,19 @@ export default function V2App() {
     <section className="ops-panel audit-panel">
       <header><FileKey size={20} /><div><span>AUDIT STATE</span><h2>{en ? "Responsibility closure" : "審計狀態"}</h2></div></header>
       <div className="audit-steps"><span className="done"><CheckCircle2 size={15} />{en ? "Rules read" : "已讀取規則版本"}</span><span className={permissions.model_generate === true || model?.enabled ? "done" : "wait"}>{permissions.model_generate === true || model?.enabled ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}{en ? "Model permission" : "模型權限"}</span><span className={ownerSignature ? "done" : "wait"}>{ownerSignature ? <CheckCircle2 size={15} /> : <Lock size={15} />}{en ? "Owner signature" : "使用者簽名"}</span><span className={task?.storage_confirmed ? "done" : "wait"}>{task?.storage_confirmed ? <CheckCircle2 size={15} /> : <Database size={15} />}{en ? "Storage confirmed" : "等待驗收 / 入庫"}</span></div>
+    </section>
+  );
+
+  const tokenAuditPanel = (
+    <section className="ops-panel token-audit-panel">
+      <header><Activity size={20} /><div><span>TOKEN AUDIT</span><h2>{en ? "Context compression" : "上下文壓縮審計"}</h2></div><em>{tokenMetrics.status || "READY"}</em></header>
+      <dl>
+        <div><dt>{en ? "Full Context" : "完整上下文"}</dt><dd>{tokenMetrics.full_context_tokens_est ?? "--"} tokens</dd></div>
+        <div><dt>{en ? "Rule Package" : "規則包"}</dt><dd>{tokenMetrics.current_rule_package_tokens_est ?? "--"} tokens</dd></div>
+        <div><dt>{en ? "Compression" : "壓縮率"}</dt><dd>{tokenMetrics.compression_percent ?? "--"}%</dd></div>
+        <div><dt>{en ? "Formal basis" : "正式依據"}</dt><dd>{en ? "Four-store signed rules" : "四庫已簽名規則"}</dd></div>
+        <div><dt>{en ? "Chat context as formal basis" : "聊天上下文作正式依據"}</dt><dd>{tokenMetrics.chat_context_used ? (en ? "Yes" : "是") : (en ? "No" : "否")}</dd></div>
+      </dl>
     </section>
   );
 
@@ -1160,25 +1044,25 @@ export default function V2App() {
     </section>
   );
 
-  const taskIsProvisional = Boolean(task?.task_id?.startsWith("local-draft-"));
+  const taskSyncBlocked = task?.status === "model_validation_failed";
 
   const workbenchPanel = (
     <section className="workbench-zone workbench-panel" aria-label="SCBKR 工作台側欄">
       <div className="zone-title product-title"><div><span>RESPONSIBILITY MATRIX · {en ? "SCBKR WORKBENCH" : "SCBKR 工作台"}</span><h2>Workbench / SCBKR 工作台</h2><small>{en ? "Edit, sign, review, then store. The model drafts only." : "確認單編輯、規則補寫、簽名與入庫流程。"}</small></div><CircleGauge size={20} /></div>
-      {!task ? <div className="workbench-empty"><SquareTerminal size={26} /><h3>{en ? "Create a confirmation sheet" : "建立責任鏈確認單"}</h3><label>{en ? "Task" : "任務指令"}<textarea value={taskInput} onChange={(e) => setTaskInput(e.target.value)} placeholder={en ? "Create a product launch marketing rulebook." : "我要一個新品上市推廣計畫，幫我生成規則。"} /></label><button disabled={!taskInput.trim()} onClick={() => void createTask()}><Sparkles size={16} />{en ? "Draft confirmation sheet" : "草擬確認單"}</button></div> : <>
-        <div className="task-state product-state"><span>{task.task_id}</span><b>{taskIsProvisional ? (en ? "Syncing formal task" : "同步正式 task 中") : readableStatus(task.status, en)}</b><em>DRAFT_ONLY</em><em>{planLevel === "FREE" ? "FREE_DRAFT_ASSISTED" : planLevel}</em><em>{task.confirmed ? (en ? "Signed" : "已簽名") : (en ? "Waiting signature" : "待簽名")}</em></div>
+      {!task ? <div className="workbench-empty"><SquareTerminal size={26} /><h3>{en ? "Create a confirmation sheet" : "建立責任鏈確認單"}</h3><label>{en ? "Task" : "任務指令"}<textarea value={taskInput} onChange={(e) => setTaskInput(e.target.value)} placeholder={en ? "Whenever a request shifts risk to me, turn that judgement into my local rule." : "以後凡是有人要求我承擔風險，先判斷這是不是風險轉嫁，把這個寫成我的本地規則。"} /></label><button disabled={!taskInput.trim()} onClick={() => void createTask()}><Sparkles size={16} />{en ? "Draft confirmation sheet" : "草擬確認單"}</button></div> : <>
+        <div className="task-state product-state"><span>{task.task_id}</span><b>{taskSyncBlocked ? (en ? "Syncing formal task" : "同步正式 task 中") : readableStatus(task.status, en)}</b><em>DRAFT_ONLY</em><em>{planLevel === "FREE" ? "FREE_DRAFT_ASSISTED" : planLevel}</em><em>{task.confirmed ? (en ? "Signed" : "已簽名") : (en ? "Waiting signature" : "待簽名")}</em></div>
         <section className="compiler-panel">
           <header><Bot size={16} /><div><span>{en ? "FORM FILLER" : "表單補寫"}</span><b>{compilerStatusLabel(task.scbkr?.compiler_report?.status, en)}</b></div></header>
           <div className="compiler-meta"><span>{en ? "Attempts" : "嘗試"} {task.scbkr?.compiler_report?.attempts ?? 0}</span><span>{task.scbkr?.model_participated ? (en ? "Model participated" : "模型有參與") : (en ? "Backend base logic" : "後端基礎邏輯")}</span><span>{task.scbkr?.draft_source || "draft"}</span></div>
           {Boolean(task.scbkr?.draft_model_call_skipped_reason || task.scbkr?.compiler_report?.errors?.length) && <small>{task.scbkr?.draft_model_call_skipped_reason || human(task.scbkr?.compiler_report?.errors)}</small>}
           <div className="button-row">
-            {!task.confirmed && <button disabled={taskIsProvisional} onClick={() => void regenerateCurrentScbkr()}><BrainCircuit size={15} />{en ? "Ask model to fill again" : "模型補寫表單"}</button>}
-            {!task.confirmed && <button disabled={taskIsProvisional} onClick={() => void applyCurrentRuleAssist()}><SlidersHorizontal size={15} />{en ? "Apply plan assist" : "套用690/3300結構補強"}</button>}
+            {!task.confirmed && <button disabled={taskSyncBlocked} onClick={() => void regenerateCurrentScbkr()}><BrainCircuit size={15} />{en ? "Ask model to fill again" : "模型補寫表單"}</button>}
+            {!task.confirmed && <button disabled={taskSyncBlocked} onClick={() => void applyCurrentRuleAssist()}><SlidersHorizontal size={15} />{en ? "Apply plan assist" : "套用690/3300結構補強"}</button>}
           </div>
         </section>
         {!task.confirmed && <section className="quick-patch-inline">
           <header><Bot size={16} /><div><span>{en ? "COLLABORATION SHORTCUTS" : "協作快捷補欄"}</span><b>{en ? "Model proposes inside SCBKR" : "模型只能在 SCBKR 表單內補寫"}</b></div></header>
-          <div className="quick-patch-grid"><button disabled={!task.scbkr || task.confirmed || taskIsProvisional} onClick={() => quickPatch("R", "請補失效條件，尤其未授權發布、未引用正式資料、未通過驗收時如何失效。", "Add invalidation conditions, especially unauthorized publishing, missing formal sources, and failed review.")}>{en ? "Add invalidation" : "補失效條件"}</button><button disabled={!task.scbkr || task.confirmed || taskIsProvisional} onClick={() => quickPatch("B", "請補邊界：不得自動發布、不得編造價格、不得引用檢索庫當正式依據。", "Add boundaries: no auto publishing, no invented prices, no retrieval store as formal basis.")}>{en ? "Add boundary" : "補邊界"}</button><button disabled={!task.scbkr || task.confirmed || taskIsProvisional} onClick={() => quickPatch("R", "請補回放要求：記錄路由、規則包、post-check、簽名、驗收與入庫結果。", "Add replay requirements: route, rule package, post-check, signature, review, and storage result.")}>{en ? "Add replay" : "補回放要求"}</button></div>
+          <div className="quick-patch-grid"><button disabled={!task.scbkr || task.confirmed || taskSyncBlocked} onClick={() => quickPatch("R", "請補失效條件，尤其未授權發布、未引用正式資料、未通過驗收時如何失效。", "Add invalidation conditions, especially unauthorized publishing, missing formal sources, and failed review.")}>{en ? "Add invalidation" : "補失效條件"}</button><button disabled={!task.scbkr || task.confirmed || taskSyncBlocked} onClick={() => quickPatch("B", "請補邊界：不得自動發布、不得編造價格、不得引用檢索庫當正式依據。", "Add boundaries: no auto publishing, no invented prices, no retrieval store as formal basis.")}>{en ? "Add boundary" : "補邊界"}</button><button disabled={!task.scbkr || task.confirmed || taskSyncBlocked} onClick={() => quickPatch("R", "請補回放要求：記錄路由、規則包、post-check、簽名、驗收與入庫結果。", "Add replay requirements: route, rule package, post-check, signature, review, and storage result.")}>{en ? "Add replay" : "補回放要求"}</button></div>
         </section>}
         {!task.confirmed && <section className="patch-assistant">
           <header><MessageSquare size={16} /><div><span>{en ? "EDIT BY CONVERSATION" : "對話修表單"}</span><b>{en ? "Model proposes, user applies" : "模型先草案，使用者再套用"}</b></div></header>
@@ -1186,7 +1070,7 @@ export default function V2App() {
             <label>{en ? "Layer" : "要修改哪一層"}<select value={patchLayer} onChange={(event) => setPatchLayer(event.target.value as ScbkrDimensionKey)}>{dims.map((dim) => <option key={dim} value={dim}>{dim} · {dimensionNames[dim][en ? "en" : "zh"]}</option>)}</select></label>
             <label>{en ? "Instruction" : "用人話說哪裡不對"}<textarea value={patchInstruction} onChange={(event) => setPatchInstruction(event.target.value)} placeholder={en ? "Example: B is missing publish boundaries and K is claiming citations." : "例如：B 層沒有寫清楚不能發布；K 層不能假裝有引用四庫。"} /></label>
           </div>
-          <div className="button-row"><button disabled={!patchInstruction.trim() || taskIsProvisional} onClick={() => void draftLayerPatch()}><Sparkles size={15} />{en ? "Propose patch" : "請模型提出修改"}</button><button disabled={!pendingPatch || taskIsProvisional} onClick={() => void applyLayerPatch()}><Check size={15} />{en ? "Apply patch" : "套用修改草案"}</button><button disabled={!pendingPatch} onClick={() => setPendingPatch(null)}><X size={15} />{en ? "Discard" : "取消草案"}</button></div>
+          <div className="button-row"><button disabled={!patchInstruction.trim() || taskSyncBlocked} onClick={() => void draftLayerPatch()}><Sparkles size={15} />{en ? "Propose patch" : "請模型提出修改"}</button><button disabled={!pendingPatch || taskSyncBlocked} onClick={() => void applyLayerPatch()}><Check size={15} />{en ? "Apply patch" : "套用修改草案"}</button><button disabled={!pendingPatch} onClick={() => setPendingPatch(null)}><X size={15} />{en ? "Discard" : "取消草案"}</button></div>
           {pendingPatch && <div className="patch-preview"><b>{pendingPatch.layer} · {pendingPatch.plan_level || planLevel}</b><p>{pendingPatch.reason}</p><pre>{human(pendingPatch.after_draft)}</pre></div>}
         </section>}
         <div className="dimension-grid product-dimensions">{dims.map((dim) => { const content = task.scbkr?.[dim] || {}; const contract = content.rule_os_dimension_contract || {}; const preview = human(content.task_subject || content.core_logic || content.stop_conditions || content.references || content.acceptance_criteria).slice(0, 120); const editValue = dimensionEdits[dim] ?? human(content.user_edit_note || preview); return <details className={`dimension-row ${dimColor[dim]}`} key={dim} open={dim === "S"}><summary><b>{dim}</b><span><strong>{dim}｜{copy.dimensions[dim]} <em>{dimensionNames[dim][en ? "en" : "zh"]}</em></strong>{preview || (en ? "Pending user confirmation" : "待使用者確認")}</span><ChevronRight size={15} /></summary><div className="dimension-readable">{Object.entries(content).filter(([key, value]) => !["pending_questions", "rule_os_dimension_contract"].includes(key) && human(value).trim()).map(([key, value]) => <div key={key}><b>{fieldTitle(key, en)}</b><p>{human(value)}</p></div>)}</div><div className="dimension-gap"><span>{en ? "Model suggestion" : "模型建議"}：{contract.usage_conditions ? human(contract.usage_conditions) : (en ? "Review this layer before signing." : "簽名前逐欄確認。")}</span><span>{en ? "Gap" : "缺口"}：{contract.gap_notes?.length ? human(contract.gap_notes) : (en ? "Needs owner confirmation." : "需使用者確認。")}</span></div><label>{en ? "Edit this layer" : "編輯此層"}<textarea value={editValue} onChange={(event) => setDimensionEdits((current) => ({ ...current, [dim]: event.target.value }))} disabled={task.confirmed} /></label><button disabled={task.confirmed || !String(dimensionEdits[dim] ?? "").trim()} onClick={() => void saveDimensionEdit(dim)}><Save size={14} />{en ? "Save layer edit" : "儲存此層"}</button></details>; })}</div>
@@ -1200,9 +1084,9 @@ export default function V2App() {
         <label>{en ? "Owner signature" : "使用者簽名"}<input value={ownerSignature} onChange={(e) => setOwnerSignature(e.target.value)} disabled={task.confirmed} /></label>
         <small>{en ? "The model cannot sign. The user signature unlocks generation, review, and storage." : "模型不能簽名；只有使用者簽名後才能生成、驗收與入庫。"}</small>
         <div className="action-grid">
-          {!task.confirmed && <button disabled={taskIsProvisional} onClick={() => void applyCurrentRuleAssist()}><Sparkles size={15} />{en ? "Apply model suggestions" : "套用模型建議"}</button>}
+          {!task.confirmed && <button disabled={taskSyncBlocked} onClick={() => void applyCurrentRuleAssist()}><Sparkles size={15} />{en ? "Apply model suggestions" : "套用模型建議"}</button>}
           {!task.confirmed && <button onClick={() => void run(en ? "Save draft" : "儲存草稿", async () => task)}><Save size={15} />{en ? "Save draft" : "儲存草稿"}</button>}
-          {!task.confirmed && <button disabled={!ownerSignature.trim() || taskIsProvisional} onClick={() => void confirmTask()}><ShieldCheck size={15} />{en ? "Submit signature" : "提交簽名"}</button>}
+          {!task.confirmed && <button disabled={!ownerSignature.trim() || taskSyncBlocked} onClick={() => void confirmTask()}><ShieldCheck size={15} />{en ? "Submit signature" : "提交簽名"}</button>}
           {task.status === "confirmed" && <button onClick={() => void generate()}><Bot size={15} />{en ? "Generate" : "開始生成"}</button>}
           {task.status === "waiting_review" && <><button disabled={!ownerSignature.trim()} onClick={() => void review("pass")}><Check size={15} />{en ? "Pass" : "通過驗收"}</button><button className="danger" disabled={!ownerSignature.trim()} onClick={() => void review("fail")}><X size={15} />{en ? "Fail" : "驗收失敗"}</button></>}
           <button className="locked-action" disabled><Lock size={15} />{en ? "Enable dual-sign mode" : "啟用雙簽規則模式"}</button>
@@ -1228,11 +1112,11 @@ export default function V2App() {
   const selectedToolData = tools.find((tool) => tool.tool_id === selectedTool);
   const pendingTasks = tasks.filter((item) => !["completed", "storage_committed"].includes(item.status)).slice(0, 12);
 
-  const commandPage = <div className="workspace-page command-workspace premium-dashboard"><div className="dashboard-grid"><section className="dashboard-main">{chatPanel}</section><aside className="dashboard-mid">{planConsole}{activeRulePanel}{aiToolPanel}</aside><aside className="dashboard-right">{auditPanel}{principlesPanel}{automationPanel}{phonePanel}<section className="ops-panel pending-panel"><header><FileKey size={20} /><div><span>ACTIVE DRAFTS</span><h2>{en ? "Pending work" : "待辦草案"}</h2></div></header><div className="activity-list">{pendingTasks.length === 0 && <div className="empty-state">{en ? "No pending drafts" : "目前沒有待辦草案"}</div>}{pendingTasks.slice(0, 5).map((item) => <button key={item.task_id} onClick={() => void openTask(item.task_id)}><span className="state-dot waiting_owner_signature" /><div><b>{item.task_name}</b><small>{item.status}</small></div><ChevronRight size={15} /></button>)}</div></section></aside>{toolLauncher}</div></div>;
+  const commandPage = <div className="workspace-page command-workspace premium-dashboard"><div className="dashboard-grid"><section className="dashboard-main">{chatPanel}</section><aside className="dashboard-mid">{planConsole}{activeRulePanel}{aiToolPanel}</aside><aside className="dashboard-right">{auditPanel}{tokenAuditPanel}{principlesPanel}{automationPanel}{phonePanel}<section className="ops-panel pending-panel"><header><FileKey size={20} /><div><span>ACTIVE DRAFTS</span><h2>{en ? "Pending work" : "待辦草案"}</h2></div></header><div className="activity-list">{pendingTasks.length === 0 && <div className="empty-state">{en ? "No pending drafts" : "目前沒有待辦草案"}</div>}{pendingTasks.slice(0, 5).map((item) => <button key={item.task_id} onClick={() => void openTask(item.task_id)}><span className="state-dot waiting_owner_signature" /><div><b>{item.task_name}</b><small>{item.status}</small></div><ChevronRight size={15} /></button>)}</div></section></aside>{toolLauncher}</div></div>;
 
   const rulesPage = <div className="workspace-page split-workspace rules-workspace product-rules"><div className="workspace-primary">{rulePanel}</div><main className="rule-detail-surface">{selectedRuleData ? <><div className="page-head inline"><div><span>{en ? "RULE CENTER" : "SCBKR 規則中心"}</span><h1>{selectedRuleData.rule_name}</h1><small>{selectedRuleData.rule_source} / {selectedRuleData.rule_author} / {selectedRuleData.rule_version}</small></div><div className="tag-row"><b className={selectedRuleData.activation_status}>{selectedRuleData.activation_status || "Draft"}</b><b>FREE</b><b>{(selectedRuleData.four_store_locations || ["LOGIC"]).join(" / ").toUpperCase()}</b></div></div><section className="rule-main-card"><p>{selectedRuleData.rule_text}</p><div className="dimension-summary compact">{dims.map((dim) => <div key={dim}><b>{dim}｜{copy.dimensions[dim]}</b><span>{human(selectedRuleData.scbkr_summary?.[dim] || selectedRuleData.compiled_rule?.execution_logic || selectedRuleData.rule_scope).slice(0, 180) || (en ? "No summary yet." : "尚無摘要。")}</span></div>)}</div></section><div className="rulebook-condition-grid"><section><b>{en ? "Formation" : "成立"}</b><p>{human(selectedRuleData.compiled_rule?.execution_logic?.formation_conditions || (en ? "Active + signed + reviewed." : "Active + 已簽名 + 已驗收。"))}</p></section><section><b>{en ? "Invalidation" : "失效"}</b><p>{human(selectedRuleData.compiled_rule?.execution_logic?.failure_conditions || (en ? "Archived, superseded, unsigned, or review failed." : "已封存、被新版取代、未簽名或驗收失敗。"))}</p></section><section><b>{en ? "Risk" : "風險"}</b><p>{selectedRuleData.risk_level || "medium"}</p></section><section><b>{en ? "Replay" : "回放"}</b><p>{human(selectedRuleData.compiled_rule?.execution_logic?.replay_requirements || selectedRuleData.version_history || "v1.0")}</p></section></div><section className="version-table"><h2>{en ? "Version history" : "版本紀錄"}</h2>{(selectedRuleData.version_history || [{ version: selectedRuleData.rule_version, status: selectedRuleData.activation_status, note: selectedRuleData.changelog?.[0] }]).map((item: any) => <div key={`${item.version}-${item.status}`}><b>{item.version}</b><span>{item.status}</span><small>{item.note}</small></div>)}</section><section className="citation-strip"><b>{en ? "Citation sources" : "引用來源"}</b>{(selectedRuleData.four_store_locations || ["logic"]).map((store: string) => <span key={store}>{String(store).toUpperCase()}</span>)}<em>{en ? "Only Active + signed + reviewed rules can be cited." : "只有 Active + 已簽名 + 已驗收 的規則可正式引用。"}</em></section></> : <div className="empty-state">{en ? "Select a rule to inspect details." : "選擇一條規則查看詳情。"}</div>}</main><aside className="workspace-inspector rule-side-panel"><div className="workspace-heading"><span>{en ? "SIGNATURE" : "簽名狀態"}</span><h2>{selectedRuleData?.signature_status === "owner_signed" ? (en ? "User self-signed" : "FREE 使用者自簽") : (en ? "Waiting signature" : "待簽名")}</h2></div><div className="rule-inspector"><div className={`status-banner ${selectedRuleData?.activation_status || ""}`}><span>{selectedRuleData?.activation_status || "Draft"}</span><b>{selectedRuleData?.review_passed ? (en ? "Reviewed" : "已驗收") : (en ? "Not reviewed" : "未驗收")}</b></div><dl><div><dt>{en ? "Enable" : "啟用狀態"}</dt><dd>{selectedRuleData?.activation_status === "active" ? "Active" : "Draft"}</dd></div><div><dt>{en ? "Storage" : "四庫位置"}</dt><dd>{human(selectedRuleData?.four_store_locations || ["logic"])}</dd></div><div><dt>{en ? "Policy" : "引用限制"}</dt><dd>{selectedRuleData?.citation_policy || (en ? "Vector is discovery only." : "VECTOR 只做召回。")}</dd></div></dl></div><div className="quick-actions"><button onClick={() => setView("workbench")}><SlidersHorizontal size={15} />{en ? "Edit in Workbench" : "在工作台編輯"}</button><button disabled><Archive size={15} />{en ? "Archive rule" : "封存此規則"}</button><button disabled><FileKey size={15} />{en ? "View rulebook" : "查看規則書"}</button><button disabled><Lock size={15} />{en ? "Enable dual-sign mode" : "啟用雙簽規則模式"}</button></div></aside></div>;
 
-  const workbenchPage = <div className="workspace-page workbench-workspace product-workbench"><aside className="task-queue"><div className="workspace-heading"><span>{en ? "DRAFTS" : "確認單草稿"}</span><h2>{en ? "Workbench" : "SCBKR 工作台"}</h2></div><button className="new-task" onClick={() => setTask(null)}><Sparkles size={15} />{en ? "New draft" : "新增草案"}</button><div className="activity-list">{tasks.slice(0, 20).map((item) => <button className={task?.task_id === item.task_id ? "selected" : ""} key={item.task_id} onClick={() => item.task_id.startsWith("local-draft-") ? setTask(item) : void openTask(item.task_id)}><span className={`state-dot ${item.confirmed ? "active" : "waiting_owner_signature"}`} /><div><b>{item.task_name}</b><small>{item.task_id.startsWith("local-draft-") ? (en ? "Syncing" : "同步中") : readableStatus(item.status, en)}</small></div><ChevronRight size={15} /></button>)}</div></aside><div className="workspace-primary">{workbenchPanel}</div><aside className="workspace-inspector collaboration-panel"><section className="ops-panel"><header><Bot size={18} /><div><span>{en ? "COLLABORATION" : "協作面板"}</span><h2>{en ? "Model suggestions" : "模型建議"}</h2></div></header><p>{task ? (en ? "Ask for a patch. The model can propose fields; it cannot sign or store." : "模型可以補欄位與提修改草案，但不能簽名、驗收或入庫。") : (en ? "Create or select a draft to start." : "先建立或選擇一份確認單草稿。")}</p><div className="quick-patch-grid"><button disabled={!task?.scbkr || task.confirmed || taskIsProvisional} onClick={() => quickPatch("R", "請補失效條件，尤其未授權發布、未引用正式資料、未通過驗收時如何失效。", "Add invalidation conditions, especially unauthorized publishing, missing formal sources, and failed review.")}>{en ? "Add invalidation" : "補失效條件"}</button><button disabled={!task?.scbkr || task.confirmed || taskIsProvisional} onClick={() => quickPatch("B", "請補邊界：不得自動發布、不得編造價格、不得引用檢索庫當正式依據。", "Add boundaries: no auto publishing, no invented prices, no retrieval store as formal basis.")}>{en ? "Add boundary" : "補邊界"}</button><button disabled={!task?.scbkr || task.confirmed || taskIsProvisional} onClick={() => quickPatch("R", "請補回放要求：記錄路由、規則包、post-check、簽名、驗收與入庫結果。", "Add replay requirements: route, rule package, post-check, signature, review, and storage result.")}>{en ? "Add replay" : "補回放要求"}</button></div></section><ContextAssistant en={en} title={en ? "Draft copilot" : "草案協作"} context={task ? `Current SCBKR task ${task.task_id}, status ${task.status}. Model may explain or propose a patch, but cannot sign, review, or store.` : "No task selected. Help the user clarify a task before creating a draft."} onAsk={(text) => askWorkspace("WORKBENCH", text)} /><section className="ops-panel signature-mode-panel"><header><Lock size={18} /><div><span>{en ? "SIGNATURE MODE" : "簽名模式"}</span><h2>{planLevel}</h2></div></header><div className="signature-choice active"><b>{en ? "FREE: user self-sign" : "FREE：僅使用者簽名"}</b><small>{en ? "Personal rule, owner-signed only." : "由使用者自行確認並簽名。"}</small></div><div className="signature-choice locked"><b>{en ? "Paid group mode: dual sign" : "付費群組模式：雙簽"}</b><small>{en ? "Locked until upgraded." : "升級後可用。"}</small></div></section></aside></div>;
+  const workbenchPage = <div className="workspace-page workbench-workspace product-workbench"><aside className="task-queue"><div className="workspace-heading"><span>{en ? "DRAFTS" : "確認單草稿"}</span><h2>{en ? "Workbench" : "SCBKR 工作台"}</h2></div><button className="new-task" onClick={() => setTask(null)}><Sparkles size={15} />{en ? "New draft" : "新增草案"}</button><div className="activity-list">{tasks.slice(0, 20).map((item) => <button className={task?.task_id === item.task_id ? "selected" : ""} key={item.task_id} onClick={() => void openTask(item.task_id)}><span className={`state-dot ${item.confirmed ? "active" : "waiting_owner_signature"}`} /><div><b>{item.task_name}</b><small>{readableStatus(item.status, en)}</small></div><ChevronRight size={15} /></button>)}</div></aside><div className="workspace-primary">{workbenchPanel}</div><aside className="workspace-inspector collaboration-panel"><section className="ops-panel"><header><Bot size={18} /><div><span>{en ? "COLLABORATION" : "協作面板"}</span><h2>{en ? "Model suggestions" : "模型建議"}</h2></div></header><p>{task ? (en ? "Ask for a patch. The model can propose fields; it cannot sign or store." : "模型可以補欄位與提修改草案，但不能簽名、驗收或入庫。") : (en ? "Create or select a draft to start." : "先建立或選擇一份確認單草稿。")}</p><div className="quick-patch-grid"><button disabled={!task?.scbkr || task.confirmed || taskSyncBlocked} onClick={() => quickPatch("R", "請補失效條件，尤其未授權發布、未引用正式資料、未通過驗收時如何失效。", "Add invalidation conditions, especially unauthorized publishing, missing formal sources, and failed review.")}>{en ? "Add invalidation" : "補失效條件"}</button><button disabled={!task?.scbkr || task.confirmed || taskSyncBlocked} onClick={() => quickPatch("B", "請補邊界：不得自動發布、不得編造價格、不得引用檢索庫當正式依據。", "Add boundaries: no auto publishing, no invented prices, no retrieval store as formal basis.")}>{en ? "Add boundary" : "補邊界"}</button><button disabled={!task?.scbkr || task.confirmed || taskSyncBlocked} onClick={() => quickPatch("R", "請補回放要求：記錄路由、規則包、post-check、簽名、驗收與入庫結果。", "Add replay requirements: route, rule package, post-check, signature, review, and storage result.")}>{en ? "Add replay" : "補回放要求"}</button></div></section><ContextAssistant en={en} title={en ? "Draft copilot" : "草案協作"} context={task ? `Current SCBKR task ${task.task_id}, status ${task.status}. Model may explain or propose a patch, but cannot sign, review, or store.` : "No task selected. Help the user clarify a task before creating a draft."} onAsk={(text) => askWorkspace("WORKBENCH", text)} /><section className="ops-panel signature-mode-panel"><header><Lock size={18} /><div><span>{en ? "SIGNATURE MODE" : "簽名模式"}</span><h2>{planLevel}</h2></div></header><div className="signature-choice active"><b>{en ? "FREE: user self-sign" : "FREE：僅使用者簽名"}</b><small>{en ? "Personal rule, owner-signed only." : "由使用者自行確認並簽名。"}</small></div><div className="signature-choice locked"><b>{en ? "Paid group mode: dual sign" : "付費群組模式：雙簽"}</b><small>{en ? "Locked until upgraded." : "升級後可用。"}</small></div></section></aside></div>;
 
   const toolsPage = <div className="workspace-page split-workspace tools-workspace"><div className="workspace-primary">{toolPanel}</div><aside className="workspace-inspector"><div className="workspace-heading"><span>TOOL INSPECTOR</span><h2>{selectedToolData?.name || (en ? "Select a tool" : "選擇工具")}</h2></div>{selectedToolData && <div className="tool-inspector"><div className="status-banner"><span>{selectedToolData.risk_level}</span><b>{selectedToolData.tool_id}</b></div><p>{human(selectedToolData.capabilities)}</p><dl><div><dt>{en ? "Permissions" : "需要權限"}</dt><dd>{human(selectedToolData.required_permissions)}</dd></div><div><dt>{en ? "Actions" : "可用動作"}</dt><dd>{human(selectedToolData.allowed_actions)}</dd></div></dl></div>}<ContextAssistant en={en} title={en ? "Tool guidance" : "工具協作"} context={selectedToolData ? `Current tool: ${JSON.stringify({ id: selectedToolData.tool_id, risk: selectedToolData.risk_level, capabilities: selectedToolData.capabilities })}. Explain gates and risks without executing the tool.` : "No tool selected."} onAsk={(text) => askWorkspace("TOOLS", text)} /><div className="trace-mini"><h3>{en ? "Recent traces" : "最近回放"}</h3>{traces.slice(0, 6).map((trace) => <div key={trace.trace_id}><span className={`state-dot ${trace.allowed ? "active" : "revoked"}`} /><b>{trace.tool_id}</b><small>{trace.action}</small></div>)}</div></aside></div>;
 
@@ -1244,7 +1128,7 @@ export default function V2App() {
 
   const launchPage = <section className="full-panel launch-page"><div className="page-head"><div><span>PRODUCTION CONTROL PLANE</span><h1>{en ? "Launch Center" : "上線中心"}</h1></div><Rocket size={25} /></div><div className="readiness-head"><div><span>{en ? "STORE READINESS" : "上架準備度"}</span><strong>{readiness.ready_count || 0}/{readiness.total_count || 8}</strong></div><div className="readiness-track"><i style={{ width: `${((readiness.ready_count || 0) / (readiness.total_count || 8)) * 100}%` }} /></div><small>{en ? "Fill in the services you create. Secret server keys never belong in the desktop client." : "你申請好服務後填在這裡；伺服器私鑰永遠不能放進桌面客戶端。"}</small></div><div className="launch-grid"><section><div className="integration-title"><Cloud /><div><b>Account & Domain</b><span>Supabase / Public URL</span></div></div><label>{en ? "Public domain" : "正式網域"}<input value={launchSettings.public_domain || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, public_domain: e.target.value })} placeholder="https://scbkr.example" /></label><label>Supabase URL<input value={launchSettings.supabase_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, supabase_url: e.target.value })} placeholder="https://project.supabase.co" /></label><label>Supabase publishable key<input type="password" value={launchSettings.supabase_publishable_key || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, supabase_publishable_key: e.target.value })} /></label></section><section><div className="integration-title"><CreditCard /><div><b>Stripe Billing</b><span>Entitlements / Customer Portal</span></div></div><label>Stripe publishable key<input value={launchSettings.stripe_publishable_key || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, stripe_publishable_key: e.target.value })} /></label><label>{en ? "Monthly Price ID" : "月費 Price ID"}<input value={launchSettings.stripe_monthly_price_id || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, stripe_monthly_price_id: e.target.value })} /></label><label>{en ? "Annual Price ID" : "年費 Price ID"}<input value={launchSettings.stripe_annual_price_id || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, stripe_annual_price_id: e.target.value })} /></label></section><section><div className="integration-title"><Globe2 /><div><b>Web Search</b><span>SearXNG / Brave Search</span></div></div><label>{en ? "Provider" : "搜尋服務"}<select value={launchSettings.search_provider || "searxng"} onChange={(e) => setLaunchSettings({ ...launchSettings, search_provider: e.target.value })}><option value="searxng">SearXNG</option><option value="brave">Brave Search API</option></select></label>{launchSettings.search_provider === "brave" ? <label>{en ? "Brave runtime credential" : "Brave 後端憑證"}<input disabled value={launchSettings.brave_api_key_configured ? (en ? "Configured" : "已設定") : (en ? "Not configured" : "未設定")} /></label> : <label>SearXNG URL<input value={launchSettings.searxng_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, searxng_url: e.target.value })} placeholder="https://search.example" /></label>}<label className="toggle-line"><input type="checkbox" checked={permissions.web_search === true} onChange={(e) => void setWebPermission(e.target.checked)} />{en ? "Allow confirmed web searches" : "允許經使用者確認的網路搜尋"}</label></section><section><div className="integration-title"><KeyRound /><div><b>Windows Distribution</b><span>Partner Center / Signing / Updater</span></div></div><label>Microsoft Partner Product ID<input value={launchSettings.microsoft_partner_product_id || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, microsoft_partner_product_id: e.target.value })} /></label><label>{en ? "Code signing subject" : "程式簽章主體"}<input value={launchSettings.code_signing_subject || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, code_signing_subject: e.target.value })} /></label><label>{en ? "Update endpoint" : "更新端點"}<input value={launchSettings.tauri_update_endpoint || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, tauri_update_endpoint: e.target.value })} /></label></section><section><div className="integration-title"><ShieldCheck /><div><b>Legal & Support</b><span>Privacy / Terms / Contact</span></div></div><label>{en ? "Privacy policy URL" : "隱私政策網址"}<input value={launchSettings.privacy_policy_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, privacy_policy_url: e.target.value })} /></label><label>{en ? "Terms URL" : "服務條款網址"}<input value={launchSettings.terms_of_service_url || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, terms_of_service_url: e.target.value })} /></label><label>{en ? "Support email" : "客服信箱"}<input value={launchSettings.support_email || ""} onChange={(e) => setLaunchSettings({ ...launchSettings, support_email: e.target.value })} /></label></section><section className="checklist-panel"><span>LAUNCH CHECKLIST</span>{(readiness.checks || []).map((check: any) => <div key={check.id} className={check.ready ? "ready" : "pending"}><i>{check.ready ? <Check size={13} /> : <X size={13} />}</i><b>{check.label}</b><em>{check.owner_action ? (en ? "OWNER" : "需你申請") : (en ? "ENGINEERING" : "工程")}</em></div>)}</section></div><div className="launch-actions"><button onClick={() => void saveLaunchSettings()}><Save size={16} />{en ? "Save launch configuration" : "儲存上線設定"}</button><span>{readiness.ready_for_store_submission ? (en ? "Ready for store submission" : "已具備送審條件") : (en ? "Missing external accounts or release materials" : "仍缺外部帳號或發布資料")}</span></div></section>;
 
-  const modelPage = <section className="full-panel model-settings"><div className="page-head"><div><span>RUNTIME CONNECTION</span><h1>模型設定</h1></div><Bot /></div><div className="settings-grid"><section><h2>{en ? "Desktop / phone connection" : "桌機 / 手機連線"}</h2><div className={`companion-state ${companion?.lan_companion_enabled ? "on" : "off"}`}><span>LAN COMPANION</span><b>{companion?.lan_companion_enabled ? "ON" : "OFF"}</b><small>{companion?.base_url || backend} · {companion?.active_devices || 0} devices</small></div><label>Backend API URL<input value={backend} onChange={(e) => setBackend(e.target.value)} /></label><label>Companion token<input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} /></label><div className="button-row"><button onClick={saveConnection}><Network size={15} />{en ? "Connect" : "儲存並連線"}</button><button disabled={!companion?.lan_companion_enabled} onClick={() => void startPairing()}><FileKey size={15} />{en ? "Pair code" : "取得配對碼"}</button><button disabled={!companion?.active_devices} onClick={() => void revokeCompanions()}><X size={15} />{en ? "Revoke" : "撤銷裝置"}</button></div>{pairing && <div className="pairing-code"><span>{en ? "PAIRING CODE" : "手機配對碼"}</span><strong>{pairing.pairing_code}</strong><small>{pairing.base_url}</small><time>{pairing.expires_at}</time></div>}</section><section><h2>LLM Runtime</h2><div className={`model-permission-card ${permissions.model_generate === true ? "on" : "off"}`}><span>{en ? "Generation permission" : "模型生成權限"}</span><b>{permissions.model_generate === true ? "ON" : "OFF"}</b><small>{model?.enabled && model?.last_test_status === "success" ? (en ? "Model tested and ready" : "模型已測試，可以進入生成流程") : (en ? "Test the model, then enable generation." : "先測試模型，再開啟生成權限。")}</small></div><label>Provider<select value={modelForm.provider} onChange={(e) => updateModelProvider(e.target.value)}><option value="lm_studio">LM Studio</option><option value="ollama">Ollama</option><option value="openai_compatible">OpenAI-compatible</option><option value="sandbox_mock_model">Sandbox</option></select></label><label>Base URL<input value={modelForm.base_url} onChange={(e) => setModelForm({ ...modelForm, base_url: e.target.value })} /></label><label>Model name<input value={modelForm.model_name} onChange={(e) => setModelForm({ ...modelForm, model_name: e.target.value })} /></label><label>API Key<input type="password" value={modelForm.api_key} onChange={(e) => setModelForm({ ...modelForm, api_key: e.target.value })} placeholder={en ? "Leave blank to keep the saved API key." : "留白會保留已儲存金鑰"} /></label><div className="button-row"><button onClick={() => void saveModel()}><Save size={15} />{en ? "Save" : "儲存設定"}</button><button onClick={() => void testModel()}><Activity size={15} />{en ? "Test" : "測試模型連線"}</button><button onClick={() => void setModelGeneratePermission(true)}><Bot size={15} />{en ? "Enable generation" : "開啟模型生成權限"}</button><button onClick={() => void switchSandboxModel()}><ShieldCheck size={15} />{en ? "Use Sandbox" : "切回 Sandbox"}</button><button onClick={() => void clearModelApiKey()}><KeyRound size={15} />{en ? "Clear API Key" : "清除 API Key"}</button></div></section></div></section>;
+  const modelPage = <section className="full-panel model-settings"><div className="page-head"><div><span>RUNTIME CONNECTION</span><h1>模型設定</h1></div><Bot /></div><div className="settings-grid"><section><h2>{en ? "Desktop / phone connection" : "桌機 / 手機連線"}</h2><div className={`companion-state ${companion?.lan_companion_enabled ? "on" : "off"}`}><span>LAN COMPANION</span><b>{companion?.lan_companion_enabled ? "ON" : "OFF"}</b><small>{companion?.base_url || backend} · {companion?.active_devices || 0} devices</small></div><label>Backend API URL<input value={backend} onChange={(e) => setBackend(e.target.value)} /></label><label>Companion token<input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} /></label><div className="button-row"><button onClick={saveConnection}><Network size={15} />{en ? "Connect" : "儲存並連線"}</button><button disabled={!companion?.lan_companion_enabled} onClick={() => void startPairing()}><FileKey size={15} />{en ? "Pair code" : "取得配對碼"}</button><button disabled={!companion?.active_devices} onClick={() => void revokeCompanions()}><X size={15} />{en ? "Revoke" : "撤銷裝置"}</button></div>{pairing && <div className="pairing-code"><span>{en ? "PAIRING CODE" : "手機配對碼"}</span><strong>{pairing.pairing_code}</strong><small>{pairing.base_url}</small><time>{pairing.expires_at}</time></div>}</section><section><h2>LLM Runtime</h2><div className={`model-permission-card ${permissions.model_generate === true ? "on" : "off"}`}><span>{en ? "Generation permission" : "模型生成權限"}</span><b>{permissions.model_generate === true ? "ON" : "OFF"}</b><small>{model?.enabled && model?.last_test_status === "success" ? (en ? "Model tested and ready" : "模型已測試，可以進入生成流程") : (en ? "Test the model, then enable generation." : "先測試模型，再開啟生成權限。")}</small></div><label>Provider<select value={modelForm.provider} onChange={(e) => updateModelProvider(e.target.value)}><option value="lm_studio">LM Studio</option><option value="ollama">Ollama</option><option value="openai_compatible">OpenAI-compatible</option><option value="sandbox_mock_model">{en ? "Local test model" : "本機測試模型"}</option></select></label><label>Base URL<input value={modelForm.base_url} onChange={(e) => setModelForm({ ...modelForm, base_url: e.target.value })} /></label><label>Model name<input value={modelForm.model_name} onChange={(e) => setModelForm({ ...modelForm, model_name: e.target.value })} /></label><label>API Key<input type="password" value={modelForm.api_key} onChange={(e) => setModelForm({ ...modelForm, api_key: e.target.value })} placeholder={en ? "Leave blank to keep the saved API key." : "留白會保留已儲存金鑰"} /></label><div className="button-row"><button onClick={() => void saveModel()}><Save size={15} />{en ? "Save" : "儲存設定"}</button><button onClick={() => void testModel()}><Activity size={15} />{en ? "Test" : "測試模型連線"}</button><button onClick={() => void setModelGeneratePermission(true)}><Bot size={15} />{en ? "Enable generation" : "開啟模型生成權限"}</button><button onClick={() => void switchLocalTestModel()}><ShieldCheck size={15} />{en ? "Use local test model" : "切回本機測試模型"}</button><button onClick={() => void clearModelApiKey()}><KeyRound size={15} />{en ? "Clear API Key" : "清除 API Key"}</button></div></section></div></section>;
 
   const aboutPage = <section className="full-panel about-panel"><div className="about-mark">SCBKR<span>2.3</span></div><h1>{manifest?.name || copy.product.name}</h1><p className="about-tagline">{manifest?.tagline || copy.product.category}</p><dl><div><dt>{en ? "Author" : "作者"}</dt><dd>{manifest?.creator?.name || "許文耀 / 沈耀888π"}</dd></div><div><dt>{en ? "Organization" : "組織"}</dt><dd>{manifest?.creator?.organization || "語意防火牆"}</dd></div><div><dt>{en ? "Contact" : "合作聯絡"}</dt><dd>{manifest?.creator?.contact_email || "ken0963521@gmail.com"}</dd></div><div><dt>{en ? "Runtime" : "運行定位"}</dt><dd>{manifest?.runtime_relationship || "Local rule-driven AI control layer"}</dd></div></dl></section>;
 

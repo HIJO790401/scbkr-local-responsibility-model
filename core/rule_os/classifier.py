@@ -162,6 +162,14 @@ HIGH_RISK_TRIGGERS = (
 )
 
 ANSWER_WITH_RULES_TRIGGERS = (
+    "可以嗎",
+    "可不可以",
+    "我要不要",
+    "該不該",
+    "墊錢",
+    "先墊",
+    "借錢",
+    "還我",
     "幫我寫",
     "幫我生成",
     "幫我整理",
@@ -175,8 +183,6 @@ ANSWER_WITH_RULES_TRIGGERS = (
     "依照規則",
     "照規則",
     "照我的規則",
-    "臉部保養貼文",
-    "美容院",
     "copy",
     "write",
     "draft",

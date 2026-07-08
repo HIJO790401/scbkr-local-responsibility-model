@@ -110,8 +110,8 @@ def test_lightweight_local_model_uses_one_short_attempt_then_valid_base_draft(tm
         "create_scbkr_draft": True,
     })
 
-    assert calls == [384]
+    assert calls == []
     assert task["status"] == "waiting_user_confirm"
-    assert task["scbkr"]["draft_source"] == "scbkr_base_logic"
-    assert task["scbkr"]["compiler_report"]["status"] == "base_logic_after_model"
+    assert task["scbkr"]["draft_source"] == "direct_scbkr_kernel_compiler"
+    assert task["scbkr"]["compiler_report"]["status"] == "direct_kernel_compiled"
     assert task["draft_object"]["state"] == "DRAFTING"

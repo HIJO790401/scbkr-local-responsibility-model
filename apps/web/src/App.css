@@ -591,6 +591,28 @@ max-width: 1180px
   white-space: nowrap;
   font-weight: 750;
 }
+.token-audit-panel dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.token-audit-panel dl div {
+  display: grid;
+  grid-template-columns: minmax(92px, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  border-bottom: 1px solid #e0ebf4;
+  padding: 6px 0;
+  font-size: .7rem;
+}
+.token-audit-panel dt {
+  color: #71869d;
+}
+.token-audit-panel dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #14395d;
+  font-weight: 760;
+}
 .tool-card-list {
   display: grid;
   gap: 7px;

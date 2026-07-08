@@ -100,7 +100,7 @@ def test_signed_storage_e2e_then_followup_adopts(monkeypatch, tmp_path):
     task = main.review(task["task_id"], {"review_decision": "pass", "reviewer_signature": "owner-trade"})
     suggestion = main.storage_suggestion(task["task_id"])
     assert suggestion["suggestions"]["vector"]["recommended"] is True
-    assert suggestion["suggestions"]["corpus"]["recommended"] is False
+    assert suggestion["suggestions"]["corpus"]["recommended"] is True
     assert suggestion["suggestions"]["logic"]["recommended"] is True
     assert suggestion["suggestions"]["memory"]["recommended"] is True
     task = main.storage_request(task["task_id"], {"selected_targets": ["vector", "logic", "memory"], "user_decision": "custom", "signature": "owner-trade"})
