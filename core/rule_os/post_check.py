@@ -26,13 +26,33 @@ def check_model_answer_against_rule_package(answer: str, package: dict[str, Any]
             violations.append({"code": "beauty_medical_or_guarantee_claim", "message": "美容文案疑似誇大療效或保證結果。"})
         if _contains_any(text, ["nt$", "$", "元", "折", "買一送一", "限時"]) and not package.get("citable_data"):
             violations.append({"code": "invented_commercial_data", "message": "沒有正式資料卻輸出價格、優惠或活動資訊。"})
+    if package.get("task_type") == "debt_civil_case_draft":
+        required_review_guard = [
+            "不是法律意見",
+            "不得視為正式法律意見",
+            "不得作為正式法律意見",
+            "不構成法律意見",
+            "not legal advice",
+            "not a filed document",
+            "not submitted",
+            "owner review",
+            "使用者確認",
+            "待確認",
+            "簽名",
+        ]
+        if not _contains_any(text, required_review_guard):
+            violations.append({"code": "debt_missing_review_guard", "message": "債務民事草稿缺少使用者確認、非法律意見或不得送件的邊界提示。"})
+        if _contains_any(text, ["已提交法院", "已送件", "已寄出存證", "已聯絡對造", "filed with court", "sent to the counterparty"]):
+            violations.append({"code": "debt_overreach_execution_claim", "message": "債務民事草稿宣稱已送件、寄出或聯絡對造。"})
+        if _contains_any(text, ["2023年", "2024年", "2025年", "2026年", "court case no.", "法院案號"]) and not _contains_any(text, ["待確認", "請確認", "placeholder", "example only"]):
+            violations.append({"code": "debt_unconfirmed_dates_or_case_data", "message": "債務民事草稿疑似輸出未確認日期、案號或案件資料。"})
     if package.get("needs_clarification") and not _contains_any(text, ["請確認", "待確認", "需要你提供", "請補", "please confirm", "need"]):
         violations.append({"code": "missed_required_clarification", "message": "缺少資訊時沒有追問或標示待確認。"})
     if package.get("non_citable_data") and _contains_any(text, ["根據檢索庫", "向量庫顯示", "vector says"]):
         violations.append({"code": "retrieval_used_as_formal_basis", "message": "檢索庫候選被當正式依據。"})
     action = "allow"
     if violations:
-        high = {"overreach_execution_claim", "retrieval_used_as_formal_basis"}
+        high = {"overreach_execution_claim", "retrieval_used_as_formal_basis", "debt_overreach_execution_claim"}
         action = "block" if any(v["code"] in high for v in violations) else "downgrade_to_draft"
     return {
         "checked": True,

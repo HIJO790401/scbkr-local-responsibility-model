@@ -1,6 +1,7 @@
 """SCBKR draft grammar, understanding compiler, and evidence relation gate."""
 from __future__ import annotations
 import json
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -15,7 +16,90 @@ SCBKR_GRAMMAR_PACK_ZH = """你正在生成 SCBKR confirmation draft 的 Task Und
 不得輸出 confirmed=true、review_passed=true、storage_confirmed=true、physical_write_performed=true、signature_status=confirmed、signer=model/assistant/system。
 S 定義任務主體；C 定義責任鏈因果；B 定義邊界行為；K 區分已採用引用/類似語法/類似邏輯/候選但未採用/無相關引用；R 必須包含使用者簽名後才成立。"""
 
-GENERIC_STOPWORDS = {"文案", "規則", "確認單", "任務", "計畫", "生成", "草案", "scbkr", "責任鏈", "使用者", "輸出", "內容", "流程", "判斷"}
+GENERIC_STOPWORDS = {
+    "文案",
+    "規則",
+    "規則書",
+    "規則包",
+    "確認單",
+    "任務",
+    "計畫",
+    "生成",
+    "建立",
+    "草稿",
+    "草案",
+    "scbkr",
+    "責任鏈",
+    "使用者",
+    "輸出",
+    "內容",
+    "流程",
+    "判斷",
+    "rule",
+    "rules",
+    "rulebook",
+    "rulebooks",
+    "rulepack",
+    "draft",
+    "create",
+    "build",
+    "generate",
+    "user",
+    "model",
+    "task",
+    "content",
+    "workflow",
+    "output",
+    "signed",
+    "stored",
+    "existing",
+    "local",
+    "api",
+    "allowed",
+    "action",
+    "actions",
+    "status",
+    "state",
+    "source",
+    "target",
+    "signature",
+    "storage",
+    "store",
+    "runtime",
+    "system",
+}
+GENERIC_CJK_TOKENS = {
+    "使用",
+    "用者",
+    "規則",
+    "則書",
+    "規則書",
+    "責任",
+    "任鏈",
+    "責任鏈",
+    "確認",
+    "認單",
+    "確認單",
+    "模型",
+    "草稿",
+    "草案",
+    "生成",
+    "建立",
+    "任務",
+    "內容",
+    "資料",
+    "不得",
+    "必須",
+    "簽名",
+    "入庫",
+    "本次",
+    "正式",
+    "依我",
+    "已建",
+    "建立的",
+    "幫我",
+    "請依",
+}
 ADOPTABLE_RELATIONS = {"direct_match", "same_domain", "similar_logic", "style_reference"}
 
 
@@ -141,11 +225,74 @@ def has_task_subject(raw_input: str) -> bool:
 
 def _tokens(text: str) -> set[str]:
     raw = (text or "").lower()
-    found = {t for t in raw.replace("/", " ").replace("_", " ").replace("-", " ").split() if len(t) >= 2}
-    for key in ("滷肉飯", "商業", "文案", "餐飲", "美容", "美容院", "臉部", "脸部", "保養", "保养", "貼文", "贴文", "ui", "介面", "工作台", "人類", "描述", "確定性", "邏輯", "二手手機", "交易", "防詐", "風險", "買賣"):
+    found = {t for t in re.findall(r"[a-z0-9_]{2,}", raw)}
+    for key in (
+        "滷肉飯",
+        "商業",
+        "文案",
+        "餐飲",
+        "美容",
+        "美容院",
+        "臉部",
+        "脸部",
+        "保養",
+        "保养",
+        "貼文",
+        "贴文",
+        "ui",
+        "介面",
+        "工作台",
+        "人類",
+        "描述",
+        "確定性",
+        "邏輯",
+        "二手手機",
+        "交易",
+        "防詐",
+        "風險",
+        "買賣",
+        "債務",
+        "债务",
+        "民事",
+        "借款",
+        "欠款",
+        "催告",
+        "支付命令",
+        "強制執行",
+        "强制执行",
+        "beauty",
+        "salon",
+        "facial",
+        "skincare",
+        "marketing",
+        "copy",
+        "post",
+        "debt",
+        "civil",
+        "loan",
+        "owed",
+        "demand",
+        "payment",
+        "order",
+        "enforcement",
+        "lawsuit",
+        "claim",
+        "evidence",
+    ):
         if key in raw:
             found.add(key)
-    return found - GENERIC_STOPWORDS
+    for run in re.findall(r"[\u4e00-\u9fff]{2,}", raw):
+        # Add small Chinese n-grams so arbitrary user-defined rule domains can
+        # match without hand-written templates. Generic workflow words are
+        # filtered below and cannot become formal evidence by themselves.
+        for size in (2, 3, 4):
+            if len(run) < size:
+                continue
+            for index in range(0, len(run) - size + 1):
+                token = run[index : index + size]
+                if token not in GENERIC_CJK_TOKENS:
+                    found.add(token)
+    return found - GENERIC_STOPWORDS - GENERIC_CJK_TOKENS
 
 
 def classify_evidence_relation(raw_input: str, candidate_text: str, *, score: Any = None, source_store: str = "") -> dict[str, Any]:
@@ -157,7 +304,13 @@ def classify_evidence_relation(raw_input: str, candidate_text: str, *, score: An
         relation, reason = "conflict", "candidate conflicts with task-specific terms"
     elif len(overlap) >= 2 or any(token in overlap for token in ("滷肉飯", "工作台", "人類", "確定性")):
         relation, adopted, scope, reason = "direct_match", True, "basis", f"task-specific overlap: {', '.join(sorted(overlap))}"
-    elif ("商業" in q and "商業" in c) or ("餐飲" in q and "餐飲" in c) or ({"美容", "美容院", "臉部", "脸部", "保養", "保养"} & q and {"美容", "美容院", "臉部", "脸部", "保養", "保养"} & c) or ({"交易", "二手手機", "防詐", "風險"} & q and {"交易", "二手手機", "防詐", "風險"} & c):
+    elif (
+        ("商業" in q and "商業" in c)
+        or ("餐飲" in q and "餐飲" in c)
+        or ({"美容", "美容院", "臉部", "脸部", "保養", "保养", "beauty", "salon", "facial", "skincare"} & q and {"美容", "美容院", "臉部", "脸部", "保養", "保养", "beauty", "salon", "facial", "skincare"} & c)
+        or ({"交易", "二手手機", "防詐", "風險"} & q and {"交易", "二手手機", "防詐", "風險"} & c)
+        or ({"債務", "债务", "民事", "借款", "欠款", "催告", "支付命令", "強制執行", "强制执行", "debt", "civil", "loan", "owed", "demand", "payment", "order", "enforcement", "lawsuit", "claim", "evidence"} & q and {"債務", "债务", "民事", "借款", "欠款", "催告", "支付命令", "強制執行", "强制执行", "debt", "civil", "loan", "owed", "demand", "payment", "order", "enforcement", "lawsuit", "claim", "evidence"} & c)
+    ):
         relation, adopted, scope, reason = "same_domain", True, "basis", "same domain"
     elif "文案" in (raw + text) and not overlap:
         relation, scope, reason = "candidate_only", "none", "only generic copywriting token matched"

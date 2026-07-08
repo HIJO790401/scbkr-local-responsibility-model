@@ -1021,6 +1021,39 @@ def health() -> dict[str, Any]:
     }
 
 
+def _rule_os_route_reply(mode: str, locale: str, copy: dict[str, Any]) -> str:
+    if locale == "en":
+        if mode == "generate_rule":
+            return (
+                f"Classified as \"{copy['modes']['generate_rule']}\".\n\n"
+                "Next step is not general chat and not free-form advice. SCBKR must create a five-dimension rule draft, and the model can only act as the SCBKR rule drafter.\n\n"
+                "Flow: user input -> S/C/B/K/R draft -> plan-depth reinforcement -> field-by-field review -> user signature -> confirm storage -> compile into a local executable rule."
+            )
+        if mode == "confirm_storage":
+            return (
+                f"Classified as \"{copy['modes']['confirm_storage']}\". Storage cannot be completed by the model alone. "
+                "User signature, acceptance review, and second confirmation are required before splitting the rule into the rule, data, memory, and retrieval stores."
+            )
+        if mode in {"tool_execution", "high_risk_action"}:
+            return (
+                f"Classified as \"{copy['modes'][mode]}\". This cannot be handed to the model for free execution. "
+                "SCBKR may draft or simulate first; formal execution requires user confirmation and signature."
+            )
+        if mode == "query_four_stores":
+            return "No signed and accepted four-store material matched this request. Retrieval-store candidates cannot be used as formal authority."
+    if mode == "generate_rule":
+        return (
+            f"已分類為「{copy['modes']['generate_rule']}」。\n\n"
+            "下一步不是一般聊天，也不是直接給建議；系統必須建立 SCBKR 五維規則草稿，讓模型只擔任「五維規則草擬員」。"
+            "\n\n流程：使用者輸入 → 五維草稿 → 方案深度補強 → 逐欄確認 → 使用者簽名 → 確認入庫 → 編譯成本地可執行規則。"
+        )
+    if mode == "confirm_storage":
+        return "已分類為「確認入庫」。入庫不能由模型自動完成；必須先完成使用者簽名、驗收、二次確認，再拆入規則庫、資料庫、記憶庫與檢索庫。"
+    if mode in {"tool_execution", "high_risk_action"}:
+        return "已分類為高風險或工具執行。這類動作不能直接丟給模型自由執行；我只能先做草稿或模擬，正式執行前必須由使用者確認與簽名。"
+    return "目前四庫沒有與這個問題相符、且已完成簽名與驗收的正式資料。檢索庫候選不能直接當正式依據。"
+
+
 @app.get("/api/product/manifest")
 def product_manifest(locale: str | None = None) -> dict[str, Any]:
     return localized_product_manifest(locale)
@@ -1605,29 +1638,26 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
         classification=input_classification,
     )
     post_check: dict[str, Any] = {"checked": False, "allowed": True, "violations": [], "action": "not_applicable"}
+    model_fallback_error: str | None = None
     mode = str(input_classification.get("mode") or "general_chat")
     if _is_workbench_capability_question(user_text):
         reply = SCBKR_WORKBENCH_CAPABILITY_ZH
         source = "scbkr_workbench_capability_lock"
     elif mode == "generate_rule":
         copy = rule_os_text(locale)
-        reply = (
-            f"已分類為「{copy['modes']['generate_rule']}」。\n\n"
-            "下一步不是一般聊天，也不是直接給建議；系統必須建立 SCBKR 五維規則草稿，讓模型只擔任「五維規則草擬員」。"
-            "\n\n流程：使用者輸入 → 五維草稿 → 方案深度補強 → 逐欄確認 → 使用者簽名 → 確認入庫 → 編譯成本地可執行規則。"
-        )
+        reply = _rule_os_route_reply(mode, locale, copy)
         source = "rule_os_hard_router"
     elif mode == "confirm_storage":
-        reply = "已分類為「確認入庫」。入庫不能由模型自動完成；必須先完成使用者簽名、驗收、二次確認，再拆入規則庫、資料庫、記憶庫與檢索庫。"
+        reply = _rule_os_route_reply(mode, locale, rule_os_text(locale))
         source = "rule_os_storage_gate"
     elif mode in {"tool_execution", "high_risk_action"}:
-        reply = "已分類為高風險或工具執行。這類動作不能直接丟給模型自由執行；我只能先做草稿或模擬，正式執行前必須由使用者確認與簽名。"
+        reply = _rule_os_route_reply(mode, locale, rule_os_text(locale))
         source = "rule_os_permission_gate"
     elif mode == "query_four_stores":
         if current_rule_package.get("matched_rules") or current_rule_package.get("citable_data") or current_rule_package.get("user_preferences"):
             reply = build_rule_package_local_reply(user_text, current_rule_package, locale)
         else:
-            reply = "目前四庫沒有與這個問題相符、且已完成簽名與驗收的正式資料。檢索庫候選不能直接當正式依據。"
+            reply = _rule_os_route_reply(mode, locale, rule_os_text(locale))
         source = "rule_os_four_store_reader"
     elif product_topic:
         reply = build_product_reply(product_topic, locale)
@@ -1635,7 +1665,7 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     elif _is_scbkr_product_question(user_text):
         reply = build_product_reply("identity", locale)
         source = "product_manifest:identity"
-    elif mode == "answer_with_rules" or current_rule_package.get("matched_rules"):
+    elif mode == "answer_with_rules":
         if current_rule_package.get("draft_only") and not current_rule_package.get("matched_rules"):
             reply = build_rule_package_local_reply(user_text, current_rule_package, locale)
             source = "rule_os_draft_only_no_signed_rule"
@@ -1652,12 +1682,24 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
             except PermissionError as exc:
                 if _model_call_requires_external_api_permission(MODEL_SETTINGS):
                     raise HTTPException(status_code=403, detail=EXTERNAL_API_LOOPBACK_ERROR) from exc
-                raise HTTPException(status_code=403, detail="目前未允許模型生成，聊天內容不會送出。請開啟 model_generate 權限或改用 Sandbox。") from exc
+                model_fallback_error = str(exc)
+                reply = build_rule_package_local_reply(user_text, current_rule_package, locale)
+                source = "model_gateway_permission_denied_local_rule_package"
             except Exception as exc:
-                raise HTTPException(status_code=502, detail=f"模型呼叫失敗：{_friendly_model_error(MODEL_SETTINGS, str(exc))}") from exc
+                model_fallback_error = _friendly_model_error(MODEL_SETTINGS, str(exc))
+                reply = build_rule_package_local_reply(user_text, current_rule_package, locale)
+                source = "model_gateway_failed_local_rule_package"
         post_check = check_model_answer_against_rule_package(reply, current_rule_package)
         if not post_check.get("allowed"):
-            reply = downgrade_answer_to_draft(reply, post_check, locale)
+            if source.startswith("model_gateway"):
+                fallback_reply = build_rule_package_local_reply(user_text, current_rule_package, locale)
+                if locale == "en":
+                    reply = "The model output did not pass the local rule check, so SCBKR replaced it with a local rule-package draft.\n\n" + fallback_reply
+                else:
+                    reply = "模型輸出未通過本地規則檢查，SCBKR 已改用本次規則包產生安全草稿。\n\n" + fallback_reply
+                source = f"{source}_post_check_local_rule_package"
+            else:
+                reply = downgrade_answer_to_draft(reply, post_check, locale)
     elif not _model_connected():
         reply = build_local_rule_assist_reply(user_text, rule_assist, locale)
         source = "rule_assist_local_fallback"
@@ -1673,9 +1715,13 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
         except PermissionError as exc:
             if _model_call_requires_external_api_permission(MODEL_SETTINGS):
                 raise HTTPException(status_code=403, detail=EXTERNAL_API_LOOPBACK_ERROR) from exc
-            raise HTTPException(status_code=403, detail="目前未允許模型生成，聊天內容不會送出。請開啟 model_generate 權限或改用 Sandbox。") from exc
+            model_fallback_error = str(exc)
+            reply = build_local_rule_assist_reply(user_text, rule_assist, locale)
+            source = "model_gateway_permission_denied_local_fallback"
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"模型呼叫失敗：{_friendly_model_error(MODEL_SETTINGS, str(exc))}") from exc
+            model_fallback_error = _friendly_model_error(MODEL_SETTINGS, str(exc))
+            reply = build_local_rule_assist_reply(user_text, rule_assist, locale)
+            source = "model_gateway_failed_local_fallback"
     if locale == "zh-TW":
         reply = _zh_tw_output_guard(reply)
     if rule_assist.get("four_store", {}).get("answer_priority") == "basic_chat_or_draft_only":
@@ -1692,7 +1738,7 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     elif rule_assist.get("state") == "OWNER_SIGNATURE_REQUIRED" and locale == "en" and "signature" not in reply.lower():
         reply = f"{reply}\n\nGate: this touches high-risk tools, publishing, storage, or external connection. I can draft only; owner signature is required before execution."
     reply = _rule_state_manager().decorate_reply(reply, locale)
-    suggestion = _build_chat_suggestion(user_text) if any(trigger in user_text for trigger in SUGGESTION_TRIGGERS) else None
+    suggestion = _build_chat_suggestion(user_text) if mode == "general_chat" and any(trigger in user_text for trigger in SUGGESTION_TRIGGERS) else None
     return {
         "mode": "general_chat",
         "route_mode": mode,
@@ -1701,6 +1747,8 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
         "post_check": post_check,
         "reply": reply,
         "reply_source": source,
+        "model_fallback_error": model_fallback_error,
+        "chat_context_used": current_rule_package.get("chat_context_used", False),
         "rule_state": _rule_state_manager().status(locale),
         "rule_assist": rule_assist,
         "model_connected": _model_connected(),

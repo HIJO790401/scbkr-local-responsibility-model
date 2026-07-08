@@ -39,23 +39,27 @@ def _append_unique(target: list[Any], values: list[Any]) -> list[Any]:
 
 def _is_beauty_copy_rule(raw_input: str) -> bool:
     text = (raw_input or "").lower()
-    return any(token in text for token in ("美容院", "美容", "臉部", "脸部", "保養", "保养", "美睫", "美甲")) and any(
-        token in text for token in ("文案", "貼文", "贴文", "商業", "廣告", "copy")
+    return any(token in text for token in ("美容院", "美容", "臉部", "脸部", "保養", "保养", "美睫", "美甲", "beauty", "salon", "facial", "skincare", "skin care")) and any(
+        token in text for token in ("文案", "貼文", "贴文", "商業", "廣告", "copy", "post", "marketing", "ad")
     )
 
 
 def _is_debt_civil_rule(raw_input: str) -> bool:
-    text = raw_input or ""
-    return any(token in text for token in ("債務", "借款", "欠款", "民事案件", "民事", "支付命令", "本票", "強制執行", "催收")) and any(
-        token in text for token in ("規則", "規則書", "案件", "起訴", "答辯", "證據", "流程")
+    text = (raw_input or "").lower()
+    return any(token in text for token in ("債務", "债务", "借款", "欠款", "民事案件", "民事", "支付命令", "本票", "強制執行", "强制执行", "催收", "debt", "civil", "loan", "owed", "demand", "payment order", "enforcement", "lawsuit", "claim")) and any(
+        token in text for token in ("規則", "規則書", "案件", "起訴", "答辯", "證據", "流程", "rule", "rulebook", "case", "lawsuit", "evidence", "workflow", "draft")
     )
 
 
 def _task_label(raw_input: str) -> str:
     if _is_debt_civil_rule(raw_input):
+        if any(token in (raw_input or "").lower() for token in ("debt", "civil", "loan", "demand", "rulebook")):
+            return "debt civil case rulebook"
         if "規則書" in raw_input:
             return "債務民事案件規則書"
         return "債務民事案件規則"
+    if _is_beauty_copy_rule(raw_input) and any(token in (raw_input or "").lower() for token in ("beauty", "salon", "facial", "skincare", "copy", "marketing")):
+        return "beauty salon marketing copy rule"
     if "商業文案" in raw_input and ("規則表單" in raw_input or "表單" in raw_input):
         return "商業文案規則表單"
     match = re.search(r"(?:建立|生成|制定|新增|寫)(?:一個|一份|這個)?(.{2,36}?規則(?:書|包|表單)?)", raw_input or "")
@@ -112,14 +116,18 @@ def _base_rule_fields(raw_input: str) -> dict[str, list[str]]:
         forbidden.extend(
             [
                 "不得把模型草稿當成正式法律意見、正式訴狀、正式答辯或已送件文件。",
+                "Do not present drafts as legal advice, filed pleadings, formal responses, or submitted documents.",
                 "不得編造借款金額、利率、日期、對話紀錄、還款紀錄、法院案號、法條或裁判結果。",
+                "Do not invent loan amounts, interest rates, dates, messages, repayment records, court case numbers, statutes, or case outcomes.",
                 "不得自動寄送存證信函、提交法院文件、聯絡對造、刪除證據或執行付款。",
+                "Do not automatically send demand letters, file court documents, contact counterparties, delete evidence, or execute payments.",
                 "不得在未確認管轄、時效、證據來源與當事人身分前宣稱規則閉環。",
             ]
         )
         stop.extend(
             [
                 "缺少當事人身分、債務來源、金額、日期、還款紀錄、證據清單或目前程序階段時，只能生成待確認草稿。",
+                "If party identity, debt source, amount, dates, repayment records, evidence, or procedural stage are missing, output only a pending-confirmation draft.",
                 "涉及起訴、答辯、支付命令、強制執行、和解條件或對外送件時，必須要求使用者逐項確認並簽名。",
                 "任何法律依據、法條、法院流程或期限未由使用者提供或正式查證時，不得作為正式依據。",
             ]
@@ -127,6 +135,7 @@ def _base_rule_fields(raw_input: str) -> dict[str, list[str]]:
         basis.extend(
             [
                 "使用者確認的借據、契約、本票、轉帳紀錄、對話紀錄、還款紀錄與催告資料",
+                "User-confirmed loan agreements, promissory notes, transfer records, messages, repayment records, and demand materials",
                 "使用者確認的法院通知、案號、程序階段與送達日期",
                 "正式查證後的法規、法院流程或律師/專業人員確認資料",
             ]
@@ -134,6 +143,7 @@ def _base_rule_fields(raw_input: str) -> dict[str, list[str]]:
         acceptance.extend(
             [
                 "表單必須列出案件角色、債務原因、請求目標、證據來源、程序階段與禁止越權事項。",
+                "The form must list case role, debt cause, claim objective, evidence source, procedural stage, and prohibited overreach.",
                 "缺少正式資料時，輸出必須標示為待確認草稿。",
                 "模型只能協助整理與草擬，不得代替使用者作法律終判或自動送件。",
             ]

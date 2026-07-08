@@ -45,6 +45,16 @@ GENERATE_RULE_TRIGGERS = (
     "幫我做規則",
     "ruleform",
     "createrule",
+    "createarule",
+    "createarulebook",
+    "buildarule",
+    "buildarulebook",
+    "makearule",
+    "makearulebook",
+    "generatearule",
+    "generatearulebook",
+    "draftarule",
+    "draftarulebook",
 )
 
 MODIFY_RULE_TRIGGERS = (
@@ -60,6 +70,10 @@ MODIFY_RULE_TRIGGERS = (
     "k不對",
     "r不對",
     "updateexistingrule",
+    "editrule",
+    "modifyrule",
+    "changerule",
+    "updaterule",
 )
 
 CONFIRM_STORAGE_TRIGGERS = (
@@ -74,6 +88,10 @@ CONFIRM_STORAGE_TRIGGERS = (
     "我簽名",
     "confirms storage",
     "confirmstorage",
+    "storetherule",
+    "savetofourstores",
+    "confirmstore",
+    "ownersignature",
 )
 
 QUERY_STORE_TRIGGERS = (
@@ -90,6 +108,12 @@ QUERY_STORE_TRIGGERS = (
     "打開四庫",
     "查入庫",
     "queryfourstores",
+    "fourstores",
+    "rulestore",
+    "datastore",
+    "memorystore",
+    "retrievalstore",
+    "datacenter",
 )
 
 TOOL_TRIGGERS = (
@@ -106,6 +130,11 @@ TOOL_TRIGGERS = (
     "執行工具",
     "呼叫api",
     "tool",
+    "websearch",
+    "searchweb",
+    "sendemail",
+    "openwebsite",
+    "callapi",
 )
 
 HIGH_RISK_TRIGGERS = (
@@ -125,6 +154,11 @@ HIGH_RISK_TRIGGERS = (
     "delete",
     "publish",
     "payment",
+    "pay",
+    "sendtocustomer",
+    "sendout",
+    "overwrite",
+    "publiclypost",
 )
 
 ANSWER_WITH_RULES_TRIGGERS = (
@@ -146,6 +180,41 @@ ANSWER_WITH_RULES_TRIGGERS = (
     "copy",
     "write",
     "draft",
+    "usemyrule",
+    "applymyrule",
+    "usemyrulebook",
+    "applymyrulebook",
+    "accordingto",
+    "basedonmyrule",
+)
+
+RULE_REFERENCE_MARKERS = (
+    "依我已建立",
+    "依已建立",
+    "依照已建立",
+    "依照我的規則",
+    "依照規則",
+    "依據規則",
+    "引用規則",
+    "套用規則",
+    "套用我的規則",
+    "使用我的規則",
+    "照我的規則",
+    "照著我的規則",
+    "已建立的",
+    "已入庫",
+    "usemyexisting",
+    "useexisting",
+    "applyexisting",
+    "applymyexisting",
+    "accordingto",
+    "basedonmy",
+    "basedontheexisting",
+    "existingrule",
+    "existingrulebook",
+    "signedrule",
+    "storedrule",
+    "localrule",
 )
 
 
@@ -168,10 +237,30 @@ def classify_user_input(text: str) -> dict[str, Any]:
             "model_call_allowed": False,
         }
     help_rule_question = any(token in normalized for token in ("怎麼建立規則", "如何建立規則", "怎麼生成規則", "如何生成規則", "怎麼建規則"))
+    reference_existing_rule = any(marker in normalized for marker in RULE_REFERENCE_MARKERS) and any(
+        noun in normalized for noun in ("規則", "規則書", "規則包", "規則表單", "rule", "rulebook", "rulepack", "ruleform")
+    )
+    if reference_existing_rule:
+        return {
+            "mode": "answer_with_rules",
+            "confidence": 0.9,
+            "matched_triggers": ["reference_existing_rule"],
+            "reason": "使用者要求依已建立規則回答，必須先查本地四庫並產生本次規則包。",
+            "requires_four_store": True,
+            "requires_signature": False,
+            "model_call_allowed": True,
+            "storage_write_allowed": False,
+            "tool_execution_allowed": False,
+        }
     create_rule_pattern = (
         not help_rule_question
         and any(verb in normalized for verb in ("生成", "建立", "新增", "制定", "做成", "整理成", "變成"))
         and any(noun in normalized for noun in ("規則", "規則書", "規則包", "規則表單"))
+    )
+    create_rule_pattern = create_rule_pattern or (
+        not help_rule_question
+        and any(verb in normalized for verb in ("create", "build", "make", "generate", "draft", "compile"))
+        and any(noun in normalized for noun in ("rule", "rulebook", "rulepack", "ruleform"))
     )
     if create_rule_pattern:
         return {
