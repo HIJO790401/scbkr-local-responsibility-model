@@ -21,7 +21,7 @@ def test_scbkr_workbench_capability_lock_does_not_call_model(monkeypatch):
     assert "修改草案" in reply
     assert "套用修改" in reply
     assert "重新確認責任鏈" in reply or "confirmed=false" in reply
-    assert "向量庫、語料庫、程式邏輯庫、記憶庫" in reply
+    assert "檢索庫、資料庫、規則庫、記憶庫" in reply
     assert "二次確認" in reply
     assert "引用已確認資料" in reply
     assert "SAP" not in reply

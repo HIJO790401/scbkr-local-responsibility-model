@@ -99,12 +99,12 @@ def test_prepare_storage_payloads_gives_each_four_store_a_distinct_contract():
 
     payloads = prepare_storage_payloads(task, ["vector", "corpus", "logic", "memory"], task["ledger_id"])
 
-    assert payloads["vector"]["store_role"] == "相似案例索引"
+    assert payloads["vector"]["store_role"] == "相似候選召回庫"
     assert payloads["vector"]["citation_policy"] == "discovery_index_only_not_formal_basis"
     assert "retrieval_text" in payloads["vector"]
-    assert payloads["corpus"]["store_role"] == "原文素材庫"
+    assert payloads["corpus"]["store_role"] == "正式資料庫"
     assert payloads["corpus"]["source_material"] == "已驗收的商業文案規則輸出"
-    assert payloads["logic"]["store_role"] == "規則與流程判準庫"
+    assert payloads["logic"]["store_role"] == "可執行規則判準庫"
     assert "不得編造價格" in payloads["logic"]["content"]
     assert payloads["memory"]["store_role"] == "長期偏好與使用者規則記憶"
     assert payloads["memory"]["memory_statement"] == "幫我生成商業文案規則表單"

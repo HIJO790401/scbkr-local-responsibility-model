@@ -55,9 +55,9 @@ def test_data_center_section_exposes_human_readable_storage_item(tmp_path, monke
 
     assert response.status_code == 200
     item = response.json()["items"][0]
-    assert item["store_label"] == "邏輯庫"
-    assert item["store_role"] == "規則與流程判準庫"
+    assert item["store_label"] == "規則庫"
+    assert item["store_role"] == "可執行規則判準庫"
     assert item["status_label"] == "可引用"
-    assert "邏輯庫" in item["model_reading_hint"]
+    assert "規則庫" in item["model_reading_hint"]
     assert "不得編造價格" in item["content_text"]
     assert item["plain_summary"] == "商業文案規則表單"

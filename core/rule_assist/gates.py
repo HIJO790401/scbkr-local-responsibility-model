@@ -29,8 +29,8 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "price_label": "免費版",
         "name": {"zh-TW": "免費草稿層", "en": "Free Draft Layer"},
         "summary": {
-            "zh-TW": "本機聊天、草案、四庫候選引用；使用者自行簽名，沒有沈耀規則完整性輔助。",
-            "en": "Local chat, drafts, and four-store candidate reads. The user signs alone; no ShenYao completeness assist.",
+            "zh-TW": "本機聊天、基本五維規則草稿、四庫候選引用；使用者自行簽名，沒有沈耀規則完整性輔助。",
+            "en": "Local chat, basic five-dimensional rule drafts, and four-store candidate reads. The user signs alone; no ShenYao completeness assist.",
         },
         "model_role": "chat_and_draft_only",
         "gates": ["DraftStateGate", "OwnerSignatureGate", "FourStoreCitationGate"],
@@ -40,10 +40,10 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "requires_owner_signature": True,
         "human_capabilities": [
             "一般聊天與任務草稿",
-            "自然語言建立未簽名規則草案",
+            "自然語言建立基本 S/C/B/K/R 規則草案",
             "四庫只能做候選搜尋，不能當正式引用結論",
         ],
-        "model_scbr_fill": "不主動補完整 S/C/B/K/R；只提供基礎草稿與提示。",
+        "model_scbr_fill": "可把人話整理成基本 S/C/B/K/R 草稿；不補責任鏈閉環，不代簽、不入庫。",
         "formation_conditions": [
             "使用者提供任務或規則原句",
             "系統可產生草案",

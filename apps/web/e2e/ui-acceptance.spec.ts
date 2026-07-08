@@ -111,8 +111,8 @@ test("核心 UI 可開啟、可導覽且沒有明顯版面溢出", async ({ page
   await openSection(page, testInfo, "資料中心");
   await expect(page.getByRole("heading", { name: "四庫資料中心", exact: true })).toBeVisible();
   await expect(page.getByLabel("搜尋四庫", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "邏輯庫 資料庫", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "邏輯庫", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "規則庫 資料庫", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "規則庫", exact: true })).toBeVisible();
   await attachScreen(page, testInfo, "04-data-center");
 
   const viewportFits = await page.evaluate(() =>
