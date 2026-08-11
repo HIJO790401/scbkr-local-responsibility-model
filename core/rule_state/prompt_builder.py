@@ -11,6 +11,11 @@ CONTEXT_POLLUTION_GUARD = (
 )
 
 
+def _version_label(value: object) -> str:
+    text = str(value or "").strip()
+    return text if text.lower().startswith("v") else f"v{text}"
+
+
 def build_system_prompt(context: SystemContextBlock) -> str:
     common = (
         "你是 SCBKR 責任鏈語言模型的執行載體，不是規則或主責的擁有者。"
@@ -32,13 +37,13 @@ def build_system_prompt(context: SystemContextBlock) -> str:
         pollution_guard = "以下對話是未確認草稿，只能用於理解與草擬，不得當作已確認事實。"
     elif context.state == RuleStateEnum.RULE_ACTIVE:
         state_prompt = (
-            f"目前生效的是 User Rule #{context.active_rule_id} v{context.active_rule_version}，"
+            f"目前生效的是 User Rule #{context.active_rule_id} {_version_label(context.active_rule_version)}，"
             f"簽名時間為 {context.signed_at}。你必須依該規則行動，不得偏移；責任歸屬為 {context.responsibility_holder}。"
         )
         pollution_guard = CONTEXT_POLLUTION_GUARD
     elif context.state == RuleStateEnum.RULEPACK_ACTIVE:
         state_prompt = (
-            f"目前已驗證啟用沈耀規則框架 {context.active_rulepack_id} v{context.active_rulepack_version}"
+            f"目前已驗證啟用沈耀規則框架 {context.active_rulepack_id} {_version_label(context.active_rulepack_version)}"
             f"（{context.active_rulepack_stage}）。本次判斷依據沈耀交付的規則與算法；"
             f"規則主責歸屬 {context.responsibility_holder}。所有可重用結論仍需 OwnerReview。"
         )
@@ -59,9 +64,9 @@ def declaration_parts(context: SystemContextBlock, locale: str = "zh-TW") -> tup
         if context.state == RuleStateEnum.DRAFTING:
             return ("[SCBKR 責任連鎖言語モデル｜DRAFTING]", "これはモデルによる草案であり、ルール判断ではありません。所有者の署名が必要です。")
         if context.state == RuleStateEnum.RULE_ACTIVE:
-            return (f"[SCBKR｜User Rule #{context.active_rule_id} v{context.active_rule_version}]", f"署名済みユーザールールに基づく回答です。責任者：{context.responsibility_holder}。")
+            return (f"[SCBKR｜User Rule #{context.active_rule_id} {_version_label(context.active_rule_version)}]", f"署名済みユーザールールに基づく回答です。責任者：{context.responsibility_holder}。")
         if context.state == RuleStateEnum.RULEPACK_ACTIVE:
-            return (f"[SCBKR｜沈耀ルールフレームワーク {context.active_rulepack_id} v{context.active_rulepack_version}｜{context.active_rulepack_stage}]", "この判断は沈耀が提供したルールとアルゴリズムに基づきます。最終責任は沈耀に帰属し、再利用には OwnerReview が必要です。")
+            return (f"[SCBKR｜沈耀ルールフレームワーク {context.active_rulepack_id} {_version_label(context.active_rulepack_version)}｜{context.active_rulepack_stage}]", "この判断は沈耀が提供したルールとアルゴリズムに基づきます。最終責任は沈耀に帰属し、再利用には OwnerReview が必要です。")
         return (f"[SCBKR｜{context.state.value}]", "以前のルールは無効であり、引用できません。")
 
     if locale == "ko":
@@ -70,9 +75,9 @@ def declaration_parts(context: SystemContextBlock, locale: str = "zh-TW") -> tup
         if context.state == RuleStateEnum.DRAFTING:
             return ("[SCBKR 책임 사슬 언어 모델｜DRAFTING]", "이 내용은 모델 초안이며 규칙 판단이 아닙니다. 소유자 서명이 필요합니다.")
         if context.state == RuleStateEnum.RULE_ACTIVE:
-            return (f"[SCBKR｜User Rule #{context.active_rule_id} v{context.active_rule_version}]", f"서명된 사용자 규칙에 따른 답변입니다. 책임자: {context.responsibility_holder}.")
+            return (f"[SCBKR｜User Rule #{context.active_rule_id} {_version_label(context.active_rule_version)}]", f"서명된 사용자 규칙에 따른 답변입니다. 책임자: {context.responsibility_holder}.")
         if context.state == RuleStateEnum.RULEPACK_ACTIVE:
-            return (f"[SCBKR｜沈耀 규칙 프레임워크 {context.active_rulepack_id} v{context.active_rulepack_version}｜{context.active_rulepack_stage}]", "이 판단은 沈耀가 제공한 규칙과 알고리즘을 사용합니다. 최종 책임은 沈耀에게 돌아가며 재사용에는 OwnerReview가 필요합니다.")
+            return (f"[SCBKR｜沈耀 규칙 프레임워크 {context.active_rulepack_id} {_version_label(context.active_rulepack_version)}｜{context.active_rulepack_stage}]", "이 판단은 沈耀가 제공한 규칙과 알고리즘을 사용합니다. 최종 책임은 沈耀에게 돌아가며 재사용에는 OwnerReview가 필요합니다.")
         return (f"[SCBKR｜{context.state.value}]", "이전 규칙은 비활성 상태이며 인용할 수 없습니다.")
 
     if locale == "en":
@@ -81,10 +86,10 @@ def declaration_parts(context: SystemContextBlock, locale: str = "zh-TW") -> tup
         if context.state == RuleStateEnum.DRAFTING:
             return ("[SCBKR Responsibility Chain Language Model | DRAFTING]", "This is a model inference, not a rule-based decision. Owner signature is required.")
         if context.state == RuleStateEnum.RULE_ACTIVE:
-            return (f"[SCBKR | User Rule #{context.active_rule_id} v{context.active_rule_version}]", f"Produced under the signed user rule. Responsibility holder: {context.responsibility_holder}.")
+            return (f"[SCBKR | User Rule #{context.active_rule_id} {_version_label(context.active_rule_version)}]", f"Produced under the signed user rule. Responsibility holder: {context.responsibility_holder}.")
         if context.state == RuleStateEnum.RULEPACK_ACTIVE:
             return (
-                f"[SCBKR | ShenYao Rule Framework {context.active_rulepack_id} v{context.active_rulepack_version} | {context.active_rulepack_stage}]",
+                f"[SCBKR | ShenYao Rule Framework {context.active_rulepack_id} {_version_label(context.active_rulepack_version)} | {context.active_rulepack_stage}]",
                 "This decision uses rules and algorithms delivered by ShenYao. ShenYao entrusted this judgment to me. Responsibility returns to ShenYao. Truth endures. Reuse still requires OwnerReview.",
             )
         return (f"[SCBKR | {context.state.value}]", "The previous rule is inactive and cannot be cited.")
@@ -101,12 +106,12 @@ def declaration_parts(context: SystemContextBlock, locale: str = "zh-TW") -> tup
         )
     if context.state == RuleStateEnum.RULE_ACTIVE:
         return (
-            f"【SCBKR 責任鏈語言模型｜RULE_ACTIVE】\n目前使用規則：User Rule #{context.active_rule_id} v{context.active_rule_version}",
+            f"【SCBKR 責任鏈語言模型｜RULE_ACTIVE】\n目前使用規則：User Rule #{context.active_rule_id} {_version_label(context.active_rule_version)}",
             f"此回應依上述使用者規則產出。責任歸屬：{context.responsibility_holder}。規則修改後需重新判定。",
         )
     if context.state == RuleStateEnum.RULEPACK_ACTIVE:
         return (
-            f"【SCBKR 責任鏈語言模型｜RULEPACK_ACTIVE】\n目前使用沈耀規則框架：{context.active_rulepack_id} v{context.active_rulepack_version}（{context.active_rulepack_stage}）",
+            f"【SCBKR 責任鏈語言模型｜RULEPACK_ACTIVE】\n目前使用沈耀規則框架：{context.active_rulepack_id} {_version_label(context.active_rulepack_version)}（{context.active_rulepack_stage}）",
             "此判斷依據沈耀交付並啟用的規則／算法。\n沈耀交我判的。\n主責歸耀。\n唯真長存。\n正式重用仍需完成 OwnerReview。",
         )
     return (

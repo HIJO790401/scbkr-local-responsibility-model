@@ -1,10 +1,9 @@
-# Plan Feature Matrix
+# Public Edition Feature Matrix
 
-| Plan | Capability | Signature |
+| Edition | Capability | Signature |
 | --- | --- | --- |
-| FREE | Basic five-dimensional SCBKR draft, user self-sign, local storage, local citation | User signature only |
-| NT$690 | Responsibility-chain assist, missing data questions, stop conditions, insufficient-basis handling | User signature plus paid collaboration structure |
-| NT$3,300 | Rulebook closure audit, validity/failure/risk/repair/replay/version/dual-signature/rulepack support | Dual-signature mode available |
+| FREE | General chat, model-assisted S/C/B/K/R drafts, editable confirmation sheets, user-approved four-store storage, signed-rule citation, replay, and token-cost audit | User signature only |
 
-The model can draft and suggest edits. It cannot sign, review, store, activate,
-publish, send, pay, delete, or claim an external action happened.
+The public repository contains the FREE edition only. The model can draft and
+suggest edits. It cannot sign, review, store, activate, publish, send, pay,
+delete, or claim an external action happened.

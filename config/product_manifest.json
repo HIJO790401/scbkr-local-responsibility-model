@@ -19,7 +19,7 @@
   "creator": {
     "author_id": "shen-yao-888pi",
     "name": {
-      "zh-TW": "許文耀／沈耀888pi",
+      "zh-TW": "許文耀／沈耀888π",
       "en": "Wen-Yao Hsu / ShenYao888pi"
     },
     "organization": {
@@ -34,8 +34,50 @@
     "contact_email": "ken0963521@gmail.com"
   },
   "identity": {
-    "zh-TW": "我是 SCBKR，一套由許文耀／沈耀888pi 建立的一般 AI 聊天與本地責任鏈系統。我不是底層語言模型；我連接使用者選擇的本地 LLM 或 API。使用者可以先正常聊天，只有可重用、可引用或需要承擔的內容，才會進入第0原理建議閘、確認單、簽名、入庫與回放治理。",
-    "en": "I am SCBKR, a general AI chat and local responsibility-chain system created by Wen-Yao Hsu / ShenYao888pi. I am not the underlying language model. I connect to a user-selected local LLM or API. Users can chat normally first; only reusable, citable, or responsibility-bearing content enters the Zeroth Principle Advisory Gate, confirmation sheets, signatures, storage, and replay governance."
+    "zh-TW": "我是 SCBKR 責任鏈語言模型 2.3 的 FREE 公開體驗版，一般 AI 聊天與本地責任鏈系統，由許文耀／沈耀888π 建立；作者是語意防火牆創辦人、產品作者與規則作者。我不是固定的底層語言模型，而是連接使用者選擇的本地 LLM 或 OpenAI-compatible API，負責規則路由、確認單編譯、四庫引用、簽名 Gate、回放與 Token 成本審計。FREE 版讓使用者建立並承擔自己的規則，不包含作者的私人正式規則包。",
+    "en": "I am the FREE public experience edition of SCBKR Responsibility Chain Language Model 2.3, created by Wen-Yao Hsu / ShenYao888pi, founder of Semantic Firewall and author of the product and its rules. I am not a fixed underlying language model. I connect to a user-selected local LLM or OpenAI-compatible API and handle rule routing, confirmation-sheet compilation, four-store citation, signature gates, replay, and token-cost audits. The FREE edition lets users create and own their own rules; it does not include the author's private official rule packs."
+  },
+  "scbkr_definition": {
+    "summary": {
+      "zh-TW": "SCBKR 是一套把人話整理成可確認、可簽名、可入庫、可引用、可回放規則的五維責任鏈。五個欄位缺一不可，也不能互相交換。",
+      "en": "SCBKR is a five-dimension responsibility chain that turns plain language into rules that can be reviewed, signed, stored, cited, and replayed. All five dimensions are required and must not be swapped."
+    },
+    "dimensions": {
+      "S": {
+        "name": {"zh-TW": "主體與情境", "en": "Subject and Situation"},
+        "description": {"zh-TW": "說清楚是誰、什麼事、在什麼情況下適用，以及預期處理什麼。", "en": "Defines who and what the rule is about, when it applies, and what it is expected to handle."},
+        "question": {"zh-TW": "這是誰的規則？處理什麼情境？", "en": "Whose rule is this, and what situation does it govern?"}
+      },
+      "C": {
+        "name": {"zh-TW": "因果與判斷順序", "en": "Causality and Decision Order"},
+        "description": {"zh-TW": "說清楚為什麼要這樣判斷、先做什麼再做什麼，以及不同條件會造成什麼結果。", "en": "Defines why the rule works, the order of checks, and how different conditions lead to different outcomes."},
+        "question": {"zh-TW": "為什麼成立？要照什麼順序判斷？", "en": "Why does it apply, and in what order should decisions be made?"}
+      },
+      "B": {
+        "name": {"zh-TW": "邊界、禁止與停止", "en": "Boundaries, Prohibitions, and Stops"},
+        "description": {"zh-TW": "說清楚不能做什麼、何時必須停止、有哪些例外，以及模型與工具不得越過哪條線。", "en": "Defines what must not be done, when processing must stop, which exceptions apply, and what the model or tools may not cross."},
+        "question": {"zh-TW": "什麼不能做？缺什麼就必須停？", "en": "What is prohibited, and what missing condition must stop the process?"}
+      },
+      "K": {
+        "name": {"zh-TW": "依據與可引用來源", "en": "Basis and Citable Sources"},
+        "description": {"zh-TW": "說清楚哪些資料能作正式依據、哪些只能當候選、來源是否已確認，以及資料不足時怎麼處理。", "en": "Defines which data is formal authority, which is only a candidate, whether sources are confirmed, and what to do when evidence is missing."},
+        "question": {"zh-TW": "憑什麼判？哪些來源可以或不可以引用？", "en": "What supports the decision, and which sources may or may not be cited?"}
+      },
+      "R": {
+        "name": {"zh-TW": "責任、驗收與簽名", "en": "Responsibility, Review, and Signature"},
+        "description": {"zh-TW": "說清楚誰負責、怎樣才算完成、誰能簽名、失敗如何修復，以及如何留下回放紀錄。", "en": "Defines who is responsible, what counts as acceptance, who may sign, how failures are repaired, and what must be replayable."},
+        "question": {"zh-TW": "誰承擔？怎樣驗收？誰簽名？錯了怎麼修？", "en": "Who is accountable, how is it accepted, who signs, and how is failure repaired?"}
+      }
+    }
+  },
+  "welcome": {
+    "zh-TW": "我是 SCBKR 責任鏈語言模型 2.3 的 FREE 公開體驗版，由許文耀／沈耀888π（語意防火牆創辦人、產品與規則作者）建立。\n\n我能像一般 AI 聊天，也能讓你連接的模型把人話整理成可編輯的 S／C／B／K／R 確認單：S 主體、C 因果、B 邊界、K 依據、R 責任。\n\n只有你能確認與簽名；簽名後規則才會編譯進四庫，並優先於聊天上下文成為後續回答依據。FREE 版讓你建立並承擔自己的規則，不包含沈耀的私人正式規則包。介面完整支援繁體中文與英文。\n\n直接聊天，或告訴我「把這個寫成我的本地規則」。如需沈耀正式規則包、深度客製或商業流程，請等待後續產品或洽商業合作。",
+    "en": "I am the FREE public experience edition of SCBKR Responsibility Chain Language Model 2.3, created by Wen-Yao Hsu / ShenYao888pi, founder of Semantic Firewall and author of the product and its rules.\n\nI can chat normally and let your connected model turn plain language into an editable S/C/B/K/R confirmation sheet: Subject, Causality, Boundary, Basis, and Responsibility.\n\nOnly you may review and sign. A signed rule is compiled into the four stores and becomes formal authority ahead of chat context. FREE lets you create and own your own rules; it does not include ShenYao's private official rule packs. The interface fully supports Traditional Chinese and English.\n\nChat normally, or tell me: \"Turn this into my local rule.\" For ShenYao official rule packs, deep customization, or commercial workflows, wait for a future product or request a commercial collaboration."
+  },
+  "supported_languages": {
+    "interface": ["zh-TW", "en"],
+    "model_reply": "depends_on_connected_model",
+    "rule_language_metadata": ["creation_language", "display_language", "translation_version", "signature_version"]
   },
   "runtime_relationship": {
     "zh-TW": "SCBKR 是控制與編譯層；LM Studio、Ollama 或 OpenAI-compatible 模型是可替換的執行 Runtime。更換模型不應改變已簽名規則、四庫資料與回放紀錄。",
@@ -46,7 +88,7 @@
       "id": "chat_first_shell",
       "phase": "2.3",
       "title": {"zh-TW": "聊天優先入口", "en": "Chat-first shell"},
-      "description": {"zh-TW": "使用者先像一般 AI 產品聊天；可重用規則需求會先進第0原理建議閘，再由使用者決定是否產生 FREE 確認單草稿。", "en": "Users start in normal AI chat. Reusable-rule intent enters the Zeroth Principle Advisory Gate before the user decides whether to create a FREE confirmation draft."}
+      "description": {"zh-TW": "使用者先像一般 AI 產品聊天；明確建規則要求會直接進模型草擬工作台，只有隱含的可重用判斷才先顯示第0原理建議閘。", "en": "Users start in normal AI chat. Explicit rule-authoring requests route directly to model-assisted Workbench drafting; only implied reusable judgements first show the Zeroth Principle Advisory Gate."}
     },
     {
       "id": "responsibility_draft",
@@ -73,16 +115,10 @@
       "description": {"zh-TW": "以具名、版本化、簽名規則控制模型與工具權限。", "en": "Control models and tool permissions with attributed, versioned, signed rules."}
     },
     {
-      "id": "protected_rule_state_runtime",
-      "phase": "2.1",
-      "title": {"zh-TW": "受保護規則狀態", "en": "Protected Rule State Runtime"},
-      "description": {"zh-TW": "訂閱取得版本化 Runtime 執行資格；使用者可在該狀態建立自訂規則，但不取得私有規則原始碼。", "en": "A subscription grants access to a versioned runtime. Users may create custom rules under that state without receiving the private rule source."}
-    },
-    {
       "id": "launch_control_plane",
       "phase": "2.1",
       "title": {"zh-TW": "上線控制中心", "en": "Launch control plane"},
-      "description": {"zh-TW": "集中管理登入、訂閱、搜尋、Windows 發布、更新與法律資料的上架準備度。", "en": "Track launch readiness for identity, billing, search, Windows distribution, updates, and legal materials."}
+      "description": {"zh-TW": "集中管理登入、搜尋、Windows 發布、更新與法律資料的上架準備度。", "en": "Track launch readiness for identity, search, Windows distribution, updates, and legal materials."}
     },
     {
       "id": "rule_state_awareness",
@@ -99,17 +135,32 @@
   "collaboration": {
     "status": "open",
     "email": "ken0963521@gmail.com",
-    "topics": ["protected runtime licensing", "custom rule design", "local AI integration", "enterprise proof of concept"]
+    "topics": ["custom rule design", "local AI integration", "enterprise proof of concept"]
   },
   "distribution_policy": {
     "private_rule_source_distributed": false,
-    "subscription_product": "ShenYao Rule State Runtime entitlement",
-    "user_owned_rule_import_supported": true
+    "public_edition": "FREE",
+    "edition_type": "experience",
+    "user_owned_rule_import_supported": true,
+    "author_official_rulepacks_included": false,
+    "external_generalizations_override_active_rule_state": false
+  },
+  "edition_positioning": {
+    "zh-TW": "FREE 是 SCBKR 框架體驗版：使用者自行定義、確認、簽名並承擔規則。外部通用說法只能作候選資料，不得在本產品內自動壓過目前啟用的使用者規則狀態。沈耀正式規則包不包含在公開版。",
+    "en": "FREE is an experience edition of the SCBKR framework: users define, review, sign, and own their rules. External generalizations are candidates only and may not automatically override the active user rule state inside this product. ShenYao official rule packs are not included in the public edition."
+  },
+  "benchmark_disclaimer": {
+    "zh-TW": "Token 節省率是逐次量測結果，不是普遍定律。只有同 provider、同模型、兩次真實呼叫且取得 provider usage 時，才能標示 VERIFIED。",
+    "en": "Token reduction is a per-benchmark measurement, not a universal law. VERIFIED requires two real calls to the same provider and exact model with provider usage available."
+  },
+  "future_offerings": {
+    "zh-TW": "FREE 框架體驗版先行上架。沈耀正式規則包、進階規則結構與商業工作流不包含在公開版；如需使用，請等待後續產品或洽許文耀／沈耀888π商業合作。",
+    "en": "The FREE framework experience launches first. ShenYao official rule packs, advanced rule structures, and commercial workflows are not included in the public edition; wait for a future product or contact Wen-Yao Hsu / ShenYao888pi for commercial collaboration."
   },
   "rule_import": {
     "current_status": "signed-versioned-rulepack",
-    "target_status": "protected-rule-state-runtime",
-    "flow": ["entitlement", "select_version", "select_mode", "activate_runtime", "create_user_overlay", "validate", "owner_signature", "audit", "rollback"]
+    "target_status": "signed-versioned-rulepack",
+    "flow": ["select_version", "activate_runtime", "create_user_overlay", "validate", "owner_signature", "audit", "rollback"]
   },
   "stores": ["vector", "corpus", "logic", "memory"],
   "master_plan": "docs/SCBKR_MASTER_PLAN_FINAL.md"

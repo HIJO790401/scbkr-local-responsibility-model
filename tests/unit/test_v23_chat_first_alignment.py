@@ -13,7 +13,9 @@ def test_v2_app_is_formal_chat_first_entry():
     assert 'import V2App from "./V2App"' in MAIN
     assert "<V2App />" in MAIN
     assert "一般聊天" in V2_APP
-    assert "像一般模型一樣輸入" in V2_APP
+    assert "用人話描述任何想長期沿用的判斷" in V2_APP
+    assert "語意防火牆創辦人" in V2_APP
+    assert "繁體中文與英文" in V2_APP
 
 
 def test_rule_intent_stays_in_chat_until_user_chooses_draft():
@@ -27,8 +29,7 @@ def test_rule_intent_stays_in_chat_until_user_chooses_draft():
 
 def test_docs_and_manifest_describe_chat_first_product():
     assert "一般 AI 聊天產品 + 使用者規則責任鏈能力" in README
-    assert "NT$690 是責任鏈結構輔助層，不是確認單生成門檻" in README
-    assert "NT$3,300 是規則書閉環層" in README
+    assert "本 GitHub 儲存庫只發佈公開免費版" in README
     assert MANIFEST["version"] == "2.3.0"
     assert MANIFEST["release_stage"] == "2.3-chat-first-ui-alignment"
     assert "一般 AI 聊天產品" in MANIFEST["category"]["zh-TW"]

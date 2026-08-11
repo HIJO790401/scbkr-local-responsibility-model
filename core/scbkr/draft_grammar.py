@@ -99,7 +99,61 @@ GENERIC_CJK_TOKENS = {
     "建立的",
     "幫我",
     "請依",
+    "發布",
+    "寄送",
+    "上架",
+    "付款",
+    "刪除",
+    "執行",
+    "工具",
+    "文件",
+    "資料",
+    "依據",
+    "風險",
+    "邊界",
+    "停止",
+    "條件",
+    "回覆",
+    "回答",
+    "問題",
+    "需求",
+    "處理",
+    "協助",
+    "直接",
 }
+GENERIC_CJK_PHRASES = {
+    *GENERIC_CJK_TOKENS,
+    "使用者確認",
+    "使用者簽名",
+    "正式依據",
+    "正式引用",
+    "模型輸出",
+    "模型回答",
+    "高風險動作",
+    "外部工具",
+    "本地四庫",
+}
+WEAK_RELATION_TOKENS = {
+    "file",
+    "files",
+    "document",
+    "documents",
+    "publish",
+    "send",
+    "delete",
+    "confirm",
+    "confirmation",
+    "signed",
+    "review",
+    "risk",
+    "boundary",
+    "evidence",
+    "logic",
+    "工作台",
+    "人類",
+    "確定性",
+}
+GLOBAL_SCOPE_MARKERS = ("scope:global", "scope=global", "[global]", "【全域規則】")
 ADOPTABLE_RELATIONS = {"direct_match", "same_domain", "similar_logic", "style_reference"}
 
 
@@ -253,7 +307,10 @@ def _tokens(text: str) -> set[str]:
     ):
         if key in raw:
             found.add(key)
-    for run in re.findall(r"[\u4e00-\u9fff]{2,}", raw):
+    cjk_source = raw
+    for phrase in sorted(GENERIC_CJK_PHRASES, key=len, reverse=True):
+        cjk_source = cjk_source.replace(phrase, " ")
+    for run in re.findall(r"[\u4e00-\u9fff]{2,}", cjk_source):
         # Add small Chinese n-grams so arbitrary user-defined rule domains can
         # match without hand-written templates. Generic workflow words are
         # filtered below and cannot become formal evidence by themselves.
@@ -267,17 +324,35 @@ def _tokens(text: str) -> set[str]:
     return found - GENERIC_STOPWORDS - GENERIC_CJK_TOKENS
 
 
+def _strong_relation_overlap(query_tokens: set[str], candidate_tokens: set[str]) -> set[str]:
+    overlap = query_tokens & candidate_tokens
+    return {token for token in overlap if token not in WEAK_RELATION_TOKENS}
+
+
+def _has_specific_relation(tokens: set[str]) -> bool:
+    if any(re.fullmatch(r"[a-z0-9_]{4,}", token) for token in tokens):
+        return True
+    cjk_tokens = [token for token in tokens if re.fullmatch(r"[\u4e00-\u9fff]{2,}", token)]
+    if any(len(token) >= 3 for token in cjk_tokens):
+        return True
+    # Two distinct two-character concepts are enough, while a single generic
+    # word such as "文件" or "發布" cannot pull an unrelated rule into force.
+    return len(set(cjk_tokens)) >= 2
+
+
 def classify_evidence_relation(raw_input: str, candidate_text: str, *, score: Any = None, source_store: str = "") -> dict[str, Any]:
     q = _tokens(raw_input); c = _tokens(candidate_text)
     overlap = q & c
+    strong_overlap = _strong_relation_overlap(q, c)
     relation = "irrelevant"; adopted = False; scope = "none"; reason = "generic token overlap is ignored; no task-specific relation"
     raw = (raw_input or "").lower(); text = (candidate_text or "").lower()
-    if any(t in text for t in ("衝突", "否認", "相反", "conflict")) and overlap:
+    is_global = any(marker in text for marker in GLOBAL_SCOPE_MARKERS)
+    if any(t in text for t in ("衝突", "否認", "相反", "conflict")) and strong_overlap:
         relation, reason = "conflict", "candidate conflicts with task-specific terms"
-    elif len(overlap) >= 2 or any(token in overlap for token in ("工作台", "人類", "確定性", "風險", "責任")):
-        relation, adopted, scope, reason = "direct_match", True, "basis", f"task-specific overlap: {', '.join(sorted(overlap))}"
-    elif len(overlap) == 1 and not (overlap & GENERIC_STOPWORDS):
-        relation, adopted, scope, reason = "same_domain", True, "basis", f"single strong task token: {next(iter(overlap))}"
+    elif _has_specific_relation(strong_overlap):
+        relation, adopted, scope, reason = "direct_match", True, "basis", f"task-specific overlap: {', '.join(sorted(strong_overlap))}"
+    elif is_global and overlap:
+        relation, adopted, scope, reason = "same_domain", True, "global", "explicit global rule matched a governed operation"
     elif "文案" in (raw + text) and not overlap:
         relation, scope, reason = "candidate_only", "none", "only generic copywriting token matched"
     elif ("scbkr" in text or "責任鏈" in text) and not overlap:

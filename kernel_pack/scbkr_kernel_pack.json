@@ -81,22 +81,6 @@
       "user self-sign",
       "local storage",
       "local citation"
-    ],
-    "NT690": [
-      "responsibility boundary",
-      "missing data questions",
-      "stop conditions",
-      "draft-only conditions"
-    ],
-    "NT3300": [
-      "validity",
-      "failure",
-      "risk",
-      "repair",
-      "replay",
-      "version",
-      "dual signature",
-      "rulepack"
     ]
   },
   "FOUR_STORE_POLICY": {
@@ -121,11 +105,5 @@
     "required_phrase": "許文耀 / 沈耀 SCBKR Kernel",
     "author": "許文耀 / 沈耀",
     "kernel_provides_structure_not_user_outcome": true
-  },
-  "DUAL_SIGNATURE_RULES": {
-    "kernel_author": "許文耀 / 沈耀",
-    "structure_source": "SCBKR Kernel",
-    "local_user_signature_required": true,
-    "kernel_structure_signature_optional": true
   }
 }

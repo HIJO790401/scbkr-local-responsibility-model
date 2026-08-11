@@ -13,10 +13,6 @@ DEFAULT_LAUNCH_SETTINGS = {
     "runtime_service_url": "",
     "supabase_url": "",
     "supabase_publishable_key": "",
-    "stripe_publishable_key": "",
-    "stripe_monthly_price_id": "",
-    "stripe_annual_price_id": "",
-    "stripe_customer_portal_url": "",
     "search_provider": "searxng",
     "searxng_url": "",
     "brave_api_key": "",
@@ -39,8 +35,9 @@ def load_launch_settings() -> dict[str, Any]:
 
 
 def save_launch_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    current = load_runtime_section("launch", DEFAULT_LAUNCH_SETTINGS)
-    update = deepcopy(payload)
+    loaded = load_runtime_section("launch", DEFAULT_LAUNCH_SETTINGS)
+    current = {key: loaded.get(key, default) for key, default in DEFAULT_LAUNCH_SETTINGS.items()}
+    update = {key: deepcopy(value) for key, value in payload.items() if key in DEFAULT_LAUNCH_SETTINGS}
     for field in SECRET_FIELDS:
         update.pop(field, None)
         current.pop(field, None)
@@ -51,7 +48,8 @@ def save_launch_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def public_launch_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
-    values = deepcopy(settings or load_launch_settings())
+    loaded = deepcopy(settings or load_launch_settings())
+    values = {key: loaded.get(key, default) for key, default in DEFAULT_LAUNCH_SETTINGS.items()}
     values["brave_api_key_configured"] = bool(values.get("brave_api_key"))
     for field in SECRET_FIELDS:
         values.pop(field, None)
@@ -64,7 +62,6 @@ def launch_readiness(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     checks = [
         {"id": "domain", "label": "正式網域", "ready": bool(values.get("public_domain")), "owner_action": True},
         {"id": "auth", "label": "Supabase Auth", "ready": bool(values.get("supabase_url") and values.get("supabase_publishable_key")), "owner_action": True},
-        {"id": "billing", "label": "Stripe 月費／年費", "ready": bool(values.get("stripe_publishable_key") and values.get("stripe_monthly_price_id") and values.get("stripe_annual_price_id")), "owner_action": True},
         {"id": "search", "label": "網路搜尋服務", "ready": search_ready, "owner_action": True},
         {"id": "partner", "label": "Microsoft Partner Center", "ready": bool(values.get("microsoft_partner_product_id")), "owner_action": True},
         {"id": "signing", "label": "程式碼簽章", "ready": bool(values.get("code_signing_subject")), "owner_action": True},

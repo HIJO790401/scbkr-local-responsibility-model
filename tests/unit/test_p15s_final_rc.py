@@ -89,6 +89,8 @@ def test_frontend_api_base_runtime_matrix_and_companion_token_contract():
     assert "tauri.localhost" in api_base
     assert api_base.index("if (isTauriDesktopHostname(hostname)) return DEFAULT_API_BASE_URL") < api_base.index("if (!loopback) return origin")
     assert 'from "./apiBase"' in app and "resolveApiBaseUrl" in app
+    assert "isTauriDesktopHostname(location.hostname)" in app
+    assert app.index("!isLoopbackHostname(location.hostname)") < app.index("!isTauriDesktopHostname(location.hostname)")
     assert "X-SCBKR-Companion-Token" in app
     assert "companion_token" in app
     assert "activeBackendUrl" in app
@@ -111,6 +113,11 @@ def test_frontend_api_base_runtime_matrix_and_companion_token_contract():
     ]
     for label, needle in matrix_contracts:
         assert needle in api_base, label
+
+    desktop_main = Path("apps/desktop/src-tauri/src/main.rs").read_text(encoding="utf-8")
+    sidecar_entry = Path("apps/api/sidecar.py").read_text(encoding="utf-8")
+    assert 'env("SCBKR_DESKTOP_PARENT_PID"' in desktop_main
+    assert "start_desktop_parent_watchdog()" in sidecar_entry
 
     matrix_cases = [
         {"case": "CASE 01", "envApiUrl": "http://custom:9999", "current": "http://localhost:5500", "expected": "http://custom:9999"},
@@ -144,21 +151,16 @@ def test_readme_final_rc_contract_and_images_exist():
     assert "one-time six-digit code" in readme
     assert "127.0.0.1:8000" not in readme and ":8000/health" not in readme
     assert "README_EN.md" not in readme
-    assert "2.0 基礎能力仍包含 Rule Registry" in readme
-    assert "2.1 加入受保護的沈耀規則狀態 Runtime" in readme
-    assert "嚴格 JSON 編譯器" in readme
+    assert "FREE 框架體驗版" in readme
+    assert "不附帶沈耀正式或私人規則包" in readme
+    assert "current_rule_package" in readme
     for image in [
         "docs/images/scbkr-hero.png",
-        "docs/images/responsibility-loop.png",
-        "docs/images/responsibility-loop-en.png",
-        "docs/images/workbench-owner-signature.png",
-        "docs/images/workbench-owner-signature-en.png",
-        "docs/images/four-store-evidence.png",
-        "docs/images/four-store-evidence-en.png",
-        "docs/images/architecture.png",
-        "docs/images/local-model-architecture-en.png",
-        "docs/images/mobile-companion-en.png",
-        "docs/images/roadmap-2.0-en.png",
+        "docs/images/scbkr-hero-en.png",
+        "docs/images/scbkr-rule-flow.png",
+        "docs/images/scbkr-rule-flow-en.png",
+        "docs/images/scbkr-token-audit.png",
+        "docs/images/scbkr-token-audit-en.png",
     ]:
         assert Path(image).exists(), image
 
@@ -166,14 +168,41 @@ def test_readme_final_rc_contract_and_images_exist():
 def test_release_metadata_contracts():
     assert '"version": "2.3.0"' in Path("package.json").read_text(encoding="utf-8")
     assert '"version": "2.3.0"' in Path("apps/web/package.json").read_text(encoding="utf-8")
-    assert '"version": "2.1.0"' in Path("apps/desktop/package.json").read_text(encoding="utf-8")
-    assert '"version": "2.1.0"' in Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
-    assert 'version = "2.1.0"' in Path("apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
+    assert '"version": "2.3.0"' in Path("apps/desktop/package.json").read_text(encoding="utf-8")
+    assert '"version": "2.3.0"' in Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+    assert 'version = "2.3.0"' in Path("apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
     build = Path("scripts/build_desktop_release_windows.ps1").read_text(encoding="utf-8")
     assert 'lan_companion_supported = $true' in build
     assert 'lan_companion_default_enabled = $false' in build
     assert 'four_store_targets = @("vector", "corpus", "logic", "memory")' in build
     assert 'exports_storage_target = $false' in build
+    assert "ReleaseDir must resolve inside the repository dist directory" in build
+    assert "Remove-Item -LiteralPath $ReleaseRoot -Recurse -Force" in build
+    assert 'Copy-Item -Recurse -Force "apps\\web\\dist\\*" $WebDistDir' in build
+    assert 'if ($TauriExitCode -ne 0)' in build
+    assert "No previous executable may be staged as the new release" in build
+    assert "Refusing to stage a previous release artifact" in build
+
+
+def test_desktop_status_is_release_candidate_not_preview(monkeypatch):
+    monkeypatch.setenv("SCBKR_DESKTOP_RUNTIME", "release-candidate")
+    from apps.api import main
+
+    status = main.desktop_status()
+
+    assert status["desktop_stage"] == "SCBKR-2.3-free-store-candidate"
+    assert status["public_edition"] == "FREE"
+    assert status["installer_built"] is True
+    assert status["desktop_release_candidate"] is True
+    assert status["release_candidate_package_built"] is True
+    assert status["preview"] is False
+    assert status["preview_package_built"] is False
+    assert status["preview_package"] == "not included"
+    assert status["installer"] == "NSIS release-candidate installer"
+    assert status["store_submission_ready"] is False
+    assert status["store_submission_target"] == "Microsoft Store"
+    assert "partner_center_publisher_identity" in status["store_submission_blockers"]
+    assert "code_signing_identity" in status["store_submission_blockers"]
 
 
 def test_web_dist_detection_contract():

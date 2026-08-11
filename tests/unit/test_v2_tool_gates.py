@@ -39,8 +39,11 @@ def active_code_rule(registry: RuleRegistry):
 
 
 def test_tool_registry_contains_master_plan_tools():
-    tool_ids = {tool["tool_id"] for tool in list_tool_definitions()}
+    definitions = {tool["tool_id"]: tool for tool in list_tool_definitions()}
+    tool_ids = set(definitions)
     assert {"web_search", "email_read", "email_draft", "code_workspace", "git_repo", "image_generation", "voice_input", "voice_output", "local_files", "api_tools", "scheduler", "data_center_query", "rule_registry_query"} <= tool_ids
+    assert definitions["email_send"]["state_scope"] == "external_message"
+    assert definitions["code_workspace"]["state_scope"] == "file_modification"
 
 
 def test_no_rule_blocks_execution_even_when_permission_and_confirmation_exist(tmp_path):
@@ -58,14 +61,54 @@ def test_no_rule_blocks_execution_even_when_permission_and_confirmation_exist(tm
 def test_active_rule_permission_and_confirmation_pass_all_gates(tmp_path):
     registry = RuleRegistry(tmp_path / "rules")
     active_code_rule(registry)
-    engine = ToolGateEngine(registry, permissions(local_file_access=True), tmp_path / "traces.jsonl")
-    result = engine.evaluate({"tool_id": "code_workspace", "action": "execute", "task_type": "coding", "workflow": "repair", "text": "fix bug", "user_confirmation": True})
+    draft_state = {"resource_id": "file:main.py", "version": "v1", "content_hash": "abc", "read_at": "2026-08-01T10:00:00Z"}
+    engine = ToolGateEngine(
+        registry,
+        permissions(local_file_access=True),
+        tmp_path / "traces.jsonl",
+        state_reader=lambda _request: {**draft_state, "read_at": "2026-08-01T10:05:00Z"},
+    )
+    result = engine.evaluate({"tool_id": "code_workspace", "action": "execute", "task_type": "coding", "workflow": "repair", "text": "fix bug", "user_confirmation": True, "draft_evidence_state": draft_state})
     assert result["allowed"] is True
     assert result["rule_match_gate"]["matched"] is True
     assert result["tool_permission_gate"]["allowed"] is True
     assert result["risk_gate"]["allowed"] is True
+    assert result["confirm_time_state_gate"]["confirm_time_rechecked"] is True
+    assert result["confirm_time_state_gate"]["conflict"] is False
+    assert result["confirm_time_state_gate"]["expected_evidence_hash"] == result["confirm_time_state_gate"]["current_evidence_hash"]
     assert result["execution_status"] == "authorized_not_executed"
     assert engine.list_traces()[0]["trace_hash"] == result["trace_hash"]
+
+
+def test_confirm_time_state_conflict_blocks_file_modification(tmp_path):
+    registry = RuleRegistry(tmp_path / "rules")
+    active_code_rule(registry)
+    draft_state = {"resource_id": "file:main.py", "version": "v1", "content_hash": "abc", "read_at": "2026-08-01T10:00:00Z"}
+    engine = ToolGateEngine(
+        registry,
+        permissions(local_file_access=True),
+        tmp_path / "traces.jsonl",
+        state_reader=lambda _request: {"resource_id": "file:main.py", "version": "v2", "content_hash": "def", "read_at": "2026-08-01T10:05:00Z"},
+    )
+
+    result = engine.evaluate({"tool_id": "code_workspace", "action": "execute", "task_type": "coding", "workflow": "repair", "text": "fix bug", "user_confirmation": True, "draft_evidence_state": draft_state})
+
+    assert result["allowed"] is False
+    assert result["reason"] == "state_conflict_reconfirmation_required"
+    assert result["confirm_time_state_gate"]["conflict"] is True
+    assert result["execution_status"] == "blocked_not_executed"
+
+
+def test_stateful_tool_without_live_reader_is_fail_closed(tmp_path):
+    registry = RuleRegistry(tmp_path / "rules")
+    active_code_rule(registry)
+    engine = ToolGateEngine(registry, permissions(local_file_access=True), tmp_path / "traces.jsonl")
+
+    result = engine.evaluate({"tool_id": "code_workspace", "action": "execute", "task_type": "coding", "workflow": "repair", "text": "fix bug", "user_confirmation": True, "draft_evidence_state": {"resource_id": "file:main.py", "version": "v1", "content_hash": "abc"}})
+
+    assert result["allowed"] is False
+    assert result["reason"] == "confirm_time_state_recheck_unavailable"
+    assert result["confirm_time_state_gate"]["confirm_time_rechecked"] is False
 
 
 def test_high_risk_confirmation_is_per_call_not_only_global(tmp_path):

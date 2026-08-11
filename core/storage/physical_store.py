@@ -134,10 +134,15 @@ def _relative(path: Path) -> str:
 
 def _sealed_scbkr(task: dict[str, Any]) -> dict[str, Any]:
     scbkr = task.get("scbkr", {})
+    dimension_hashes = {
+        dimension: (scbkr.get(dimension) or {}).get("snapshot_hash")
+        for dimension in ("S", "C", "B", "K", "R")
+        if isinstance(scbkr.get(dimension), dict)
+    }
     return sanitize_payload(
         {
-            "confirmed_snapshot": scbkr.get("confirmed_snapshot"),
             "confirmed_snapshot_hash": scbkr.get("confirmed_snapshot_hash"),
+            "dimension_snapshot_hashes": dimension_hashes,
             "confirmation_status": scbkr.get("confirmation_status"),
             "signature_status": scbkr.get("signature_status"),
             "owner_signature_required": scbkr.get("owner_signature_required"),
@@ -156,9 +161,101 @@ def _title(task: dict[str, Any]) -> str:
     return str(task.get("task_name") or task.get("scbkr", {}).get("S", {}).get("task_name") or task.get("raw_input") or "SCBKR storage item")[:80]
 
 
+def _first_text(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, list):
+            value = next((item for item in value if str(item or "").strip()), "")
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _as_text_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item or "").strip()]
+    if value in (None, "", {}):
+        return []
+    return [str(value).strip()]
+
+
+def _rule_summary(task: dict[str, Any]) -> str:
+    scbkr = task.get("scbkr") or {}
+    subject = scbkr.get("S") or {}
+    return _first_text(
+        scbkr.get("rule_summary"),
+        subject.get("model_draft_content"),
+        subject.get("task_subject"),
+        subject.get("task_name"),
+        task.get("raw_input"),
+    )[:300]
+
+
 def _summary(task: dict[str, Any]) -> str:
-    text = _generation_text(task) or str(task.get("raw_input") or "")
-    return text[:300]
+    return _rule_summary(task)
+
+
+def _is_rule_authoring_task(task: dict[str, Any]) -> bool:
+    mode = str((task.get("input_classification") or {}).get("mode") or "")
+    source = str(task.get("draft_source") or (task.get("scbkr") or {}).get("draft_source") or "")
+    return mode == "generate_rule" or "rulebook" in source or source.startswith("owner_repaired_model")
+
+
+def _generation_is_citable_corpus(task: dict[str, Any], text: str) -> bool:
+    if not text or _is_rule_authoring_task(task):
+        return False
+    generation = task.get("generation_result") or {}
+    post_check = generation.get("post_check")
+    if isinstance(post_check, dict) and post_check.get("allowed") is not True:
+        return False
+    if not isinstance(post_check, dict) and task.get("review_passed") is not True:
+        return False
+    lowered = text.lower()
+    blocked_markers = (
+        "【scbkr 責任鏈語言模型｜empty】",
+        "目前尚無任何規則生效",
+        "no active rule",
+        "no signed rule matched",
+        "已降級為待確認草稿",
+    )
+    return not any(marker in lowered for marker in blocked_markers)
+
+
+def _generation_audit(task: dict[str, Any]) -> dict[str, Any]:
+    generation = task.get("generation_result") or {}
+    content = _generation_text(task)
+    post_check = generation.get("post_check") or {}
+    token_metrics = generation.get("token_metrics") or {}
+    return sanitize_payload(
+        {
+            "status": generation.get("status"),
+            "source": generation.get("source"),
+            "content_hash": hash_payload(content) if content else None,
+            "post_check": {
+                "checked": post_check.get("checked"),
+                "allowed": post_check.get("allowed"),
+                "action": post_check.get("action"),
+                "violation_codes": [item.get("code") for item in post_check.get("violations", []) if isinstance(item, dict)],
+            },
+            "token_metrics": {
+                "measurement_basis": token_metrics.get("measurement_basis"),
+                "actual_prompt_tokens": token_metrics.get("actual_prompt_tokens"),
+                "actual_completion_tokens": token_metrics.get("actual_completion_tokens"),
+                "actual_total_tokens": token_metrics.get("actual_total_tokens"),
+            },
+        }
+    )
+
+
+def _relation_summary(task: dict[str, Any]) -> dict[str, Any]:
+    context = task.get("data_center_context") or {}
+    packet = context.get("evidence_packet") or {}
+    return {
+        "authority_count": int(packet.get("authority_count") or 0),
+        "candidate_count": int(packet.get("candidate_count") or 0),
+        "must_cite_ids": list(packet.get("must_cite_ids") or [])[:8],
+        "vector_is_discovery_only": True,
+    }
 
 
 def _store_contract(target: str) -> dict[str, Any]:
@@ -197,12 +294,16 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
         "scbkr_snapshot": _sealed_scbkr(task),
         "scbkr_snapshot_hash": snapshot_hash,
         "confirmed_snapshot_hash": snapshot_hash,
-        "generation_result": generation,
-        "review_result": task.get("review_result"),
+        "generation_result": _generation_audit(task),
+        "review_result": {
+            "status": (task.get("review_result") or {}).get("status"),
+            "review_passed": (task.get("review_result") or {}).get("review_passed") is True,
+            "review_message": str((task.get("review_result") or {}).get("review_message") or "")[:300],
+        },
         "review_passed": task.get("review_passed") is True or (task.get("review_result") or {}).get("review_passed") is True,
         "signature_status": scbkr.get("signature_status"),
         "owner_signature": {"signature_hash": hash_payload(scbkr.get("signature") or "") if scbkr.get("signature") else None, "confirmed_by": scbkr.get("confirmed_by")},
-        "relation_metadata": task.get("data_center_context", {}),
+        "relation_metadata": _relation_summary(task),
         "confirmed_at": scbkr.get("confirmed_at") or task.get("confirmed_at"),
         "reviewed_at": (task.get("review_result") or {}).get("reviewed_at") or task.get("accepted_at"),
         "written_at": now,
@@ -219,7 +320,7 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
             part for part in [
                 f"任務：{task.get('raw_input')}",
                 f"主體：{s.get('task_subject') or s.get('task_name')}",
-                f"摘要：{_summary(task)}",
+                f"規則摘要：{_summary(task)}",
                 f"核心邏輯：{_list_text(c.get('core_logic'))}",
                 f"停止條件：{_list_text(b.get('stop_conditions'))}",
                 f"驗收：{_list_text(r.get('acceptance_criteria'))}",
@@ -234,7 +335,11 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
             "content": retrieval_text,
             "retrieval_text": retrieval_text,
             "index_fields": {
-                "S": s,
+                "S": {
+                    "task_subject": s.get("task_subject") or s.get("model_draft_content"),
+                    "applies_when": _as_text_list(s.get("applies_when")),
+                    "does_not_apply_when": _as_text_list(s.get("does_not_apply_when")),
+                },
                 "C_core_logic": c.get("core_logic", []),
                 "B_stop_conditions": b.get("stop_conditions", []),
                 "R_acceptance_criteria": r.get("acceptance_criteria", []),
@@ -244,17 +349,19 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
             "status": "metadata_saved_embedding_pending",
         }
     if "corpus" in selected_targets:
-        source_material = gen_text or str(task.get("raw_input") or "")
+        use_generation = _generation_is_citable_corpus(task, gen_text)
+        source_material = gen_text if use_generation else _first_text(task.get("raw_input"), _rule_summary(task))
+        source_kind = "review_passed_generation" if use_generation else "owner_confirmed_rule_source"
         payloads["corpus"] = {
             **base,
             **_store_contract("corpus"),
             "target": "corpus",
             "source_id": f"corpus:{task.get('task_id')}",
             "item_type": "review_passed_source_material",
-            "type": "review_passed_generation",
+            "type": source_kind,
             "content": source_material,
             "source_material": source_material,
-            "source_material_kind": "review_passed_generation" if gen_text else "owner_raw_input",
+            "source_material_kind": source_kind,
             "tags": [str(task.get("task_type") or "general"), "corpus"],
             "source_origin": "user_confirmed_storage",
         }
@@ -265,7 +372,7 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
         r = scbkr.get("R", {})
         logic_content = "\n".join([
             f"規則/流程：{_title(task)}",
-            f"目的：{_summary(task)}",
+            f"目的：{_rule_summary(task)}",
             f"流程：\n{_list_text(c.get('flow_steps'))}",
             f"核心邏輯：\n{_list_text(c.get('core_logic'))}",
             f"邊界/停止條件：\n{_list_text(b.get('stop_conditions') or b.get('storage_conditions'))}",
@@ -281,11 +388,15 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
             "logic_id": f"logic:{task.get('task_id')}",
             "item_type": "scbkr_rule_logic",
             "name": _title(task),
-            "purpose": _summary(task),
+            "purpose": _rule_summary(task),
             "content": logic_content,
             "flow_steps": c.get("flow_steps", []),
             "core_logic": c.get("core_logic", []),
-            "boundary_rules": b.get("stop_conditions") or b.get("storage_conditions", []),
+            "boundary_rules": (
+                _as_text_list(b.get("forbidden"))
+                + _as_text_list(b.get("stop_conditions"))
+                + _as_text_list(b.get("model_must_not"))
+            ),
             "formation_conditions": b.get("formation_conditions") or r.get("formation_conditions", []),
             "failure_conditions": b.get("failure_conditions") or r.get("failure_conditions", []),
             "test_rules": c.get("test_conditions", []),
@@ -294,17 +405,28 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
             "status": "active",
         }
     if "memory" in selected_targets:
+        s = scbkr.get("S", {})
+        c = scbkr.get("C", {})
         b = scbkr.get("B", {})
-        r = scbkr.get("R", {})
         memory_statement = (
             str(task.get("raw_input") or "").strip()
             or _summary(task)
             or _title(task)
         )
+        trigger_conditions = (
+            _as_text_list(s.get("applies_when"))
+            or _as_text_list(s.get("task_subject"))
+            or [memory_statement]
+        )
+        required_behavior = (
+            _as_text_list(c.get("core_logic"))
+            + _as_text_list(b.get("forbidden"))
+            + _as_text_list(b.get("stop_conditions"))
+        )
         memory_content = "\n".join([
             f"長期記憶：{memory_statement}",
-            f"觸發條件：\n{_list_text(b.get('stop_conditions') or b.get('failure_conditions'))}",
-            f"必須提醒：\n{_list_text(r.get('acceptance_criteria'))}",
+            f"觸發條件：\n{_list_text(trigger_conditions)}",
+            f"必須遵守：\n{_list_text(required_behavior)}",
             "限制：這不是一次性生成成品；只有使用者簽名確認後才影響未來任務。",
         ]).strip()
         payloads["memory"] = {
@@ -316,8 +438,8 @@ def prepare_storage_payloads(task: dict[str, Any], selected_targets: list[str], 
             "category": str(task.get("task_type") or "general"),
             "content": memory_content,
             "memory_statement": memory_statement,
-            "trigger_conditions": b.get("stop_conditions") or b.get("failure_conditions", []),
-            "required_behavior": r.get("acceptance_criteria", []),
+            "trigger_conditions": trigger_conditions,
+            "required_behavior": required_behavior,
             "reason": "使用者二次確認後保存為本地長期記憶資料。",
             "source_task": task.get("task_id"),
             "confirmed_by_user": True,

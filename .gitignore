@@ -1,9 +1,18 @@
 node_modules/
 dist/
+build/
+*.egg-info/
 .vite/
 *.tsbuildinfo
 apps/web/playwright-report/
 apps/web/test-results/
+/test-results/
+/.pi1/
+/atlases/
+/AGENTS.md
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/sidecar/
+apps/desktop/src-tauri/target/
 
 npm-debug.log*
 yarn-debug.log*
@@ -16,6 +25,9 @@ __pycache__/
 data/scbkr.sqlite3
 data/scbkr.sqlite3-*
 data/runtime-settings.json
+data/metrics/
+data/api-runtime*.log
+data/ledger/audit-log.jsonl
 data/corpus/*
 !data/corpus/.gitkeep
 data/logic/*
@@ -28,3 +40,9 @@ data/rule_registry/*
 .env
 .env.*
 !.env.example
+
+reports/*.private.md
+reports/real_model_baseline_latest.json
+
+# Local/private rule products are never part of the public FREE edition.
+config/rulepacks/shen-an-black-shield.v2.draft.json

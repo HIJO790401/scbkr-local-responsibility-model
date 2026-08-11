@@ -10,12 +10,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.resource_paths import product_resource_path
+
 KERNEL_AUTHOR = "許文耀 / 沈耀"
 KERNEL_NAME = "許文耀 / 沈耀 SCBKR Kernel"
 SOURCE_ROLE = "AUTHOR_KERNEL_SOURCE"
 DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/12VzOUJsgt68OXOoh1KukpQygJNfU_nn8"
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_KERNEL_PACK_PATH = REPO_ROOT / "kernel_pack" / "scbkr_kernel_pack.json"
+DEFAULT_KERNEL_PACK_PATH = product_resource_path("kernel_pack", "scbkr_kernel_pack.json")
 
 REQUIRED_SECTIONS = [
     "L0_ZEROTH_THEOREM",
@@ -30,7 +31,6 @@ REQUIRED_SECTIONS = [
     "LOCAL_FIRST_PRIVACY_RULES",
     "USER_RESPONSIBILITY_RULES",
     "SHENYAO_KERNEL_ATTRIBUTION_RULES",
-    "DUAL_SIGNATURE_RULES",
 ]
 
 
@@ -78,8 +78,6 @@ def default_kernel_pack() -> dict[str, Any]:
         },
         "PLAN_DEPTH_RULES": {
             "FREE": ["basic five dimensions", "user self-sign", "local storage", "local citation"],
-            "NT690": ["responsibility boundary", "missing data questions", "stop conditions", "draft-only conditions"],
-            "NT3300": ["validity", "failure", "risk", "repair", "replay", "version", "dual signature", "rulepack"],
         },
         "FOUR_STORE_POLICY": {
             "LOGIC": "formal signed active rules",
@@ -101,12 +99,6 @@ def default_kernel_pack() -> dict[str, Any]:
             "author": KERNEL_AUTHOR,
             "kernel_provides_structure_not_user_outcome": True,
         },
-        "DUAL_SIGNATURE_RULES": {
-            "kernel_author": KERNEL_AUTHOR,
-            "structure_source": "SCBKR Kernel",
-            "local_user_signature_required": True,
-            "kernel_structure_signature_optional": True,
-        },
     }
 
 
@@ -124,6 +116,11 @@ def compile_kernel_pack(output_path: Path | None = None) -> dict[str, Any]:
 def load_kernel_pack(path: Path | None = None) -> dict[str, Any]:
     target = path or DEFAULT_KERNEL_PACK_PATH
     if not target.exists():
+        if path is None:
+            return default_kernel_pack()
         return compile_kernel_pack(target)
-    return json.loads(target.read_text(encoding="utf-8"))
-
+    pack = json.loads(target.read_text(encoding="utf-8"))
+    missing = [name for name in REQUIRED_SECTIONS if name not in pack]
+    if missing:
+        raise ValueError(f"kernel pack missing sections: {missing}")
+    return pack

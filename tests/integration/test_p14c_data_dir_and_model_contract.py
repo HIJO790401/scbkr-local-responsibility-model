@@ -1,4 +1,5 @@
 import importlib
+import json
 import sqlite3
 
 
@@ -30,7 +31,11 @@ def test_lm_studio_contract_calls_base_url_only_on_model_test(tmp_path, monkeypa
             return b'{"choices":[{"message":{"content":"local ok"}}]}'
 
     def fake_urlopen(request, timeout):
-        calls.append(request.full_url)
+        calls.append({
+            "url": request.full_url,
+            "timeout": timeout,
+            "body": json.loads(request.data.decode("utf-8")),
+        })
         return FakeResponse()
 
     monkeypatch.setattr(main, "urlopen", fake_urlopen)
@@ -43,7 +48,51 @@ def test_lm_studio_contract_calls_base_url_only_on_model_test(tmp_path, monkeypa
     result = main.test_model()
     assert result["last_test_status"] == "success"
     assert result["test_result_kind"] == "local_model_success"
-    assert calls == ["http://127.0.0.1:1234/v1/chat/completions"]
+    assert len(calls) == 1
+    assert calls[0]["url"] == "http://127.0.0.1:1234/v1/chat/completions"
+    assert calls[0]["timeout"] == 300
+    assert calls[0]["body"]["model"] == "qwen2.5-vl-7b-instruct"
+    assert calls[0]["body"]["temperature"] == 0
+    assert calls[0]["body"]["max_tokens"] == 8
+    assert calls[0]["body"]["messages"][-1] == {
+        "role": "user",
+        "content": "Reply with exactly: SCBKR READY",
+    }
+
+
+def test_persisted_model_success_is_not_reused_as_current_runtime_evidence(monkeypatch):
+    import apps.api.main as main
+
+    monkeypatch.setattr(main, "_MODEL_SESSION_VERIFIED", False)
+    monkeypatch.setitem(main.MODEL_SETTINGS, "enabled", True)
+    monkeypatch.setitem(main.MODEL_SETTINGS, "last_test_status", "success")
+    monkeypatch.setitem(main.MODEL_SETTINGS, "last_test_message", "old successful test")
+
+    public = main._public_model_settings()
+
+    assert main._model_connected() is False
+    assert public["runtime_verified"] is False
+    assert public["enabled"] is False
+    assert public["last_test_status"] == "untested"
+    assert "本次啟動" in public["last_test_message"]
+
+
+def test_setting_change_invalidates_current_model_session(monkeypatch):
+    import apps.api.main as main
+
+    monkeypatch.setattr(main, "_MODEL_SESSION_VERIFIED", True)
+    main.set_model_settings(
+        {
+            "mode": "local",
+            "provider": "lm_studio",
+            "base_url": "http://127.0.0.1:1234/v1",
+            "api_key": "local",
+            "model_name": "replacement-model",
+        }
+    )
+
+    assert main._MODEL_SESSION_VERIFIED is False
+    assert main._model_connected() is False
 
 
 def test_sandbox_and_ungated_generate_do_not_call_local_base_url(tmp_path, monkeypatch):

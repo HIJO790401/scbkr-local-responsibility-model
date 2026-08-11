@@ -1,6 +1,8 @@
-# SCBKR 2.0 RulePack Authoring
+# SCBKR RulePack Authoring
 
 RulePacks are versioned rule distributions. A pack does not become active by being imported.
+
+The public repository is the FREE framework experience edition. It does not bundle ShenYao official or private rule packs. Users author, review, sign, own, and remain responsible for their own rules. Official packs and commercial customization require a future product or a separate commercial agreement.
 
 ## Trust flow
 
@@ -13,4 +15,4 @@ RulePacks are versioned rule distributions. A pack does not become active by bei
 
 The private master text does not need to be published. A public compiled pack can carry its source document hash for traceability without exposing the source itself.
 
-The file `config/rulepacks/shen-an-black-shield.v2.draft.json` is intentionally unsigned. It must remain `waiting_owner_signature` until the author signs the canonical manifest. SCBKR must not label an unsigned draft as a ShenYao-signed active pack.
+An unsigned or unverifiable pack must remain `waiting_owner_signature`. SCBKR must never label an unsigned draft as author-verified, active, or officially supplied.

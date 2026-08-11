@@ -1,8 +1,8 @@
-"""Generate the P14-C unsigned placeholder Windows icon at build time.
+"""Generate the unsigned SCBKR Windows icon at build time.
 
 This script intentionally uses only the Python standard library and does not
 embed any trademarked or copyrighted logo asset. The generated icon is a simple
-preview placeholder used so Tauri can continue Windows preview packaging without
+placeholder used so Tauri can continue Windows release-candidate packaging without
 committing a binary .ico file to git.
 """
 
@@ -85,7 +85,7 @@ def main() -> None:
     if not data.startswith(ICO_HEADER):
         raise RuntimeError("generated icon has an invalid ICO header")
     ICON_PATH.write_bytes(data)
-    print(f"Generated P14-C preview icon: {ICON_PATH} ({len(data)} bytes)")
+    print(f"Generated SCBKR Windows icon: {ICON_PATH} ({len(data)} bytes)")
 
 
 if __name__ == "__main__":

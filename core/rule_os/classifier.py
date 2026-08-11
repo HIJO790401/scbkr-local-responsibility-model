@@ -23,8 +23,62 @@ def _normalize(text: str) -> str:
     return re.sub(r"[\s，,。！？!?:：；;（）()\[\]【】「」『』]+", "", value)
 
 
-def _matches(normalized: str, patterns: tuple[str, ...]) -> list[str]:
-    return [pattern for pattern in patterns if pattern.lower().replace(" ", "") in normalized]
+ASCII_WORD_FORMS: dict[str, tuple[str, ...]] = {
+    "copy": ("copy", "copies", "copied", "copying"),
+    "delete": ("delete", "deletes", "deleted", "deleting"),
+    "draft": ("draft", "drafts", "drafted", "drafting"),
+    "drive": ("drive",),
+    "gmail": ("gmail",),
+    "overwrite": ("overwrite", "overwrites", "overwrote", "overwritten", "overwriting"),
+    "pay": ("pay", "pays", "paid", "paying"),
+    "payment": ("payment", "payments"),
+    "publish": ("publish", "publishes", "published", "publishing"),
+    "tool": ("tool", "tools"),
+    "write": ("write", "writes", "wrote", "written", "writing"),
+}
+
+
+def _matches(text: str, patterns: tuple[str, ...]) -> list[str]:
+    normalized = _normalize(text)
+    lowered = (text or "").lower()
+    matched: list[str] = []
+    for pattern in patterns:
+        compact = _normalize(pattern)
+        if compact not in normalized:
+            continue
+        forms = ASCII_WORD_FORMS.get(compact)
+        if forms and not any(
+            re.search(rf"(?<![a-z0-9_]){re.escape(form)}(?![a-z0-9_])", lowered)
+            for form in forms
+        ):
+            continue
+        matched.append(pattern)
+    return matched
+
+
+CHAT_ONLY_TRIGGERS = (
+    "只是聊天",
+    "只想聊天",
+    "先聊聊",
+    "只討論",
+    "先討論",
+    "不要建立規則",
+    "不要生成規則",
+    "不要新增規則",
+    "不要做成規則",
+    "先不要建立規則",
+    "先別建立規則",
+    "不用建規則",
+    "不需要規則",
+    "just chat",
+    "chat only",
+    "only discuss",
+    "let's just discuss",
+    "do not create a rule",
+    "don't create a rule",
+    "do not make a rule",
+    "don't turn this into a rule",
+)
 
 
 GENERATE_RULE_TRIGGERS = (
@@ -99,6 +153,8 @@ QUERY_STORE_TRIGGERS = (
     "查詢四庫",
     "四庫有什麼",
     "四庫裡面",
+    "四庫裡",
+    "四庫內",
     "規則庫",
     "資料庫",
     "記憶庫",
@@ -194,6 +250,53 @@ ANSWER_WITH_RULES_TRIGGERS = (
     "basedonmyrule",
 )
 
+ADVISORY_QUESTION_TRIGGERS = (
+    "能不能",
+    "是否",
+    "會不會",
+    "有沒有風險",
+    "怎麼判斷",
+    "如何判斷",
+    "如果",
+    "is it okay",
+    "is this okay",
+    "can i",
+    "should i",
+    "would it",
+    "what if",
+    "is it safe",
+    "what is the risk",
+)
+
+ACTION_REQUEST_PREFIXES = (
+    "幫我",
+    "請幫我",
+    "替我",
+    "請替我",
+    "現在幫我",
+    "立刻幫我",
+    "直接幫我",
+    "please",
+    "go ahead and",
+    "do it",
+)
+
+
+def _is_high_risk_execution_request(raw: str, normalized: str, matched_actions: list[str]) -> bool:
+    """Separate an execution command from a question about a risky action."""
+    if not matched_actions:
+        return False
+    advisory = normalized.endswith("嗎") or bool(_matches(raw, ADVISORY_QUESTION_TRIGGERS))
+    # Polite imperatives such as "請幫我直接發布" are still execution
+    # requests. Extra adverbs between the prefix and action must not turn them
+    # into an advisory question; an actual question marker still wins.
+    explicit_request = any(
+        normalized.startswith(_normalize(prefix))
+        for prefix in ACTION_REQUEST_PREFIXES
+    ) and not advisory
+    imperative_start = any(normalized.startswith(_normalize(action)) for action in matched_actions)
+    return explicit_request or (imperative_start and not advisory)
+
 RULE_REFERENCE_MARKERS = (
     "依我已建立",
     "依已建立",
@@ -242,7 +345,40 @@ def classify_user_input(text: str) -> dict[str, Any]:
             "requires_signature": False,
             "model_call_allowed": False,
         }
+    chat_only_matches = _matches(raw, CHAT_ONLY_TRIGGERS)
+    if chat_only_matches:
+        return {
+            "mode": "general_chat",
+            "confidence": 0.99,
+            "matched_triggers": chat_only_matches,
+            "reason": "explicit_chat_only: 使用者明確要求只聊天或不要建立規則。",
+            "requires_four_store": False,
+            "requires_signature": False,
+            "model_call_allowed": True,
+            "storage_write_allowed": False,
+            "tool_execution_allowed": False,
+        }
     help_rule_question = any(token in normalized for token in ("怎麼建立規則", "如何建立規則", "怎麼生成規則", "如何生成規則", "怎麼建規則"))
+    store_surface_matches = _matches(raw, QUERY_STORE_TRIGGERS)
+    store_read_request = bool(store_surface_matches) and any(
+        marker in normalized
+        for marker in (
+            "查", "查詢", "查看", "看四庫", "打開", "列出", "有哪些", "有什麼", "裡面有什麼",
+            "show", "list", "query", "display", "inspect", "open", "what", "which",
+        )
+    )
+    if store_read_request:
+        return {
+            "mode": "query_four_stores",
+            "confidence": 0.94,
+            "matched_triggers": store_surface_matches,
+            "reason": "使用者要求查看本地四庫內容，不是要求模型套用規則回答。",
+            "requires_four_store": True,
+            "requires_signature": False,
+            "model_call_allowed": True,
+            "storage_write_allowed": False,
+            "tool_execution_allowed": False,
+        }
     reference_existing_rule = any(marker in normalized for marker in RULE_REFERENCE_MARKERS) and any(
         noun in normalized for noun in ("規則", "規則書", "規則包", "規則表單", "rule", "rulebook", "rulepack", "ruleform")
     )
@@ -260,13 +396,25 @@ def classify_user_input(text: str) -> dict[str, Any]:
         }
     create_rule_pattern = (
         not help_rule_question
-        and any(verb in normalized for verb in ("生成", "建立", "新增", "制定", "做成", "整理成", "變成"))
+        and any(verb in normalized for verb in ("生成", "建立", "新增", "制定", "做成", "寫成", "整理成", "變成"))
         and any(noun in normalized for noun in ("規則", "規則書", "規則包", "規則表單"))
     )
     create_rule_pattern = create_rule_pattern or (
         not help_rule_question
         and any(verb in normalized for verb in ("create", "build", "make", "generate", "draft", "compile"))
         and any(noun in normalized for noun in ("rule", "rulebook", "rulepack", "ruleform"))
+    )
+    # Users often name the reusable rule first (for example, "美容院文案規則")
+    # and describe the later output in the same sentence. Treat that as rule
+    # authoring before the answer-with-rules trigger sees words like "幫我寫".
+    create_rule_pattern = create_rule_pattern or (
+        not help_rule_question
+        and "規則" in normalized
+        and any(prefix in normalized for prefix in (
+            "我要一個", "我要一套", "我想要一個", "我想要一套", "我需要一個", "我需要一套",
+            "請幫我建立", "請幫我生成", "幫我做成", "幫我寫成", "替我制定",
+        ))
+        and not any(marker in normalized for marker in RULE_REFERENCE_MARKERS)
     )
     if create_rule_pattern:
         return {
@@ -281,6 +429,22 @@ def classify_user_input(text: str) -> dict[str, Any]:
             "tool_execution_allowed": False,
         }
 
+    high_risk_matches = _matches(raw, HIGH_RISK_TRIGGERS)
+    if high_risk_matches and not _is_high_risk_execution_request(raw, normalized, high_risk_matches):
+        advisory_matches = _matches(raw, ANSWER_WITH_RULES_TRIGGERS + ADVISORY_QUESTION_TRIGGERS)
+        if advisory_matches:
+            return {
+                "mode": "answer_with_rules",
+                "confidence": 0.91,
+                "matched_triggers": high_risk_matches + advisory_matches,
+                "reason": "使用者在詢問高風險動作的判斷，不是要求立即執行；必須先查本地四庫回答。",
+                "requires_four_store": True,
+                "requires_signature": False,
+                "model_call_allowed": True,
+                "storage_write_allowed": False,
+                "tool_execution_allowed": False,
+            }
+
     checks: list[tuple[str, tuple[str, ...], float, str]] = [
         ("high_risk_action", HIGH_RISK_TRIGGERS, 0.98, "高風險動作必須停在確認與簽名流程。"),
         ("tool_execution", TOOL_TRIGGERS, 0.92, "工具執行必須先經權限與使用者確認。"),
@@ -293,7 +457,7 @@ def classify_user_input(text: str) -> dict[str, Any]:
     for mode, patterns, confidence, reason in checks:
         if help_rule_question and mode == "generate_rule":
             continue
-        matched = _matches(normalized, patterns)
+        matched = _matches(raw, patterns)
         if matched:
             return {
                 "mode": mode,

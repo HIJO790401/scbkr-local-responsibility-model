@@ -11,7 +11,8 @@
     "test:ui": "playwright test",
     "test:ui:desktop": "playwright test --project=desktop-chromium",
     "test:ui:mobile": "playwright test --project=mobile-chromium",
-    "test:ui:report": "playwright show-report"
+    "test:ui:report": "playwright show-report",
+    "marketing:cards": "node scripts/render-product-cards.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.19",

@@ -49,6 +49,7 @@ def deterministic_storage_suggestion(task: dict[str, Any], user_preference: str 
     has_docs = any(token in text for token in ("pdf", "docx", "markdown", "網頁", "文件", "報告", "文章", "url", "http", "資料來源", "外部資料"))
     has_long_term = any(token in text for token in ("長期偏好", "固定規則", "禁止", "不得", "未來任務", "記憶規則", "驗收失敗", "以後", "判準"))
     is_logic = any(token in text for token in ("api", "ui", "workflow", "流程", "測試", "權限", "規則", "程式", "邏輯", "scbkr", "邊界", "後果", "查證", "條件"))
+    is_rulebook = bool(is_logic and task.get("review_passed") is True and task.get("scbkr"))
     suggestions = {
         "vector": {
             "recommended": True,
@@ -59,9 +60,9 @@ def deterministic_storage_suggestion(task: dict[str, Any], user_preference: str 
             "model_write_logic": "模型只能把任務摘要與可召回片段放進向量索引；引用時必須再回查 corpus/logic/memory 正式資料。",
         },
         "corpus": {
-            "recommended": bool(has_docs),
-            "reason": "本次任務包含外部文件、網頁或原始資料，可作為後續生成依據。" if has_docs else "本次任務未提供外部文件或原始資料，因此不建議寫入資料庫。",
-            "planned_summary": "寫入使用者提供或驗收後的原文文本、生成成品與素材內容。" if has_docs else "",
+            "recommended": bool(has_docs or is_rulebook),
+            "reason": "本次任務包含外部文件、網頁或原始資料，可作為後續生成依據。" if has_docs else "本次規則書已完成驗收，可將使用者原始需求與已驗收輸出存為正式資料素材。",
+            "planned_summary": "寫入使用者提供或驗收後的原文文本、生成成品與素材內容。" if (has_docs or is_rulebook) else "",
             "store_role": "source_material",
             "store_purpose": STORE_PURPOSES["corpus"],
             "model_write_logic": "模型只能把已驗收正式資料、原文或成品放入資料庫；不得把推論規則塞進資料庫冒充原文。",

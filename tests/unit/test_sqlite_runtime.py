@@ -8,6 +8,7 @@ from core.storage.sqlite_runtime import (
     clear_ledger_index,
     get_task_ledger,
     init_sqlite_runtime,
+    list_task_summaries,
     list_tasks,
     load_task,
     save_ledger_index,
@@ -99,6 +100,20 @@ def test_list_tasks_lists_persisted_tasks(tmp_path):
 
     task_ids = {task["task_id"] for task in list_tasks(sqlite_path=sqlite_path)}
     assert {"task-1", "task-2"} <= task_ids
+
+
+def test_list_task_summaries_omits_large_task_body(tmp_path):
+    sqlite_path = tmp_path / "runtime.sqlite3"
+    task = make_task("task-summary")
+    task["large_private_payload"] = "x" * 200_000
+    save_task(task, sqlite_path=sqlite_path)
+
+    summaries = list_task_summaries(sqlite_path=sqlite_path)
+
+    assert summaries[0]["task_id"] == "task-summary"
+    assert summaries[0]["task_name"] == task["task_name"]
+    assert "large_private_payload" not in summaries[0]
+    assert "scbkr" not in summaries[0]
 
 
 def test_sqlite_error_does_not_delete_jsonl(tmp_path):

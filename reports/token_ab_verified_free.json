@@ -1,0 +1,36 @@
+{
+  "report_version": "scbkr.token-ab.public.v1",
+  "edition": "FREE",
+  "status": "VERIFIED",
+  "scope_note": "This is one reproducible benchmark result, not a universal reduction guarantee.",
+  "started_at_utc": "2026-07-29T08:10:20.6080000Z",
+  "finished_at_utc": "2026-07-29T08:30:20.0110000Z",
+  "provider": "lm_studio",
+  "model": "qwen2.5-3b-instruct",
+  "comparison_basis": "same_provider_same_model_two_real_calls",
+  "measurement_basis": "provider_usage",
+  "model_calls": 2,
+  "variant_a": {
+    "context_mode": "bounded_full_history_and_full_rule_context",
+    "prompt_tokens": 5658,
+    "completion_tokens": 51,
+    "total_tokens": 5709,
+    "latency_ms": 620326.456,
+    "prompt_sha256": "8ad883f3532330a8c94d75cc1d9b2dd216fbdfc21d1a95b69919f10be9ff9bfd"
+  },
+  "variant_b": {
+    "context_mode": "minimal_current_rule_package",
+    "prompt_tokens": 1723,
+    "completion_tokens": 57,
+    "total_tokens": 1780,
+    "latency_ms": 156837.284,
+    "prompt_sha256": "d6be690d7b4bed13497e6f3c02ee68dd69506273cd91e29d9d09792f8adcfe56"
+  },
+  "savings": {
+    "prompt_tokens_saved": 3935,
+    "prompt_reduction_percent": 69.55,
+    "total_tokens_saved": 3929,
+    "total_reduction_percent": 68.82
+  },
+  "raw_source_sha256": "B13F50C5B1C8967540EEAC209136CDDEB34872F388D9A46BB925CD26F2ABD863"
+}

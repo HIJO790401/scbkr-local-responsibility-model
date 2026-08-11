@@ -27,6 +27,7 @@ RULE_STATUSES = {
     "revoked",
     "archived",
     "superseded",
+    "deleted",
 }
 AUTOMATION_LEVELS = {"draft_only", "manual", "semi_auto", "full_auto"}
 RISK_LEVELS = {"low", "medium", "high", "critical"}
@@ -252,9 +253,21 @@ class RuleRegistry:
         return self._mutate(rule_id, activate_rule)
 
     def set_status(self, rule_id: str, status: str) -> dict[str, Any]:
-        if status not in {"disabled", "revoked", "archived"}:
-            raise ValueError("status must be disabled, revoked, or archived")
+        if status not in {"disabled", "revoked", "archived", "deleted"}:
+            raise ValueError("status must be disabled, revoked, archived, or deleted")
         return self._mutate(rule_id, lambda rule: {**rule, "activation_status": status})
+
+    def supersede(self, rule_id: str, superseded_by: str) -> dict[str, Any]:
+        if not str(superseded_by or "").strip():
+            raise ValueError("superseded_by is required")
+        return self._mutate(
+            rule_id,
+            lambda rule: {
+                **rule,
+                "activation_status": "superseded",
+                "superseded_by": superseded_by,
+            },
+        )
 
     def import_pack(self, pack: dict[str, Any]) -> dict[str, Any]:
         verification = verify_rulepack(pack)

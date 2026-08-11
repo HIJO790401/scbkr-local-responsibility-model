@@ -23,13 +23,30 @@ def _text(value: Any) -> str:
     return str(value or "")
 
 
+def _live_dimension_content(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return _text(payload).strip()
+    for key in ("owner_draft_content", "model_draft_content", "core_logic", "task_subject", "source_credibility", "real_world_responsibility"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return _text(payload).strip()
+
+
 def validate_direct_draft(draft: dict[str, Any], kernel_pack: dict[str, Any] | None = None) -> dict[str, Any]:
     reasons: list[str] = []
+    live_dimension_text = {
+        dim: _live_dimension_content(draft.get(dim))
+        for dim in ("S", "C", "B", "K", "R")
+    }
     for dim in ("S", "C", "B", "K", "R"):
         if not isinstance(draft.get(dim), dict) or not _text(draft.get(dim)).strip():
             reasons.append("template_empty")
             break
-    if any(value in _text(draft) for value in GENERIC_EMPTY_VALUES):
+    # Historical model attempts remain in the audit payload on purpose. Only
+    # the current editable five-dimensional content may determine whether the
+    # live draft is still a placeholder.
+    if any(text in GENERIC_EMPTY_VALUES for text in live_dimension_text.values()):
         reasons.append("template_empty")
     if len(_text(draft.get("S", {}))) < 24:
         reasons.append("missing_specific_subject")
@@ -49,9 +66,10 @@ def validate_direct_draft(draft: dict[str, Any], kernel_pack: dict[str, Any] | N
     meta_text = _text(draft.get("meta", {})) + " " + r_text
     if KERNEL_NAME not in meta_text:
         reasons.append("missing_kernel_attribution")
-    if "使用者簽名後才成立" not in r_text and "requires_user_signature" not in meta_text:
+    if "使用者簽名後才成立" not in r_text and draft.get("meta", {}).get("requires_user_signature") is not True and "requires_user_signature" not in meta_text:
         reasons.append("missing_user_signature_condition")
-    if "自行承擔" not in r_text and "real_world_outcome_owner" not in meta_text:
+    responsibility_signals = ("自行承擔", "使用者負責", "使用者承擔", "owner is responsible", "user is responsible", "user accepts responsibility", "accountable")
+    if not any(signal in r_text.lower() for signal in responsibility_signals) and "real_world_outcome_owner" not in meta_text:
         reasons.append("missing_user_responsibility")
     if draft.get("signature_status") in {"confirmed", "owner_signed"}:
         reasons.append("model_overreach")

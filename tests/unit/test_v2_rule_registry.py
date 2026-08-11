@@ -1,11 +1,13 @@
 import base64
 import json
+import os
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from apps.api import main
+from core.product_manifest import load_product_manifest
 from core.rules.registry import RuleRegistry, verify_rulepack
 
 
@@ -53,12 +55,28 @@ def test_rule_lifecycle_and_match_gate(tmp_path):
     assert revoked["draft_only"] is True
 
 
-def test_unsigned_shenyao_pack_cannot_claim_signed_status(tmp_path):
-    pack = json.loads((Path(__file__).resolve().parents[2] / "config" / "rulepacks" / "shen-an-black-shield.v2.draft.json").read_text(encoding="utf-8"))
+def test_public_free_edition_runs_without_an_official_rulepack(tmp_path):
+    manifest = load_product_manifest()
+    registry = RuleRegistry(tmp_path)
+
+    assert manifest["distribution_policy"]["edition_type"] == "experience"
+    assert manifest["distribution_policy"]["author_official_rulepacks_included"] is False
+    assert registry.list_rules() == []
+    assert registry.list_subscriptions() == []
+
+
+def test_local_private_shenyao_pack_is_verified_without_becoming_public_or_active(tmp_path):
+    default_path = Path(__file__).resolve().parents[2] / "config" / "rulepacks" / "shen-an-black-shield.v2.draft.json"
+    pack_path = Path(os.environ.get("SCBKR_PRIVATE_RULEPACK_PATH", str(default_path)))
+    if not pack_path.is_file():
+        pytest.skip("Private ShenYao rule pack is intentionally absent from the public FREE checkout")
+
+    pack = json.loads(pack_path.read_text(encoding="utf-8"))
     registry = RuleRegistry(tmp_path)
     imported = registry.import_pack(pack)
     assert imported["verification"]["signature_verified"] is False
     assert {rule["activation_status"] for rule in registry.list_rules()} == {"waiting_owner_signature"}
+    assert registry.list_subscriptions() == []
     with pytest.raises(ValueError, match="Ed25519"):
         registry.sign_user_rule(pack["rules"][0]["rule_id"], "typed signature")
     with pytest.raises(ValueError, match="author-verified"):

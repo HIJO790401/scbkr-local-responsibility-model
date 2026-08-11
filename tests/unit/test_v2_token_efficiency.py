@@ -29,3 +29,6 @@ def test_summary_aggregates_task_metrics():
     assert summary["task_count"] == 2
     assert summary["estimated_tokens_avoided"] == 150
     assert summary["candidate_evidence_excluded"] == 6
+    assert summary["measurement_scope"] == "aggregate_history"
+    assert summary["savings_verified"] is False
+    assert summary["status"] == "HISTORY_ONLY"

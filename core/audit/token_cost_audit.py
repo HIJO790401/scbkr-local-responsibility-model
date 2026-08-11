@@ -1,8 +1,9 @@
 """Token and cost audit for the local-first SCBKR runtime.
 
 The audit compares a full-context prompt shape with the minimal
-``current_rule_package`` used by the formal answer path. It deliberately uses
-estimated tokens unless a project tokenizer is introduced later.
+``current_rule_package`` used by the formal answer path. This is a transparent
+local estimate, not a verified savings claim. Verified savings require the
+separate same-provider, same-model A/B benchmark and provider-reported usage.
 """
 
 from __future__ import annotations
@@ -11,8 +12,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.metrics.token_meter import build_token_meter_report
 
-PASS_THRESHOLD_PERCENT = 98.06
+
 FORMAL_BASIS = "signed_active_four_store_rules_only"
 
 
@@ -46,9 +48,39 @@ def _formal_source_summary(current_rule_package: dict[str, Any]) -> dict[str, An
     }
 
 
-def measure_context_compression(full_context: Any, current_rule_package: dict[str, Any]) -> dict[str, Any]:
-    full_context_text = _stable_text(full_context)
-    package_text = _stable_text(current_rule_package)
+def measure_context_compression(
+    full_context: Any,
+    current_rule_package: dict[str, Any],
+    *,
+    messages: list[dict[str, Any]] | None = None,
+    provider_usages: list[dict[str, Any]] | None = None,
+    model_settings: dict[str, Any] | None = None,
+    pricing: dict[str, Any] | None = None,
+    measurement_scope: str = "rule_answer",
+) -> dict[str, Any]:
+    source_summary = _formal_source_summary(current_rule_package)
+    compression_eligible = (
+        measurement_scope == "rule_answer"
+        and source_summary["matched_rules"] > 0
+    )
+    # A normal chat with no signed rule has no valid compression baseline. Do
+    # not serialize or tokenize a potentially large local store just to report
+    # a percentage that must be marked not applicable anyway. Provider usage
+    # for the actual chat request is still retained by the token meter.
+    meter_full_context = full_context if compression_eligible else {}
+    meter_rule_package = current_rule_package if compression_eligible else {}
+    full_context_text = _stable_text(meter_full_context) if compression_eligible else ""
+    package_text = _stable_text(meter_rule_package) if compression_eligible else ""
+    meter = build_token_meter_report(
+        full_context=meter_full_context,
+        current_rule_package=meter_rule_package,
+        messages=messages,
+        provider_usages=provider_usages,
+        model_settings=model_settings,
+        pricing=pricing,
+        measurement_scope=measurement_scope,
+    )
+    # Keep these legacy fields stable for existing reports and clients.
     full_tokens = estimate_tokens(full_context_text)
     package_tokens = estimate_tokens(package_text)
     if full_tokens <= 0:
@@ -57,19 +89,38 @@ def measure_context_compression(full_context: Any, current_rule_package: dict[st
     else:
         ratio = package_tokens / full_tokens
         percent = max(0.0, (1.0 - ratio) * 100)
-    status = "PASS_98_06" if percent >= PASS_THRESHOLD_PERCENT else "NEEDS_OPTIMIZATION"
+    status = "ESTIMATE_ONLY" if compression_eligible else "NOT_APPLICABLE"
+    if not compression_eligible:
+        meter.update(
+            {
+                "tokens_saved": None,
+                "reduction_percent": None,
+                "compression_ratio": None,
+                "compression_percent": None,
+                "comparison_basis": "not_applicable_without_signed_rule",
+                "estimated_cost_saved": None,
+                "savings_verified": False,
+            }
+        )
     return {
+        **meter,
         "full_context_chars": len(full_context_text),
         "full_context_tokens_est": full_tokens,
         "current_rule_package_chars": len(package_text),
         "current_rule_package_tokens_est": package_tokens,
-        "compression_ratio": round(ratio, 6),
-        "compression_percent": round(percent, 2),
+        "compression_ratio": round(ratio, 6) if compression_eligible else None,
+        "compression_percent": round(percent, 2) if compression_eligible else None,
         "chat_context_used": bool(current_rule_package.get("chat_context_used", False)),
         "formal_basis": FORMAL_BASIS,
-        "threshold_percent": PASS_THRESHOLD_PERCENT,
+        "threshold_percent": None,
         "status": status,
-        "formal_source_summary": _formal_source_summary(current_rule_package),
+        "savings_verified": False,
+        "verification_note": (
+            "This per-request comparison is a local context estimate. Run the same-model A/B benchmark for verified savings."
+            if compression_eligible
+            else "Rule compression is not applicable until a signed active rule is matched. Actual provider usage may still be shown for the current chat call."
+        ),
+        "formal_source_summary": source_summary,
         "excluded_context": [
             "raw_chat_history",
             "unreviewed_drafts",
@@ -117,8 +168,9 @@ def render_token_cost_audit_report(
 - Rule Package: {audit.get("current_rule_package_tokens_est")} tokens ({audit.get("current_rule_package_chars")} chars)
 - Compression Ratio: {audit.get("compression_ratio")}
 - Compression: {audit.get("compression_percent")}%
-- Threshold: {audit.get("threshold_percent")}%
+- Savings verified: {"Yes" if audit.get("savings_verified") else "No"}
 - Status: {audit.get("status")}
+- Verification note: {audit.get("verification_note")}
 
 ## Formal Basis
 - Formal basis: {audit.get("formal_basis")}

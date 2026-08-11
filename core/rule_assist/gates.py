@@ -1,8 +1,4 @@
-"""Deterministic SCBKR 2.3 rule-assist gates.
-
-The local model may help phrase text, but these gates define the product
-contract for FREE / NT$690 / NT$3300 modes.
-"""
+"""Deterministic gates for the public SCBKR FREE edition."""
 
 from __future__ import annotations
 
@@ -12,14 +8,13 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 
-PLAN_LEVELS = ("FREE", "NT690", "NT3300")
+PLAN_LEVELS = ("FREE",)
 
 DEFAULT_RULE_ASSIST_SETTINGS: dict[str, Any] = {
     "plan_level": "FREE",
     "locale": "zh-TW",
     "rule_source": "local_user_defined",
     "author_signature_required": False,
-    "cloud_subscription_enabled": False,
     "mock_model_enabled": True,
 }
 
@@ -29,12 +24,12 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
         "price_label": "免費版",
         "name": {"zh-TW": "免費草稿層", "en": "Free Draft Layer"},
         "summary": {
-            "zh-TW": "本機聊天、基本五維規則草稿、四庫候選引用；使用者自行簽名，沒有沈耀規則完整性輔助。",
-            "en": "Local chat, basic five-dimensional rule drafts, and four-store candidate reads. The user signs alone; no ShenYao completeness assist.",
+            "zh-TW": "本機聊天、模型輔助五維規則草稿、使用者簽名、四庫入庫與規則引用。",
+            "en": "Local chat, model-assisted five-dimensional rule drafts, user signatures, four-store storage, and signed-rule citation.",
         },
         "model_role": "chat_and_draft_only",
         "gates": ["DraftStateGate", "OwnerSignatureGate", "FourStoreCitationGate"],
-        "can_fill_structure": False,
+        "can_fill_structure": True,
         "can_claim_close": False,
         "service_refusal_gate": False,
         "requires_owner_signature": True,
@@ -43,7 +38,7 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
             "自然語言建立基本 S/C/B/K/R 規則草案",
             "四庫只能做候選搜尋，不能當正式引用結論",
         ],
-        "model_scbr_fill": "可把人話整理成基本 S/C/B/K/R 草稿；不補責任鏈閉環，不代簽、不入庫。",
+        "model_scbr_fill": "可把人話整理成基本 S/C/B/K/R 草稿並說明缺口；不代簽、不自動入庫。",
         "formation_conditions": [
             "使用者提供任務或規則原句",
             "系統可產生草案",
@@ -53,79 +48,6 @@ PLAN_CATALOG: dict[str, dict[str, Any]] = {
             "沒有使用者簽名不得成立規則",
             "沒有四庫正式引用不得宣稱已有依據",
             "模型不得自行 CLOSE、驗收或入庫",
-        ],
-    },
-    "NT690": {
-        "plan_level": "NT690",
-        "price_label": "NT$690",
-        "name": {"zh-TW": "責任鏈結構輔助層", "en": "Responsibility Structure Assist"},
-        "summary": {
-            "zh-TW": "語意合法輸出硬閘：擋空回覆、假因果、無參數建議，協助補 S/C/B/K/R 基本結構。",
-            "en": "Semantic legality gate: blocks empty replies, fake causality, and parameter-free advice while filling basic S/C/B/K/R.",
-        },
-        "model_role": "structured_draft_assistant",
-        "gates": ["DraftStateGate", "ZerothPrincipleGate", "SemanticLegalityGate", "OwnerSignatureGate"],
-        "can_fill_structure": True,
-        "can_claim_close": False,
-        "service_refusal_gate": False,
-        "requires_owner_signature": True,
-        "human_capabilities": [
-            "協助補 S/C/B/K/R 基本欄位",
-            "擋掉空回覆、假因果、缺參數建議",
-            "把使用者一句話整理成可檢查草案",
-        ],
-        "model_scbr_fill": "可補主體、流程、邊界、依據、驗收條件，但只能是草案。",
-        "formation_conditions": [
-            "通過第 0 原理：不是空話或只有『好』",
-            "語意合法：有主語、目的、邊界或可追問缺口",
-            "使用者簽名後才可進入生成或啟用",
-        ],
-        "failure_conditions": [
-            "主語不明、邊界不明或責任不明",
-            "只有空泛要求，沒有任務參數",
-            "模型補欄位後未經使用者簽名",
-        ],
-    },
-    "NT3300": {
-        "plan_level": "NT3300",
-        "price_label": "NT$3300",
-        "name": {"zh-TW": "規則書閉環審計層", "en": "Rulebook Closure Audit"},
-        "summary": {
-            "zh-TW": "有效性/失敗審計與服務拒絕閘；高風險工具、發布、入庫、付款、外部連線必須回使用者簽名。",
-            "en": "Validity/failure audit plus service-refusal gate. High-risk tools, publishing, storage, payment, and external calls require user signature.",
-        },
-        "model_role": "closure_candidate_assistant",
-        "gates": [
-            "DraftStateGate",
-            "ZerothPrincipleGate",
-            "SemanticLegalityGate",
-            "ValidityFailureAudit",
-            "ServiceRefusalGate",
-            "OwnerSignatureGate",
-        ],
-        "can_fill_structure": True,
-        "can_claim_close": False,
-        "service_refusal_gate": True,
-        "requires_owner_signature": True,
-        "human_capabilities": [
-            "建立 CLOSE_CANDIDATE，而非替使用者終裁",
-            "明列成立條件、失效條件與修復路徑",
-            "高風險工具、發布、入庫、外部連線一律要求簽名",
-        ],
-        "model_scbr_fill": "可補完整 S/C/B/K/R、成立條件、失效條件、修復路徑與工具拒絕理由。",
-        "formation_conditions": [
-            "第 0 原理通過",
-            "語意合法 Gate 通過",
-            "有效性/失敗審計通過",
-            "高風險操作已有使用者簽名",
-            "若引用四庫，必須命中已簽名且已驗收資料",
-        ],
-        "failure_conditions": [
-            "語意 Gate 未閉合",
-            "高風險操作未簽名",
-            "宣稱引用但四庫沒有正式資料",
-            "模型自行簽名、驗收、入庫或宣稱 CLOSE",
-            "服務對象、邊界、標準、責任、回放缺任一項",
         ],
     },
 }
@@ -164,52 +86,12 @@ RULE_TRIGGERS = (
     "store",
     "sign",
 )
-HIGH_RISK_TERMS = (
-    "刪除",
-    "付款",
-    "刷卡",
-    "轉帳",
-    "發佈",
-    "發布",
-    "公開",
-    "寄信",
-    "email",
-    "mail",
-    "delete",
-    "payment",
-    "purchase",
-    "publish",
-    "deploy",
-    "external_api",
-    "上網",
-    "網路搜尋",
-    "讀信箱",
-    "信箱",
-    "電腦",
-    "檔案",
-    "drive",
-)
-
-
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
 def normalize_plan_level(value: str | None) -> str:
-    raw = str(value or "").strip().upper().replace("$", "")
-    aliases = {
-        "690": "NT690",
-        "NT690": "NT690",
-        "NTD690": "NT690",
-        "NT$690": "NT690",
-        "3300": "NT3300",
-        "NT3300": "NT3300",
-        "NTD3300": "NT3300",
-        "NT$3300": "NT3300",
-        "FREE": "FREE",
-        "免費": "FREE",
-    }
-    return aliases.get(raw, "FREE")
+    return "FREE"
 
 
 def plan_catalog(locale: str = "zh-TW") -> list[dict[str, Any]]:
@@ -265,11 +147,9 @@ def validate_settings_update(current: dict[str, Any], payload: dict[str, Any]) -
         next_settings["locale"] = str(payload.get("locale"))
     if "mock_model_enabled" in payload:
         next_settings["mock_model_enabled"] = bool(payload.get("mock_model_enabled"))
-    if "cloud_subscription_enabled" in payload:
-        next_settings["cloud_subscription_enabled"] = bool(payload.get("cloud_subscription_enabled"))
     if "rule_source" in payload:
         next_settings["rule_source"] = str(payload.get("rule_source") or "local_user_defined")[:80]
-    next_settings["author_signature_required"] = next_settings["plan_level"] in {"NT690", "NT3300"}
+    next_settings["author_signature_required"] = False
     next_settings["updated_at"] = _now()
     return next_settings
 
@@ -329,7 +209,7 @@ def _semantic_legality_gate(text: str, target_mode: str = "chat") -> dict[str, A
     status = "pass" if not findings else "needs_clarification"
     score = 0.82 if status == "pass" else max(0.38, 0.78 - len(findings) * 0.16)
     return {
-        "gate_id": "P16-690-SEMANTIC-LEGALITY-GATE",
+        "gate_id": "FREE-SEMANTIC-LEGALITY-GATE",
         "status": status,
         "score": round(score, 2),
         "findings": findings,
@@ -342,51 +222,6 @@ def _semantic_legality_gate(text: str, target_mode: str = "chat") -> dict[str, A
         },
         "model_forbidden": ["auto_close", "auto_sign", "auto_store", "invent_citation", "claim_owner_decision"],
         "required_next_action": "ask_clarifying_question" if status != "pass" else "compile_draft_or_answer",
-    }
-
-
-def _validity_failure_audit(text: str, semantic_gate: dict[str, Any]) -> dict[str, Any]:
-    raw = (text or "").strip()
-    has_rule_language = _contains_any(raw, RULE_TRIGGERS)
-    high_risk = _contains_any(raw, HIGH_RISK_TERMS)
-    failure_cases = []
-    if semantic_gate.get("status") != "pass":
-        failure_cases.append("semantic_gate_not_closed")
-    if high_risk:
-        failure_cases.append("high_risk_action_requires_signature")
-    if has_rule_language and "簽名" not in raw and "signature" not in raw.lower():
-        failure_cases.append("rule_without_explicit_signature_path")
-    status = "pass" if not failure_cases else "owner_review"
-    return {
-        "gate_id": "P17-3300-VALIDITY-FAILURE-AUDIT",
-        "status": status,
-        "score": 0.9 if status == "pass" else 0.62,
-        "failure_cases": failure_cases,
-        "validity": {
-            "can_answer": semantic_gate.get("status") == "pass" or _looks_like_question(raw),
-            "can_compile_draft": True,
-            "can_close": False,
-            "close_reason": "模型最多到 CLOSE_CANDIDATE；正式 CLOSE 必須使用者簽名、驗收、入庫。",
-        },
-        "repair_path": [
-            "補主語與服務對象",
-            "補不可越界條款",
-            "補依據或四庫引用",
-            "補使用者簽名與回放要求",
-        ],
-    }
-
-
-def _service_refusal_gate(text: str, target_mode: str = "chat") -> dict[str, Any]:
-    high_risk = _contains_any(text, HIGH_RISK_TERMS) or target_mode in {"tool", "store", "publish", "external"}
-    status = "owner_signature_required" if high_risk else "pass"
-    return {
-        "gate_id": "P18-3300-SERVICE-REFUSAL-GATE",
-        "status": status,
-        "risk_level": "high" if high_risk else "normal",
-        "blocked_until": "owner_signature" if high_risk else None,
-        "allowed_without_signature": ["explain", "draft", "simulate", "ask_clarifying_question"],
-        "blocked_without_signature": ["tool_execution", "external_send", "publish", "delete", "physical_store"] if high_risk else [],
     }
 
 
@@ -606,7 +441,7 @@ def _gate_summary(assessment: dict[str, Any]) -> list[str]:
 
 
 def apply_rule_assist_to_scbkr(raw_input: str, scbkr: dict[str, Any], assessment: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Apply FREE / NT690 / NT3300 structure-assist rules to a SCBKR draft.
+    """Apply the public FREE structure-assist contract to a SCBKR draft.
 
     This is deterministic backend logic. A local LLM may supply phrasing before
     this step, but the product contract is enforced here.
@@ -625,9 +460,6 @@ def apply_rule_assist_to_scbkr(raw_input: str, scbkr: dict[str, Any], assessment
         "gate_summary": _gate_summary(assessment),
         "owner_signature_required": True,
     }
-    if plan == "FREE":
-        return draft
-
     draft.setdefault("S", {})
     draft.setdefault("C", {})
     draft.setdefault("B", {})
@@ -662,20 +494,6 @@ def apply_rule_assist_to_scbkr(raw_input: str, scbkr: dict[str, Any], assessment
     draft["R"]["model_signature_allowed"] = False
     draft["R"]["required_signer"] = "user"
 
-    if plan == "NT3300":
-        formation = list(contract.get("formation_conditions") or []) + profile["formation"]
-        failure = list(contract.get("failure_conditions") or []) + profile["failure"]
-        repair = profile["repair"]
-        for gate in assessment.get("gates", []) or []:
-            if isinstance(gate.get("repair_path"), list):
-                repair.extend(gate["repair_path"])
-        draft["B"]["formation_conditions"] = _append_unique([], formation)
-        draft["B"]["failure_conditions"] = _append_unique([], failure)
-        draft["R"]["formation_conditions"] = _append_unique([], formation)
-        draft["R"]["failure_conditions"] = _append_unique([], failure)
-        draft["R"]["repair_path"] = _append_unique([], repair)
-        draft["R"]["closure_state"] = "CLOSE_CANDIDATE_ONLY_BEFORE_OWNER_SIGNATURE"
-        draft["structure_assist"]["closure_limit"] = "模型可補完整條件，但正式 CLOSE 必須使用者簽名、驗收與回放。"
     return draft
 
 
@@ -709,9 +527,6 @@ def build_scbkr_layer_patch(
         _append_unique(_ensure_list(after, "stop_conditions"), profile["boundaries"])
         _append_unique(_ensure_list(after, "data_write_scope"), ["未簽名不得寫入四庫", "未驗收不得入庫", "未簽名不得發布或寄出"])
         _append_unique(_ensure_list(after, "error_handling"), ["B 層不完整時進 OWNER_REVIEW，不得讓模型硬編。"])
-        if plan == "NT3300":
-            after["formation_conditions"] = _append_unique([], profile["formation"])
-            after["failure_conditions"] = _append_unique([], profile["failure"])
     elif layer == "K":
         _append_unique(_ensure_list(after, "references"), profile["basis"])
         _append_unique(_ensure_list(after, "source_credibility"), [
@@ -726,11 +541,6 @@ def build_scbkr_layer_patch(
         after["owner_signature_required"] = True
         after["model_signature_allowed"] = False
         after["required_signer"] = "user"
-        if plan == "NT3300":
-            after["formation_conditions"] = _append_unique([], profile["formation"])
-            after["failure_conditions"] = _append_unique([], profile["failure"])
-            after["repair_path"] = _append_unique([], profile["repair"])
-            after["closure_state"] = "CLOSE_CANDIDATE_ONLY_BEFORE_OWNER_SIGNATURE"
     return after
 
 
@@ -765,18 +575,6 @@ def evaluate_rule_assist(
     result["plan"]["display_name"] = result["plan"]["name"].get(locale) or result["plan"]["name"]["zh-TW"]
     result["plan"]["display_summary"] = result["plan"]["summary"].get(locale) or result["plan"]["summary"]["zh-TW"]
 
-    if plan == "FREE":
-        result["gates"] = [{
-            "gate_id": "FREE-DRAFT-STATE-GATE",
-            "status": "draft_only",
-            "score": 0.5,
-            "findings": ["no_paid_structure_assist"],
-            "advice": "可聊天、可產生草案；正式引用與入庫仍需使用者自行確認。",
-        }]
-        result["capability_state"] = "basic_chat_and_user_signed_draft"
-        result["next_required_action"] = "user_manual_review"
-        return result
-
     result["gates"].extend([zeroth, semantic])
     if semantic["status"] != "pass" or zeroth["status"] != "pass":
         result["state"] = "OWNER_REVIEW"
@@ -784,19 +582,7 @@ def evaluate_rule_assist(
     else:
         result["state"] = "DRAFT_STRUCTURED"
         result["next_required_action"] = "compile_structured_draft"
-    result["capability_state"] = "semantic_structure_assist"
-
-    if plan == "NT3300":
-        validity = _validity_failure_audit(text, semantic)
-        refusal = _service_refusal_gate(text, target_mode)
-        result["gates"].extend([validity, refusal])
-        result["capability_state"] = "rulebook_closure_candidate"
-        if refusal["status"] != "pass":
-            result["state"] = "OWNER_SIGNATURE_REQUIRED"
-            result["next_required_action"] = "owner_signature_before_action"
-        elif validity["status"] == "pass" and result["state"] == "DRAFT_STRUCTURED":
-            result["state"] = "CLOSE_CANDIDATE"
-            result["next_required_action"] = "owner_signature_and_replay"
+    result["capability_state"] = "free_model_assisted_structure"
     return result
 
 

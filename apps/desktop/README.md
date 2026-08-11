@@ -1,54 +1,42 @@
-# SCBKR Desktop Launch Skeleton — P14-B
+# SCBKR Desktop
 
-P14-B is a desktop launch skeleton, not a production installer.
+This directory contains the Tauri 2 shell used to package SCBKR 2.3 FREE for Windows.
 
-This folder provides the minimum Tauri-oriented structure and runtime contract for a future desktop shell. It does not build or publish `.exe`, `.msi`, `.dmg`, installers, auto-updaters, code signing assets, or GitHub Releases. P14-C remains responsible for packaged sidecar runtime and release automation.
+The app embeds the production Web build and launches the PyInstaller `scbkr-api` sidecar automatically. The sidecar binds to `127.0.0.1:8787` by default and stores user data under `%APPDATA%\SCBKR\data`.
 
-## Development contract
+## Runtime contract
 
-- Desktop shell points at the existing Web UI dev server: `http://localhost:5500`.
-- Web UI talks to the existing local FastAPI server, normally `http://localhost:8787`.
-- Sandbox Mode remains the safest default path and requires no model, API key, model download, or external call.
-- LM Studio / Ollama / OpenAI-compatible endpoints remain user-provided local services; SCBKR does not install or download models.
-- Desktop skeleton must not bypass SCBKR gates: confirm, sealed snapshot, `model_generate`, review, signed storage confirm, and advisory retrieval locks remain in FastAPI/workflow code.
+- General chat and model-assisted rulebook authoring require a user-connected LM Studio, Ollama, or OpenAI-compatible endpoint.
+- SCBKR does not bundle a model, download model weights, or include an API key.
+- A missing or invalid model is reported as unavailable. No template or direct-kernel fallback may impersonate model authorship.
+- The desktop shell cannot bypass owner review, signature, acceptance, second storage confirmation, four-store authority, or tool permission gates.
+- LAN Companion Mode is disabled by default and requires an explicit token plus one-time pairing code.
 
-## Non-goals in P14-B
+## Windows build
 
-- No production installer.
-- No formal Tauri build requirement in CI.
-- No auto-update.
-- No code signing.
-- No cloud account system.
-- No bundled large model.
+The release candidate command is:
 
-## P14-C Windows preview sidecar staging
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build_desktop_release_windows.ps1 -SkipPythonDependencyInstall
+```
 
-The Windows preview build must stage the PyInstaller sidecar before `tauri build`.
-Tauri v2 resolves the configured external binary name from `src-tauri`, then adds
-the Windows target triple. Therefore `src-tauri/tauri.conf.json` uses
-`bundle.externalBin = ["sidecar/scbkr-api"]`, and the build script must copy the
-sidecar to:
+The build performs the Web production build, PyInstaller sidecar build and smoke test, desktop release-contract check, Tauri release build, and NSIS packaging. Output is staged under:
+
+```text
+dist/scbkr-windows-desktop-rc/
+```
+
+Tauri resolves `bundle.externalBin = ["sidecar/scbkr-api"]` by appending the Windows target triple. The build therefore stages:
 
 ```text
 apps/desktop/src-tauri/sidecar/scbkr-api-x86_64-pc-windows-msvc.exe
 ```
 
-`scripts/build_api_sidecar_windows.ps1` creates both the distribution copy at
-`dist/windows-preview/sidecar/scbkr-api.exe` and the Tauri staging copy above.
-`scripts/build_desktop_preview_windows.ps1` fails before `tauri build` if the
-staged sidecar is missing, rather than producing a partial preview package.
+The generated icon is an unsigned placeholder used for the current RC. Microsoft Store submission still requires publisher identity, final brand assets, legal listing data, and the selected signing path.
 
-## P14-C Windows preview icon generation
+## Distribution boundaries
 
-P14-C does not commit `apps/desktop/src-tauri/icons/icon.ico` as a binary file.
-The unsigned Windows preview placeholder icon is generated at build time by
-`scripts/generate_tauri_preview_icon.py`. Direct Tauri preview builds also run
-the generator first: `npm --prefix apps/desktop run tauri:build:preview` invokes
-`npm run generate:icon` before `tauri build`, so a fresh checkout does not need a
-pre-existing `icon.ico`. The Windows preview packaging script still runs the
-generator independently and fails fast if the generated ICO is missing, empty,
-or does not start with the ICO header `00 00 01 00`.
-
-The generated icon is only an unsigned preview placeholder. It is
-not a production brand asset, does not use any copyrighted or trademarked logo, and
-does not add code signing, auto-update, a bundled model, or a bundled API key.
+- Public edition: FREE framework experience.
+- No ShenYao official or private rule pack is bundled.
+- No NT$690 or NT$3,300 private product source is published here.
+- No code-signing certificate, cloud account, auto-update service, model, or API key is stored in the repository.

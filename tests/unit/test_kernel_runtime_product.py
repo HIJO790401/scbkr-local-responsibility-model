@@ -33,23 +33,27 @@ def test_direct_runtime_generates_signable_scbkr_without_model_authority():
     assert "VECTOR" in draft["K"]["four_store_policy"]
 
 
-def test_plan_depth_adds_paid_depth_without_changing_rule_owner():
+def test_plan_depth_is_always_public_free_without_changing_rule_owner():
     free = compile_rule_from_input(RULE_INPUT, plan_level="FREE")["draft"]
-    nt690 = apply_plan_depth(free, "NT690")
-    nt3300 = apply_plan_depth(free, "NT3300")
-    assert "responsibility_boundary" in nt690["plan_depth"]["adds"]
-    assert "rulebook_audit_record" in nt3300
-    assert "dual_signature_conditions" in nt3300["R"]
-    assert nt3300["meta"]["user_rule_owner"] == "local_user"
+    unknown = apply_plan_depth(free, "PRIVATE")
+    assert unknown["meta"]["plan_level"] == "FREE"
+    assert unknown["plan_depth"]["adds"] == [
+        "basic_five_dimensions",
+        "user_self_signature",
+        "local_storage",
+        "local_citation",
+        "not_full_closure",
+    ]
+    assert unknown["meta"]["user_rule_owner"] == "local_user"
 
 
-def test_signature_policy_blocks_model_signature_and_marks_paid_dual_lock():
+def test_signature_policy_blocks_model_signature_and_requires_local_user():
     free = signature_policy("FREE")
-    paid = signature_policy("NT3300")
+    unknown = signature_policy("PRIVATE")
     record = build_signature_record("owner-signature", plan_level="FREE")
     assert free["model_signature_allowed"] is False
     assert free["user_signature_required"] is True
-    assert paid["dual_signature"]["locked"] is False
+    assert unknown["signature_mode"] == "local_user_only"
     assert record["signature_status"] == "owner_signed"
 
 
@@ -80,3 +84,56 @@ def test_current_rule_package_only_promotes_signed_active_formal_sources():
     assert package["matched_rules"][0]["active"] is True
     assert not package["citable_data"]
     assert package["retrieval_candidates"][0]["source_store"] == "vector"
+
+
+def test_owner_signed_local_rule_takes_priority_over_an_adopted_external_rulepack():
+    context = {
+        "hits": [
+            {
+                "source_store": "logic",
+                "rule": "使用者已簽名規則：未確認金額與證據前不得墊款。",
+                "adopted": True,
+                "review_passed": True,
+                "signature_status": "owner_signed",
+                "status": "active",
+                "source_id": "local-owner-rule",
+            },
+            {
+                "source_store": "logic",
+                "rule": "外部普遍說法：朋友之間應互相墊款。",
+                "adopted": True,
+                "review_passed": True,
+                "signature_status": "verified",
+                "status": "active",
+                "source_id": "external-pack-rule",
+            },
+        ]
+    }
+
+    package = build_current_rule_package("朋友要我先墊三萬，可以嗎？", context)
+
+    assert [item["source_id"] for item in package["matched_rules"]] == ["local-owner-rule"]
+    assert any(item["source_id"] == "external-pack-rule" for item in package["non_citable_data"])
+    assert package["external_generalizations_override_active_rule_state"] is False
+    assert package["rule_authority_precedence"][0] == "owner_signed_local_rule"
+
+
+def test_explicitly_adopted_verified_pack_can_be_used_when_no_local_rule_conflicts():
+    context = {
+        "hits": [
+            {
+                "source_store": "logic",
+                "rule": "使用者已明確採用的外部規則包條文。",
+                "adopted": True,
+                "review_passed": True,
+                "signature_status": "verified",
+                "status": "active",
+                "source_id": "adopted-pack-rule",
+            }
+        ]
+    }
+
+    package = build_current_rule_package("依我採用的規則判斷", context)
+
+    assert package["matched_rules"][0]["source_id"] == "adopted-pack-rule"
+    assert package["matched_rules"][0]["authority_origin"] == "explicitly_adopted_verified_rulepack"

@@ -14,6 +14,37 @@ from core.model_gateway.settings import can_enable_generate
 from core.workflow.generation_result import build_generation_result
 
 
+MODEL_VISIBLE_FIELDS = {
+    "S": ("model_draft_content", "task_subject", "task_name", "applies_when"),
+    "C": ("model_draft_content", "core_logic", "flow_steps"),
+    "B": ("model_draft_content", "forbidden", "stop_conditions", "model_must_not", "data_write_scope"),
+    "K": ("model_draft_content", "citable_sources", "non_citable_sources", "when_basis_missing", "references"),
+    "R": ("model_draft_content", "acceptance_criteria", "real_world_responsibility", "model_cannot_sign"),
+}
+
+
+def _compact_value(value):
+    if isinstance(value, str):
+        return value[:320]
+    if isinstance(value, list):
+        return [_compact_value(item) for item in value[:3]]
+    if isinstance(value, dict):
+        return {key: _compact_value(item) for key, item in list(value.items())[:5]}
+    return value
+
+
+def _compact_model_visible_scbkr(sealed_payload):
+    """Keep model context small after full sealed-snapshot verification."""
+    return {
+        dimension: {
+            key: _compact_value(payload[key])
+            for key in MODEL_VISIBLE_FIELDS[dimension]
+            if key in payload and payload[key] not in (None, "", [], {})
+        }
+        for dimension, payload in sealed_payload.items()
+    }
+
+
 def assert_task_can_generate(task, scbkr, model_settings, permissions):
     """Raise ValueError unless task, SCBKR, and model settings pass P6 safety gates."""
     if task.get("confirmed") is not True:
@@ -65,7 +96,7 @@ def build_generation_messages(task, scbkr):
     if all_dimensions_confirmed(scbkr) is not True:
         raise ValueError("S/C/B/K/R dimensions must all be confirmed and match their sealed snapshots before generation")
 
-    sealed_scbkr_payload = build_model_visible_scbkr_payload(scbkr)
+    sealed_scbkr_payload = _compact_model_visible_scbkr(build_model_visible_scbkr_payload(scbkr))
     sealed_r_payload = sealed_scbkr_payload["R"]
     user_payload = {
         "raw_input": task.get("raw_input", ""),

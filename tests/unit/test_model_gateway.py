@@ -111,6 +111,33 @@ def test_build_chat_completion_payload_only_builds_payload():
         build_chat_completion_payload(messages, enabled_settings(model_name=""))
 
 
+def test_local_qwen35_uses_bounded_non_thinking_mode_by_default():
+    messages = [{"role": "user", "content": "SCBKR"}]
+    payload = build_chat_completion_payload(
+        messages,
+        enabled_settings(
+            provider="lm_studio",
+            base_url="http://127.0.0.1:1234/v1",
+            model_name="qwen3.5-4b",
+        ),
+    )
+
+    assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+    assert payload["reasoning_effort"] == "none"
+
+    explicit = build_chat_completion_payload(
+        messages,
+        enabled_settings(
+            provider="lm_studio",
+            base_url="http://127.0.0.1:1234/v1",
+            model_name="qwen3.5-4b",
+            chat_template_kwargs={"enable_thinking": True},
+        ),
+    )
+    assert explicit["chat_template_kwargs"] == {"enable_thinking": True}
+    assert "reasoning_effort" not in explicit
+
+
 def test_build_headers_does_not_print_or_log_api_key(capsys):
     api_key = "sk-test-secret-key"
     headers = build_headers(enabled_settings(api_key=api_key))

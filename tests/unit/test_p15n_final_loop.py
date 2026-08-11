@@ -7,11 +7,10 @@ def test_chat_intent_routes_confirmation_and_typo_without_general_markdown():
         assert data["intent"] == "create_confirmation"
 
 
-def test_chat_intent_suggests_confirmation_card_for_planning_request():
+def test_chat_intent_keeps_one_off_planning_request_in_normal_chat():
     data = chat_intent({"message": "我想做一個商業文案計畫"})
-    assert data["intent"] == "suggest_create_confirmation"
-    assert data["suggestion"]["title"] == "可生成 SCBKR 確認單"
-    assert "生成確認單" in data["suggestion"]["actions"]
+    assert data["intent"] == "normal_chat"
+    assert "suggestion" not in data
 
 
 def test_retrieval_gate_rejects_unrelated_ui_rule_for_braised_pork_copy(monkeypatch):

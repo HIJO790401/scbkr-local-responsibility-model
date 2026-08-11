@@ -8,6 +8,7 @@ from core.scbkr.compiler import (
     task_understanding_response_format,
     validate_task_understanding_strict,
 )
+from core.scbkr.draft_grammar import classify_evidence_relation
 
 
 def valid_understanding():
@@ -98,3 +99,51 @@ def test_reviewed_owner_signed_logic_source_can_be_cited():
     assert citation["source_store"] == "logic"
     assert citation["version"] == "2"
     assert validate_evidence_packet(packet) is packet
+
+
+@pytest.mark.parametrize(
+    ("query", "candidate"),
+    [
+        (
+            "請直接幫我發布這份文件",
+            "債務民事案件規則：任何對外發布或提交法院文件前必須由使用者確認。",
+        ),
+        (
+            "Publish this document now.",
+            "Debt dispute rule: confirm before publishing court documents or deleting evidence.",
+        ),
+    ],
+)
+def test_generic_governance_words_do_not_adopt_an_unrelated_rule(query, candidate):
+    relation = classify_evidence_relation(query, candidate, source_store="logic")
+    assert relation["adopted"] is False
+    assert relation["relation"] in {"irrelevant", "similar_grammar"}
+
+
+@pytest.mark.parametrize(
+    ("query", "candidate"),
+    [
+        (
+            "朋友要我今天先墊三萬元，可以嗎？",
+            "朋友要求先墊錢時，先確認金額與還款證據；禁止未確認就付款。",
+        ),
+        (
+            "Can I advance money to a friend before repayment evidence is confirmed?",
+            "Friend advance-payment rule: require repayment evidence before advancing money.",
+        ),
+    ],
+)
+def test_task_specific_language_can_adopt_a_relevant_rule(query, candidate):
+    relation = classify_evidence_relation(query, candidate, source_store="logic")
+    assert relation["adopted"] is True
+    assert relation["adoption_scope"] == "basis"
+
+
+def test_explicit_global_rule_can_govern_a_generic_operation():
+    relation = classify_evidence_relation(
+        "Publish this document now.",
+        "[GLOBAL] All publish operations require owner confirmation.",
+        source_store="logic",
+    )
+    assert relation["adopted"] is True
+    assert relation["adoption_scope"] == "global"

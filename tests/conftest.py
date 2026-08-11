@@ -8,8 +8,20 @@ missing Starlette's httpx/httpx2 test dependency.
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import shutil
+import tempfile
 
 os.environ.setdefault("SCBKR_PERSIST_RUNTIME_SETTINGS", "0")
+
+# Keep every test-created task, ledger entry, and four-store artifact away
+# from the product data directory.
+_TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="scbkr-pytest-"))
+os.environ.setdefault("SCBKR_DATA_DIR", str(_TEST_DATA_DIR))
+
+
+def pytest_sessionfinish(session, exitstatus):  # noqa: ANN001, ANN201, ARG001
+    shutil.rmtree(_TEST_DATA_DIR, ignore_errors=True)
 
 try:
     from fastapi.testclient import TestClient as _RealTestClient  # noqa: F401

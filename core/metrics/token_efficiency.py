@@ -5,6 +5,8 @@ import json
 import math
 from typing import Any
 
+from core.metrics.token_meter import build_token_meter_report
+
 
 def estimate_tokens(value: Any) -> int:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
@@ -21,6 +23,9 @@ def build_token_efficiency_metrics(
     full_rule_registry: list[dict[str, Any]] | None,
     provider_usages: list[dict[str, Any]] | None = None,
     attempts: int = 0,
+    model_settings: dict[str, Any] | None = None,
+    pricing: dict[str, Any] | None = None,
+    measurement_scope: str = "rule_authoring",
 ) -> dict[str, Any]:
     context = retrieval_context or {}
     full_context = {
@@ -32,14 +37,24 @@ def build_token_efficiency_metrics(
         "messages": messages,
         "evidence_packet": context.get("evidence_packet") or {},
     }
-    baseline_tokens = estimate_tokens(full_context)
-    compiled_tokens = estimate_tokens(actual_context)
-    saved = max(0, baseline_tokens - compiled_tokens)
+    meter = build_token_meter_report(
+        full_context=full_context,
+        current_rule_package=actual_context,
+        messages=messages,
+        provider_usages=provider_usages,
+        model_settings=model_settings,
+        pricing=pricing,
+        measurement_scope=measurement_scope,
+    )
+    baseline_tokens = meter["baseline_prompt_tokens"]
+    compiled_tokens = meter["compiled_prompt_tokens"]
+    saved = meter["tokens_saved"]
     usages = [usage for usage in (provider_usages or []) if isinstance(usage, dict)]
     provider_prompt = sum(int(item.get("prompt_tokens") or 0) for item in usages)
     provider_completion = sum(int(item.get("completion_tokens") or 0) for item in usages)
     return {
-        "metrics_version": "scbkr.token-efficiency.v2",
+        **meter,
+        "metrics_version": "scbkr.token-efficiency.v3",
         "estimation_method": "cjk_1.7_ascii_4",
         "baseline_context_tokens_estimate": baseline_tokens,
         "compiled_context_tokens_estimate": compiled_tokens,
@@ -58,10 +73,17 @@ def summarize_metrics(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     metrics = [task.get("scbkr", {}).get("token_metrics") for task in tasks]
     metrics = [item for item in metrics if isinstance(item, dict)]
     return {
-        "metrics_version": "scbkr.token-efficiency.v2",
+        "metrics_version": "scbkr.token-efficiency.v3",
+        "measurement_scope": "aggregate_history",
+        "measurement_basis": "aggregate",
+        "comparison_basis": "none",
+        "savings_verified": False,
+        "status": "HISTORY_ONLY",
         "task_count": len(metrics),
         "estimated_tokens_avoided": sum(int(item.get("estimated_tokens_avoided") or 0) for item in metrics),
         "provider_total_tokens": sum(int(item.get("provider_total_tokens") or 0) for item in metrics),
+        "actual_total_tokens": sum(int(item.get("actual_total_tokens") or 0) for item in metrics),
+        "estimated_cost_saved": round(sum(float(item.get("estimated_cost_saved") or 0) for item in metrics), 8),
         "model_attempts": sum(int(item.get("model_attempts") or 0) for item in metrics),
         "candidate_evidence_excluded": sum(int(item.get("candidate_evidence_excluded") or 0) for item in metrics),
     }

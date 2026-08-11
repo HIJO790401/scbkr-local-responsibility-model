@@ -6,7 +6,7 @@ Date: 2026-07-08
 
 SCBKR 2.3 is a general AI chat product with SCBKR responsibility-chain rule capability. It is not a pure rule-engine dashboard. The default user path must be:
 
-Normal chat -> Zeroth Principle Advisory Gate -> FREE confirmation draft -> Workbench collaboration -> user signature / dual-signature mode -> Rule Center -> Data Center.
+Normal chat -> Zeroth Principle Advisory Gate -> FREE confirmation draft -> Workbench collaboration -> user signature -> Rule Center -> Data Center.
 
 ## Current System Inventory
 
@@ -15,7 +15,7 @@ Normal chat -> Zeroth Principle Advisory Gate -> FREE confirmation draft -> Work
 3. Root package version: `2.3.0`.
 4. Web package version: `2.3.0`.
 5. FastAPI runtime version: `2.3.0`.
-6. Desktop / Tauri metadata remains on the existing RC line (`apps/desktop` package and Tauri config still report `2.1.0`) and should be treated as shell metadata, not the product capability version.
+6. Desktop / Tauri metadata is aligned with the product capability version at `2.3.0`.
 7. Product manifest is updated to `2.3.0` / `2.3-chat-first-ui-alignment`.
 8. README and Release Notes now describe SCBKR as chat-first plus responsibility-chain rules.
 
@@ -36,7 +36,7 @@ Normal chat -> Zeroth Principle Advisory Gate -> FREE confirmation draft -> Work
 6. FREE draft creation remains available after the user clicks the draft action.
 7. The direct `New rule` quick mode still creates a draft because that mode is an explicit rule-building command.
 
-## Plan Semantics
+## Public Edition Semantics
 
 FREE:
 - Normal chat.
@@ -47,18 +47,9 @@ FREE:
 - User self-signature.
 - User-owned rule storage after gates.
 
-NT$690:
-- Responsibility-chain structure assistance.
-- S/C/B/K/R completion help.
-- Basic formation / invalidation condition help.
-- Field linkage reminders and limited user-confirmed tool actions.
-- It is not the confirmation-draft paywall.
-
-NT$3,300:
-- Rulebook closure layer.
-- ShenYao creator rule signature plus user signature.
-- Formation / invalidation conflict checks, risk, repair, replay, RulePack, OwnerReview, and long-term workflow support.
-- It still cannot sign for the user or bypass OwnerReview.
+The public repository ships the FREE edition only. Private commercial
+extensions are intentionally absent from public source, configuration, tests,
+and interface copy.
 
 ## Gate Preservation
 
@@ -79,7 +70,7 @@ No backend gate was weakened in this alignment pass. The existing backend still 
 
 1. The Workbench collaboration panel exists, but should be visually upgraded to match the reference images more closely.
 2. Rule Center and Data Center already exist, but need a stronger non-engineering presentation for normal users.
-3. The FREE / NT$690 / NT$3,300 plan cards are present, but need clearer user-facing copy for exact unlock states.
+3. The public UI identifies itself as the FREE edition and contains no commercial plan selector.
 4. The old `App.tsx` regression shell still contains older wording and direct confirmation behavior; it is not the formal entry, but future cleanup should label it explicitly as legacy.
 5. Desktop RC metadata should remain separate until a dedicated desktop release pass updates installer, signing, and distribution state.
 

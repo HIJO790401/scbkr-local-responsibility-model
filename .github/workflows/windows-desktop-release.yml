@@ -1,0 +1,76 @@
+name: Windows Desktop RC
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/**'
+      - 'core/**'
+      - 'config/**'
+      - 'kernel_pack/**'
+      - 'schemas/**'
+      - 'scripts/**'
+      - '.github/workflows/windows-desktop-release.yml'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'package.json'
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'core/**'
+      - 'config/**'
+      - 'scripts/**'
+      - '.github/workflows/windows-desktop-release.yml'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'package.json'
+
+jobs:
+  windows-release-candidate:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup Node LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e . pytest pyinstaller
+
+      - name: Install web dependencies
+        run: npm --prefix apps/web ci
+
+      - name: Install desktop dependencies
+        run: npm --prefix apps/desktop ci
+
+      - name: Run Python tests
+        run: python -m pytest -q
+
+      - name: Build Windows release candidate
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/build_desktop_release_windows.ps1 -SkipPythonDependencyInstall
+
+      - name: Run bilingual desktop and mobile UI tests
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/run_ui_acceptance_windows.ps1
+
+      - name: Upload Windows release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: scbkr-windows-desktop-rc
+          path: dist/scbkr-windows-desktop-rc

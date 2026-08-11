@@ -3,7 +3,7 @@
 from .classifier import classify_user_input
 from .compiler import compile_executable_rule
 from .depth import apply_plan_depth_to_draft
-from .i18n import rule_os_text
+from .i18n import normalize_locale_text, rule_os_text
 from .post_check import check_model_answer_against_rule_package, downgrade_answer_to_draft
 from .rule_package import (
     build_current_rule_package,
@@ -20,5 +20,6 @@ __all__ = [
     "classify_user_input",
     "compile_executable_rule",
     "downgrade_answer_to_draft",
+    "normalize_locale_text",
     "rule_os_text",
 ]

@@ -147,6 +147,15 @@ def init_sqlite_runtime(sqlite_path: str | Path | None = None) -> dict[str, Any]
                 created_at TEXT,
                 result_json TEXT
             );
+
+            CREATE INDEX IF NOT EXISTS idx_tasks_updated_at
+                ON tasks(updated_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_tasks_formal_rules
+                ON tasks(storage_confirmed, physical_write_performed, review_passed, updated_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_tasks_status_updated_at
+                ON tasks(status, updated_at DESC);
             """
         )
     return {"sqlite_path": str(_runtime_sqlite_path(sqlite_path)), "status": "ready"}
@@ -216,6 +225,60 @@ def list_tasks(sqlite_path: str | Path | None = None, limit: int = 50) -> list[d
         rows = conn.execute(
             """
             SELECT task_json FROM tasks
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [json.loads(row["task_json"]) for row in rows]
+
+
+def list_task_summaries(sqlite_path: str | Path | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    """Return navigation fields without loading each task's large JSON body."""
+    init_sqlite_runtime(sqlite_path)
+    with _connect(sqlite_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT task_id, trace_id, ledger_id, task_name, task_type, raw_input,
+                   status, confirmed, review_passed, storage_confirmed,
+                   physical_write_performed, created_at, updated_at
+            FROM tasks
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "task_id": row["task_id"],
+            "trace_id": row["trace_id"],
+            "ledger_id": row["ledger_id"],
+            "task_name": row["task_name"],
+            "task_type": row["task_type"],
+            "raw_input": row["raw_input"],
+            "status": row["status"],
+            "confirmed": bool(row["confirmed"]),
+            "review_passed": bool(row["review_passed"]),
+            "storage_confirmed": bool(row["storage_confirmed"]),
+            "physical_write_performed": bool(row["physical_write_performed"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "runtime": "local",
+        }
+        for row in rows
+    ]
+
+
+def list_active_stored_tasks(sqlite_path: str | Path | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    """Return recent signed-storage candidates without scanning every task JSON."""
+    init_sqlite_runtime(sqlite_path)
+    with _connect(sqlite_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT task_json FROM tasks
+            WHERE storage_confirmed = 1
+              AND physical_write_performed = 1
+              AND review_passed = 1
             ORDER BY updated_at DESC
             LIMIT ?
             """,

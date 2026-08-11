@@ -10,7 +10,17 @@ requires-python = ">=3.11"
 dependencies = [
   "cryptography>=42",
   "fastapi>=0.111",
+  "opencc>=1.1.9,<2",
   "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+token-meter = [
+  "tiktoken>=0.9.0",
+  "transformers>=4.50.0",
+]
+cost-gateway = [
+  "litellm>=1.74.0",
 ]
 
 [tool.setuptools.packages.find]

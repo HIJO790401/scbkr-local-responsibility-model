@@ -124,6 +124,19 @@ def test_build_generation_messages_contains_scbkr_dimensions():
     assert user_payload["acceptance_criteria"] == ["結果只能進入 waiting_review"]
 
 
+def test_build_generation_messages_compacts_large_confirmed_payloads():
+    scbkr = make_scbkr()
+    for dimension in ("S", "C", "B", "K", "R"):
+        scbkr[dimension]["unused_large_field"] = "x" * 50000
+    from core.scbkr.confirmation import confirm_all_dimensions
+
+    confirm_all_dimensions(scbkr, confirmed_by="user", signature="user")
+    messages = build_generation_messages(make_task(), scbkr)
+
+    assert "unused_large_field" not in messages[1]["content"]
+    assert len(messages[1]["content"]) < 12000
+
+
 def test_build_model_request_package_only_builds_payload():
     package = build_model_request_package(
         make_task(),

@@ -6,7 +6,9 @@ appended to a JSONL replay ledger; retrieval is advisory and no desktop runtime 
 
 from datetime import UTC, datetime
 from copy import deepcopy
+from functools import wraps
 from itertools import count
+from threading import RLock
 from uuid import uuid4
 from typing import Any
 from urllib.parse import urlparse
@@ -32,10 +34,13 @@ from core.model_gateway.openai_compatible import build_chat_completion_payload, 
 from core.model_gateway.response_parser import parse_chat_completion_response
 from core.model_gateway.settings import DEFAULT_MODEL_SETTINGS, mask_api_key, validate_model_settings
 from core.metrics.token_efficiency import build_token_efficiency_metrics, summarize_metrics
+from core.metrics.token_ab_benchmark import run_token_ab_benchmark, write_token_ab_report
+from core.metrics.token_meter import DEFAULT_PRICING, normalize_pricing
 from core.permissions.permission_checker import assert_permission_allowed, validate_permission_settings
 from core.permissions.permission_flags import DEFAULT_PERMISSION_SETTINGS
 from core.product_manifest import (
     build_product_reply,
+    detect_explanation_depth,
     detect_product_topic,
     localized_product_manifest,
     load_product_manifest,
@@ -61,16 +66,52 @@ from core.scbkr.compiler import (
     validate_task_understanding_strict,
 )
 from core.scbkr.draft_object import build_rule_draft_object, build_scbkr_draft_object
+from core.scbkr.model_rulebook_author import (
+    ModelRulebookAuthoringError,
+    apply_model_dimension_patch,
+    authoring_to_scbkr_draft,
+    build_authoring_failure,
+    build_context_audit,
+    build_model_capability_assessment,
+    build_model_basis_selection_messages,
+    build_model_dimension_explanation_messages,
+    build_model_dimension_patch_messages,
+    build_model_rulebook_messages,
+    build_semantic_repair_instruction,
+    compile_kernel_required_clauses,
+    compile_model_basis_selection_candidate,
+    enforce_kernel_authority_boundary,
+    merge_model_dimension_explanation_candidate,
+    model_dimension_explanation_response_format,
+    model_dimension_patch_response_format,
+    model_dimension_repair_instruction,
+    model_rulebook_response_format,
+    model_rulebook_repair_targets,
+    merge_model_dimension_patch_candidate,
+    parse_model_basis_selection_output,
+    parse_model_dimension_explanation_output,
+    parse_model_dimension_patch_output,
+    parse_model_rulebook_candidate,
+    parse_model_rulebook_output,
+    refresh_model_rulebook_support_fields,
+    validate_model_rulebook_semantics,
+)
+from core.scbkr.plan_depth_compiler import apply_plan_depth
+from core.scbkr.validity_failure_validator import validate_validity_failure
 from core.storage.physical_store import commit_memory_rule, commit_storage_items, hash_payload
 from core.storage.sqlite_runtime import (
     get_task_ledger,
     init_sqlite_runtime,
+    list_active_stored_tasks,
+    list_task_summaries as list_persisted_task_summaries,
     list_tasks as list_persisted_tasks,
     load_task,
     list_memory_rules as list_persisted_memory_rules,
+    list_retrieval_cases as list_persisted_retrieval_cases,
     list_storage_items as list_persisted_storage_items,
     save_ledger_index,
     save_memory_rule,
+    save_retrieval_case,
     save_scbkr_confirmation,
     save_storage_item,
     save_task as _persist_task,
@@ -88,10 +129,12 @@ from core.rule_state.manager import RuleStateManager
 from core.rule_state.runtime import RuleStateRuntime
 from core.rule_state.schemas import RuleStateEnum
 from core.tools.registry import ToolGateEngine, list_tool_definitions
+from core.tools.state_precondition import compare_evidence_state, evidence_state_hash
 from core.tools.web_runtime import WebRuntime
 from core.launch.readiness import launch_readiness, load_launch_settings, public_launch_settings, save_launch_settings
+from core.kernel.local_kernel_cache import ensure_local_kernel_cache
 from core.storage.runtime_paths import current_data_dir
-from core.runtime_settings import load_runtime_section, save_runtime_section
+from core.runtime_settings import load_runtime_section, persistence_enabled, save_runtime_section
 from core.rule_assist import (
     DEFAULT_RULE_ASSIST_SETTINGS,
     apply_rule_assist_to_scbkr,
@@ -112,9 +155,9 @@ from core.rule_os import (
     classify_user_input,
     compile_executable_rule,
     downgrade_answer_to_draft,
+    normalize_locale_text,
     rule_os_text,
 )
-from core.runtime.local_scbkr_runtime import compile_rule_from_input
 from core.audit.token_cost_audit import measure_context_compression
 
 LOCAL_DESKTOP_API_BASE_URL = "http://127.0.0.1:8787"
@@ -149,11 +192,26 @@ app.add_middleware(
 
 _TASK_COUNTER = count(1)
 TASKS: dict[str, dict[str, Any]] = {}
+RULE_STATE_COMMIT_LOCK = RLock()
 MODEL_SETTINGS: dict[str, Any] = load_runtime_section("model", DEFAULT_MODEL_SETTINGS)
+# A successful connection test is evidence for the current API process only.
+# Persisted credentials remain available, but a restarted desktop must verify
+# that the configured model still exists before generation is enabled.
+_MODEL_SESSION_VERIFIED = not persistence_enabled()
 PERMISSIONS: dict[str, Any] = load_runtime_section("permissions", DEFAULT_PERMISSION_SETTINGS)
 RULE_ASSIST_SETTINGS: dict[str, Any] = load_runtime_section("rule_assist", DEFAULT_RULE_ASSIST_SETTINGS)
+PRICING_SETTINGS: dict[str, Any] = load_runtime_section("pricing", DEFAULT_PRICING)
 COMPANION_PAIRINGS: dict[str, dict[str, Any]] = {}
 COMPANION_TOKENS: dict[str, dict[str, Any]] = {}
+
+
+def _serialized_rule_state_change(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        with RULE_STATE_COMMIT_LOCK:
+            return func(*args, **kwargs)
+
+    return wrapped
 
 
 def lan_companion_enabled() -> bool:
@@ -351,7 +409,7 @@ def _zh_tw_output_guard(text: str) -> str:
         "输": "輸", "层": "層", "责": "責", "链": "鏈", "语": "語", "构": "構",
         "标": "標", "签": "簽", "验": "驗", "审": "審", "计": "計", "广": "廣",
     }
-    guarded = text
+    guarded = normalize_locale_text(text, "zh-TW")
     for simplified, traditional in replacements.items():
         guarded = guarded.replace(simplified, traditional)
     return guarded
@@ -414,16 +472,25 @@ def route_chat_intent(message: str) -> dict[str, Any]:
         "工作台草案", "開工作台", "幫我建確認單", "幫我做責任鏈", "你能生成責任鏈確認單嗎",
         "workbench草案", "scbkr確認單", "scbkr任務", "確認單草案",
     )
-    suggest_terms = ("我想做", "我要處理", "以後要重用", "變成規則", "規劃一個流程", "商業文案計畫", "滷肉飯文案")
+    suggest_terms = (
+        "以後要重用", "想固定這個做法", "這個判斷想重用", "下次也要照這樣",
+        "規劃一個可重用流程", "make this reusable", "reuse this decision", "use this next time",
+    )
     rule_os_mode = str(rule_os_classification.get("mode") or "")
-    if rule_os_mode == "generate_rule":
+    if str(rule_os_classification.get("reason") or "").startswith("explicit_chat_only"):
+        intent = "normal_chat"
+    elif rule_os_mode == "generate_rule":
         intent = "create_new_rule_confirmation"
-    elif rule_os_mode == "answer_with_rules":
+    elif rule_os_mode == "query_four_stores":
         intent = "data_center_query"
+    elif rule_os_mode == "answer_with_rules":
+        # Continue to /api/chat/general so that it can build the current rule
+        # package, call the model, post-check the answer, and record token use.
+        intent = "normal_chat"
     elif rule_os_mode == "modify_existing_rule":
-        intent = "suggest_data_center_update_confirmation"
+        intent = "normal_chat"
     elif rule_os_mode == "confirm_storage":
-        intent = "create_confirmation"
+        intent = "normal_chat"
     elif rule_os_mode in {"tool_execution", "high_risk_action"} and has_any(memory_terms):
         intent = "create_confirmation"
     elif rule_os_mode in {"tool_execution", "high_risk_action"}:
@@ -544,7 +611,25 @@ def _validate_model_authored_scbkr_draft(candidate: Any) -> dict[str, Any]:
 
 
 def _model_connected() -> bool:
-    return MODEL_SETTINGS.get("enabled") is True and MODEL_SETTINGS.get("last_test_status") == "success"
+    return (
+        _MODEL_SESSION_VERIFIED
+        and MODEL_SETTINGS.get("enabled") is True
+        and MODEL_SETTINGS.get("last_test_status") == "success"
+    )
+
+
+def _mark_model_runtime_unavailable(message: str) -> None:
+    global _MODEL_SESSION_VERIFIED
+    _MODEL_SESSION_VERIFIED = False
+    MODEL_SETTINGS.update(
+        {
+            "enabled": False,
+            "last_test_status": "failed",
+            "last_test_message": message,
+            "last_test_at": _now(),
+        }
+    )
+    save_runtime_section("model", MODEL_SETTINGS)
 
 
 def _keyword_tokens(text: str) -> set[str]:
@@ -588,9 +673,9 @@ def _build_four_store_context(raw_input: str, task_id: str | None = None) -> dic
             relation = classify_evidence_relation(raw_input, text_value, source_store=source_store)
             signature_status = payload.get("signature_status") or payload.get("scbkr_snapshot", {}).get("signature_status")
             review_passed = item.get("review_passed") is True or payload.get("review_passed") is True or payload.get("review_result", {}).get("review_passed") is True
-            unavailable_status = item.get("status") in ("revoked", "archived", "superseded") or payload.get("status") in ("revoked", "archived", "superseded")
+            unavailable_status = item.get("status") in ("disabled", "revoked", "archived", "superseded", "deleted") or payload.get("status") in ("disabled", "revoked", "archived", "superseded", "deleted")
             if unavailable_status:
-                relation.update({"adopted": False, "adoption_scope": "none", "relation_reason": "狀態不可用：revoked / archived / superseded"})
+                relation.update({"adopted": False, "adoption_scope": "none", "relation_reason": "狀態不可用：disabled / revoked / archived / superseded / deleted"})
             elif signature_status != "owner_signed":
                 relation.update({"adopted": False, "adoption_scope": "none", "relation_reason": "未完成使用者簽名"})
             elif review_passed is not True:
@@ -744,6 +829,8 @@ def _model_authored_scbkr_draft(
         full_rule_registry=_rule_registry().list_rules(),
         provider_usages=provider_usages,
         attempts=compiler_attempts,
+        model_settings=MODEL_SETTINGS,
+        pricing=PRICING_SETTINGS,
     )
     if skipped_reason:
         draft["draft_model_call_skipped_reason"] = skipped_reason
@@ -823,6 +910,139 @@ def validate_scbkr_draft_for_confirmation(candidate: Any) -> None:
         raise HTTPException(status_code=400, detail="SCBKR draft is incomplete: " + "; ".join(problems))
 
 
+def _compiled_scbkr_authoring_view(scbkr: dict[str, Any]) -> dict[str, Any]:
+    """Build a semantic-validation view from the editable compiled draft."""
+    view: dict[str, Any] = {}
+    schema_repaired = bool(scbkr.get("model_schema_repaired"))
+    for dimension in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
+        payload = scbkr.get(dimension) if isinstance(scbkr.get(dimension), dict) else {}
+        owner_edited = bool((payload.get("owner_edit") or {}).get("owner_edited"))
+        adapter_generated = payload.get("model_schema_adapter_generated")
+        if adapter_generated is None:
+            # Older persisted drafts did not retain this flag. Stay conservative:
+            # a compact model explanation cannot prove semantic understanding
+            # until the owner actually rewrites that dimension.
+            adapter_generated = schema_repaired and not owner_edited
+        view[dimension] = {
+            "content": str(payload.get("owner_draft_content") or payload.get("model_draft_content") or "").strip(),
+            "explanation": str(payload.get("model_explanation") or "").strip(),
+            "missing_information": payload.get("missing_information") or [],
+            "needs_user_confirmation": payload.get("needs_user_confirmation") or [],
+            "model_cannot_decide": payload.get("model_cannot_decide") or [],
+            "risk_notes": payload.get("risk_notes") or [],
+            "schema_adapter_generated": bool(adapter_generated),
+            "model_explanation_derived_from_fields": bool(payload.get("model_explanation_derived_from_fields")) or owner_edited,
+            "model_explanation_repaired_by_model": bool(payload.get("model_explanation_repaired_by_model")),
+        }
+    support_fields = (
+        "rule_summary",
+        "missing_information",
+        "user_confirmation_items",
+        "model_cannot_decide",
+        "risk_reminders",
+        "next_actions",
+    )
+    for key in support_fields:
+        view[key] = scbkr.get(key)
+    view["model_global_fields_present"] = {key: key in scbkr for key in support_fields}
+    view["model_support_fields_derived"] = scbkr.get("model_support_fields_derived") or {}
+    return view
+
+
+def _revalidate_revised_scbkr(task: dict[str, Any], *, revision_source: str) -> dict[str, Any]:
+    """Re-run real semantic and kernel gates after a user or model edit.
+
+    A previously limited model draft may become signable only when the actual
+    edited five-dimensional content closes every gate. This never invents a
+    replacement rule and never changes the original model audit result.
+    """
+    scbkr = task.get("scbkr")
+    if not isinstance(scbkr, dict):
+        raise HTTPException(status_code=400, detail="SCBKR draft required before validation")
+    validate_scbkr_draft_for_confirmation(scbkr)
+    kernel_pack = ensure_local_kernel_cache()
+    structural = validate_validity_failure(scbkr, kernel_pack)
+    model_authored = bool(scbkr.get("model_authored") or scbkr.get("model_participated") or task.get("model_used"))
+    semantic = (
+        validate_model_rulebook_semantics(
+            _compiled_scbkr_authoring_view(scbkr),
+            user_input=str(task.get("raw_input") or ""),
+        )
+        if model_authored
+        else {"passed": True, "note": "Non-model draft; semantic model-authoring gate not applicable."}
+    )
+    passed = structural.get("passed") is True and semantic.get("passed") is True
+    locale = str((scbkr.get("meta") or {}).get("locale") or _response_locale(str(task.get("raw_input") or ""), None))
+    previous_source = str(scbkr.get("draft_source") or task.get("draft_source") or "")
+    owner_repaired = revision_source in {"owner_dimension_edit", "owner_full_edit"}
+    if passed:
+        if previous_source == "model_capability_limited":
+            resolved_source = "owner_repaired_model_rulebook" if owner_repaired else "model_repaired_rulebook"
+        else:
+            resolved_source = previous_source or ("owner_repaired_model_rulebook" if owner_repaired else "model_assisted_rulebook")
+        capability = dict(scbkr.get("model_capability") or task.get("model_capability") or {})
+        if capability:
+            capability.update(
+                {
+                    "state": "owner_repaired" if owner_repaired else "model_repaired",
+                    "current_task_closure": True,
+                    "unresolved_gaps": [],
+                    "gap_codes": [],
+                    "owner_decision_required": True,
+                    "recommended_action": (
+                        "Review the revised rulebook and sign only if it matches your intent."
+                        if locale.lower().startswith("en")
+                        else "請逐欄確認修正後的規則書；只有符合你的原意時才簽名。"
+                    ),
+                }
+            )
+            scbkr["model_capability"] = capability
+            task["model_capability"] = capability
+        scbkr["draft_source"] = resolved_source
+        scbkr["signing_allowed"] = True
+        scbkr["next_required_action"] = "owner_review_and_signature"
+        task["draft_source"] = resolved_source
+        task["status"] = "waiting_user_confirm"
+        task["signing_allowed"] = True
+        task["next_required_action"] = "owner_review_and_signature"
+    else:
+        attempts = int((scbkr.get("compiler_report") or {}).get("attempts") or 1)
+        capability = build_model_capability_assessment(
+            semantic,
+            attempts=attempts,
+            locale=locale,
+            model_name=str(scbkr.get("model_name") or task.get("model_name") or ""),
+        )
+        scbkr["draft_source"] = "model_capability_limited" if model_authored else previous_source
+        scbkr["model_capability"] = capability
+        scbkr["signing_allowed"] = False
+        scbkr["next_required_action"] = "owner_clarify_or_select_stronger_model"
+        task["draft_source"] = scbkr["draft_source"]
+        task["model_capability"] = capability
+        task["status"] = "model_capability_limited" if model_authored else "model_validation_failed"
+        task["signing_allowed"] = False
+        task["next_required_action"] = scbkr["next_required_action"]
+    scbkr["compiled_semantic_valid"] = semantic.get("passed") is True
+    scbkr["compiled_semantic_report"] = semantic
+    scbkr["validator_passed"] = passed
+    scbkr["last_revision_source"] = revision_source
+    scbkr.setdefault("compiler_report", {}).update(
+        {
+            "validator_passed": passed,
+            "validator": structural,
+            "compiled_semantic_valid": semantic.get("passed") is True,
+            "compiled_semantic_report": semantic,
+            "last_revision_source": revision_source,
+        }
+    )
+    task["validator_passed"] = passed
+    task["compiled_semantic_valid"] = semantic.get("passed") is True
+    task["compiled_semantic_report"] = semantic
+    if isinstance(task.get("kernel_runtime"), dict):
+        task["kernel_runtime"]["validator"] = structural
+    return {"passed": passed, "semantic": semantic, "structural": structural}
+
+
 def _reset_owner_signature_status(scbkr: dict[str, Any]) -> None:
     if not isinstance(scbkr, dict):
         return
@@ -858,7 +1078,8 @@ def _invalidate_downstream_after_scbkr_revision(task: dict[str, Any], status_bef
     task["storage_confirmed"] = False
     task["physical_write_performed"] = False
     if task.get("status") in ("waiting_review", "review_passed", "waiting_storage_confirm", "storage_requested", "storage_committed", "completed"):
-        task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
+        draft_source = task.get("scbkr", {}).get("draft_source")
+        task["status"] = "draft_failed" if draft_source == "draft_failed" else "model_capability_limited" if draft_source == "model_capability_limited" else "waiting_user_confirm"
     if had_downstream:
         _append_task_event(
             "scbkr_revised_downstream_invalidated",
@@ -933,6 +1154,15 @@ def _task_response(task: dict[str, Any], **extra: Any) -> dict[str, Any]:
 
 def _public_model_settings() -> dict[str, Any]:
     public = {**MODEL_SETTINGS, "api_key": mask_api_key(MODEL_SETTINGS.get("api_key", ""))}
+    public["runtime_verified"] = _MODEL_SESSION_VERIFIED
+    if not _MODEL_SESSION_VERIFIED and public.get("last_test_status") == "success":
+        public.update(
+            {
+                "enabled": False,
+                "last_test_status": "untested",
+                "last_test_message": "本次啟動尚未重新確認模型；請測試連線後再開始生成。",
+            }
+        )
     if MODEL_SETTINGS.get("mode") == "sandbox":
         public.update({"sandbox": True, "provider": SANDBOX_PROVIDER, "external_call_performed": False})
     return public
@@ -949,6 +1179,10 @@ def _apply_provider_defaults(settings: dict[str, Any], payload: dict[str, Any] |
     if payload.get("mode") == "sandbox" or provider == SANDBOX_PROVIDER:
         settings.update({"mode": "sandbox", "provider": SANDBOX_PROVIDER, "base_url": "", "api_key": "", "model_name": SANDBOX_PROVIDER})
         return settings
+    # These are public response markers for the deterministic test model. Do
+    # not let them survive when the user switches to a real local/API model.
+    settings.pop("sandbox", None)
+    settings.pop("external_call_performed", None)
     if provider == "lm_studio":
         settings["mode"] = "local"
         if not payload.get("base_url"):
@@ -967,14 +1201,39 @@ def _apply_provider_defaults(settings: dict[str, Any], payload: dict[str, Any] |
     return settings
 
 
-def _friendly_model_error(settings: dict[str, Any], message: str) -> str:
+def _friendly_model_error(settings: dict[str, Any], message: str, *, locale: str = "zh-TW") -> str:
     provider = settings.get("provider")
-    if "api_key" in message.lower() or "authorization" in message.lower():
-        return "API key 缺失或無效，請輸入正確 API key。"
+    lowered = message.lower()
+    english = str(locale).lower().startswith("en")
+    if "api_key" in lowered or "authorization" in lowered:
+        return "The API key is missing or invalid." if english else "API key 缺失或無效，請輸入正確 API key。"
+    if "timed out" in lowered or "timeout" in lowered:
+        return (
+            "The model endpoint was reached, but this generation exceeded the current wait time. "
+            "No template or fallback was used. Retry or increase the local wait time; a slow response alone does not mean the model is incompatible."
+            if english
+            else "模型端點可連線，但本次生成超過目前等候時間；系統沒有套用模板或 fallback。請重試或增加本地等候時間，回覆較慢不代表模型不相容。"
+        )
     if provider in ("lm_studio", "ollama"):
         name = "LM Studio" if provider == "lm_studio" else "Ollama"
-        return f"無法連線到本地模型，請確認 {name} Server 是否已啟動、Base URL 與模型名稱是否正確。"
-    return "無法連線到 API 模型，請確認 API base URL、API key 與模型名稱。"
+        return (
+            f"Could not reach the local model. Check that the {name} server is running and that the Base URL and model name are correct."
+            if english
+            else f"無法連線到本地模型，請確認 {name} Server 是否已啟動、Base URL 與模型名稱是否正確。"
+        )
+    return (
+        "Could not reach the API model. Check the API Base URL, API key, and model name."
+        if english
+        else "無法連線到 API 模型，請確認 API base URL、API key 與模型名稱。"
+    )
+
+
+def _model_unavailable_reply(locale: str, reason: str = "") -> str:
+    if locale == "en":
+        detail = "The model is not connected or did not respond."
+        return f"{detail} SCBKR did not replace the model with a template or hidden fallback. Open Model Settings, test the connection, and retry.\n\nStatus: {reason or 'model_unavailable'}"
+    detail = "模型目前未連線或沒有回覆。"
+    return f"{detail} SCBKR 不會用模板或隱藏 fallback 冒充模型回答。請到「模型設定」測試連線與生成權限後再試。\n\n狀態：{reason or 'model_unavailable'}"
 
 def _get_task(task_id: str) -> dict[str, Any]:
     task = TASKS.get(task_id)
@@ -997,7 +1256,9 @@ def save_task(task: dict[str, Any]) -> dict[str, Any]:
 
 
 def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, str]], response_format: dict[str, Any] | None = None) -> dict[str, Any]:
-    governed_messages = _rule_state_manager().inject_system_context(messages)
+    # Rulebook authoring already receives the local SCBKR Kernel contract. Do
+    # not append the larger chat identity/state envelope to that request.
+    governed_messages = messages if settings.get("_skip_rule_state_context") else _rule_state_manager().inject_system_context(messages)
     payload = build_chat_completion_payload(governed_messages, settings, response_format=response_format)
     url = settings["base_url"].rstrip("/") + "/chat/completions"
     request = UrlRequest(
@@ -1010,7 +1271,12 @@ def _post_openai_compatible(settings: dict[str, Any], messages: list[dict[str, s
         with urlopen(request, timeout=settings["timeout"]) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        raise RuntimeError(f"model http error: {exc.code}") from exc
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:1200]
+        except Exception:
+            detail = ""
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"model http error: {exc.code}{suffix}") from exc
     except URLError as exc:
         raise RuntimeError(f"model connection failed: {exc.reason}") from exc
     except TimeoutError as exc:
@@ -1043,6 +1309,863 @@ def _try_model_storage_suggestion(task: dict[str, Any]) -> dict[str, Any] | None
         "fallback_used": False,
         "next_required_action": "user_select_storage_targets",
     }
+
+
+def _model_rulebook_unavailable_reason() -> str | None:
+    if MODEL_SETTINGS.get("mode") == "sandbox" or MODEL_SETTINGS.get("provider") == SANDBOX_PROVIDER:
+        return "model_not_connected"
+    if not _model_connected():
+        return "model_not_connected"
+    if not str(MODEL_SETTINGS.get("model_name") or "").strip():
+        return "model_not_connected"
+    if PERMISSIONS.get("model_generate") is not True:
+        return "model_generate_permission_required"
+    if _model_call_requires_external_api_permission(MODEL_SETTINGS) and PERMISSIONS.get("external_api") is not True:
+        return "external_api_permission_required"
+    return None
+
+
+def _uses_lightweight_local_authoring(settings: dict[str, Any]) -> bool:
+    if settings.get("mode") != "local":
+        return False
+    name = str(settings.get("model_name") or "").lower()
+    return any(marker in name for marker in ("0.5b", "1.5b", "2b", "3b", "4b", "mini", "small", "phi-3"))
+
+
+def _post_same_model_with_schema(
+    settings: dict[str, Any],
+    messages: list[dict[str, str]],
+    response_format: dict[str, Any],
+) -> dict[str, Any]:
+    """Negotiate structured output without changing provider or model."""
+    if _uses_lightweight_local_authoring(settings):
+        # CPU-bound 0.5B-4B models can spend the entire request budget inside
+        # constrained JSON-schema decoding. The prompt still requires the same
+        # object, and the parser plus Kernel Validator enforce the contract.
+        return _post_openai_compatible(settings, messages)
+    try:
+        return _post_openai_compatible(settings, messages, response_format=response_format)
+    except Exception as exc:
+        message = str(exc).lower()
+        if not any(token in message for token in ("response_format", "json_schema", "structured output", "unsupported")):
+            raise
+        return _post_openai_compatible(settings, messages)
+
+
+def _repair_model_rulebook_dimensions(
+    candidate: dict[str, Any],
+    *,
+    raw_input: str,
+    locale: str,
+    settings: dict[str, Any],
+    provider_usages: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, str]]]:
+    """Ask the same small model to rewrite only unresolved SCBKR dimensions."""
+    repaired = json.loads(json.dumps(candidate, ensure_ascii=False))
+    repaired, initial_kernel_repairs = compile_kernel_required_clauses(
+        repaired,
+        user_input=raw_input,
+        locale=locale,
+    )
+    repaired, initial_authority_repairs = enforce_kernel_authority_boundary(
+        repaired,
+        locale=locale,
+    )
+    repaired = refresh_model_rulebook_support_fields(repaired, locale=locale)
+    report = validate_model_rulebook_semantics(repaired, user_input=raw_input)
+    repaired["model_semantic_report"] = report
+    repaired["model_semantic_valid"] = report.get("passed") is True
+    targets = model_rulebook_repair_targets(report, limit=3)
+    repair_audit: list[dict[str, Any]] = [{
+        "layer": item["layer"],
+        "model_used": False,
+        "schema_valid": True,
+        "kernel_compile_audit": item,
+    } for item in initial_kernel_repairs]
+    repair_audit.extend({
+        "layer": str(item.get("path") or "authority"),
+        "model_used": False,
+        "schema_valid": True,
+        "kernel_authority_guard": item,
+    } for item in initial_authority_repairs)
+    if not targets:
+        repaired["model_dimension_repairs"] = repair_audit
+        return repaired, repair_audit, []
+
+    instructions = {
+        layer: model_dimension_repair_instruction(layer, locale=locale)
+        for layer in targets
+    }
+    repair_messages: list[dict[str, str]] = []
+    for layer in targets:
+        raw_patch = ""
+        try:
+            current = repaired.get(layer) or {}
+            role_alignment = report.get("dimension_role_alignment") or {}
+            explanation_alignment = report.get("model_explanation_alignment") or {}
+            explanation_only = (
+                explanation_alignment.get(layer) is not True
+                and layer not in (report.get("placeholder_dimensions") or [])
+                and (
+                    (layer == "S" and report.get("subject_request_alignment") is True)
+                    or (layer != "S" and role_alignment.get(layer) is True)
+                )
+            )
+            use_basis_selection = layer == "K" and (
+                not explanation_only
+                and role_alignment.get("K") is not True
+                or report.get("k_signature_as_basis") is True
+                or bool(report.get("k_unrequested_non_citable_sources"))
+            )
+            if explanation_only:
+                messages = build_model_dimension_explanation_messages(
+                    raw_input,
+                    layer=layer,
+                    current_content=str(current.get("content") or ""),
+                    locale=locale,
+                )
+            elif use_basis_selection:
+                messages = build_model_basis_selection_messages(
+                    raw_input,
+                    locale=locale,
+                )
+            else:
+                messages = build_model_dimension_patch_messages(
+                    raw_input,
+                    layer=layer,
+                    instruction=instructions[layer],
+                    current_dimension={
+                        "model_draft_content": current.get("content"),
+                        "model_explanation": current.get("explanation"),
+                        "missing_information": current.get("missing_information"),
+                        "needs_user_confirmation": current.get("needs_user_confirmation"),
+                    },
+                    locale=locale,
+                    compact=True,
+                )
+            repair_messages.extend(messages)
+            if use_basis_selection:
+                basis_settings = {
+                    **settings,
+                    "max_tokens": min(max(int(settings.get("max_tokens") or 0), 40), 80),
+                }
+                response = _post_openai_compatible(basis_settings, messages)
+            elif explanation_only:
+                explanation_settings = {
+                    **settings,
+                    "max_tokens": min(max(int(settings.get("max_tokens") or 0), 96), 180),
+                }
+                response = _post_same_model_with_schema(
+                    explanation_settings,
+                    messages,
+                    model_dimension_explanation_response_format(),
+                )
+            else:
+                response = _post_same_model_with_schema(settings, messages, model_dimension_patch_response_format())
+            if isinstance(response, dict) and isinstance(response.get("usage"), dict):
+                provider_usages.append(response["usage"])
+            raw_patch = parse_chat_completion_response(response)
+            basis_audit: dict[str, Any] | None = None
+            if use_basis_selection:
+                selected_terms = parse_model_basis_selection_output(
+                    raw_patch,
+                    user_input=raw_input,
+                    locale=locale,
+                )
+                repaired, basis_audit = compile_model_basis_selection_candidate(
+                    repaired,
+                    selected_terms=selected_terms,
+                    raw_model_output=raw_patch,
+                    locale=locale,
+                )
+            elif explanation_only:
+                explanation = parse_model_dimension_explanation_output(
+                    raw_patch,
+                    layer=layer,
+                    current_content=str(current.get("content") or ""),
+                    user_input=raw_input,
+                    locale=locale,
+                )
+                repaired = merge_model_dimension_explanation_candidate(
+                    repaired,
+                    layer=layer,
+                    explanation=explanation,
+                )
+            else:
+                patch = parse_model_dimension_patch_output(
+                    raw_patch,
+                    layer=layer,
+                    instruction=instructions[layer],
+                    user_input=raw_input,
+                    locale=locale,
+                    require_complete_role=layer not in ("B", "R"),
+                )
+                repaired = merge_model_dimension_patch_candidate(repaired, layer=layer, patch=patch)
+            repair_audit.append({
+                "layer": layer,
+                "model_used": True,
+                "schema_valid": True,
+                "raw_preview": raw_patch[:900],
+                "repair_kind": "explanation_only" if explanation_only else "dimension_content",
+                "model_fragment_compiled": basis_audit is not None,
+                "kernel_compile_audit": basis_audit,
+            })
+        except Exception as exc:
+            repair_audit.append({
+                "layer": layer,
+                "model_used": bool(raw_patch),
+                "schema_valid": False,
+                "error": str(exc),
+                "raw_preview": raw_patch[:900],
+            })
+
+    repaired, kernel_repairs = compile_kernel_required_clauses(
+        repaired,
+        user_input=raw_input,
+        locale=locale,
+    )
+    repair_audit.extend({
+        "layer": item["layer"],
+        "model_used": False,
+        "schema_valid": True,
+        "kernel_compile_audit": item,
+    } for item in kernel_repairs)
+    repaired, authority_repairs = enforce_kernel_authority_boundary(
+        repaired,
+        locale=locale,
+    )
+    repair_audit.extend({
+        "layer": str(item.get("path") or "authority"),
+        "model_used": False,
+        "schema_valid": True,
+        "kernel_authority_guard": item,
+    } for item in authority_repairs)
+    repaired = refresh_model_rulebook_support_fields(
+        repaired,
+        locale=locale,
+    )
+    semantic_report = validate_model_rulebook_semantics(repaired, user_input=raw_input)
+    repaired["model_semantic_report"] = semantic_report
+    repaired["model_semantic_valid"] = semantic_report.get("passed") is True
+    repaired["model_dimension_repairs"] = repair_audit
+    return repaired, repair_audit, repair_messages
+
+
+def _repair_model_rulebook_schema_gap(
+    exc: ModelRulebookAuthoringError,
+    *,
+    raw_input: str,
+    locale: str,
+    settings: dict[str, Any],
+    provider_usages: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, str]]]:
+    """Repair one incomplete model field without rewriting valid dimensions."""
+    code = str(exc.code or "")
+    layer = code[:1].upper()
+    if layer not in ("S", "C", "B", "K", "R") or not any(
+        token in code for token in ("_missing_content", "_missing_explanation", "_must_be_object")
+    ):
+        raise exc
+    raw_candidate = deepcopy(exc.candidate or {})
+    if not raw_candidate:
+        raise exc
+
+    value = raw_candidate.get(layer)
+    current_content = ""
+    current_explanation = str(raw_candidate.get(f"{layer}_explanation") or "").strip()
+    if isinstance(value, dict):
+        current_content = str(
+            value.get("content") or value.get("draft") or value.get("summary") or ""
+        ).strip()
+        current_explanation = str(value.get("explanation") or current_explanation).strip()
+    else:
+        current_content = str(value or "").strip()
+
+    explanation_only = code.endswith("_missing_explanation") and len(current_content) >= 2
+    instruction = model_dimension_repair_instruction(layer, locale=locale)
+    if explanation_only:
+        messages = build_model_dimension_explanation_messages(
+            raw_input,
+            layer=layer,
+            current_content=current_content,
+            locale=locale,
+        )
+        repair_settings = {
+            **settings,
+            "max_tokens": min(max(int(settings.get("max_tokens") or 0), 96), 180),
+        }
+        response = _post_same_model_with_schema(
+            repair_settings,
+            messages,
+            model_dimension_explanation_response_format(),
+        )
+        raw_patch = parse_chat_completion_response(response)
+        explanation = parse_model_dimension_explanation_output(
+            raw_patch,
+            layer=layer,
+            current_content=current_content,
+            user_input=raw_input,
+            locale=locale,
+        )
+        patch = {
+            "content": current_content,
+            "explanation": explanation,
+        }
+    else:
+        messages = build_model_dimension_patch_messages(
+            raw_input,
+            layer=layer,
+            instruction=instruction,
+            current_dimension={
+                "model_draft_content": current_content,
+                "model_explanation": current_explanation,
+            },
+            locale=locale,
+            compact=True,
+        )
+        response = _post_same_model_with_schema(
+            settings,
+            messages,
+            model_dimension_patch_response_format(),
+        )
+        raw_patch = parse_chat_completion_response(response)
+        patch = parse_model_dimension_patch_output(
+            raw_patch,
+            layer=layer,
+            instruction=instruction,
+            user_input=raw_input,
+            locale=locale,
+            require_complete_role=False,
+        )
+    if isinstance(response, dict) and isinstance(response.get("usage"), dict):
+        provider_usages.append(response["usage"])
+
+    raw_candidate[layer] = {
+        "content": patch["content"],
+        "explanation": patch["explanation"],
+        "missing_information": patch.get("missing_information") or [],
+        "needs_user_confirmation": patch.get("needs_user_confirmation") or [],
+        "model_cannot_decide": patch.get("model_cannot_decide") or [],
+        "risk_notes": patch.get("risk_notes") or [],
+        "model_explanation_repaired_by_model": explanation_only,
+    }
+    raw_candidate.pop(f"{layer}_explanation", None)
+    candidate = parse_model_rulebook_candidate(
+        json.dumps(raw_candidate, ensure_ascii=False),
+        user_input=raw_input,
+        locale=locale,
+    )
+    return candidate, {
+        "layer": layer,
+        "model_used": True,
+        "schema_valid": True,
+        "repair_kind": "schema_explanation_only" if explanation_only else "schema_dimension_content",
+        "source_error": code,
+        "raw_preview": raw_patch[:900],
+    }, messages
+
+
+def _compile_model_assisted_rulebook(raw_input: str, *, plan_level: str, locale: str) -> dict[str, Any]:
+    kernel_pack = ensure_local_kernel_cache()
+    unavailable = _model_rulebook_unavailable_reason()
+    if unavailable:
+        return {
+            "ok": False,
+            "kernel_pack": kernel_pack,
+            "failure": build_authoring_failure(
+                reason=unavailable,
+                model_provider=str(MODEL_SETTINGS.get("provider") or ""),
+                model_name=str(MODEL_SETTINGS.get("model_name") or ""),
+                message=(
+                    "The model is not connected or lacks generation permission. Complete the connection test and enable generation in Model Settings."
+                    if str(locale).lower().startswith("en")
+                    else "模型未能連上或尚未取得生成權限；請先到模型設定完成連線測試與權限啟用。"
+                ),
+                context_audit=build_context_audit(messages=[], kernel_pack=kernel_pack),
+            ),
+        }
+    messages = build_model_rulebook_messages(raw_input, kernel_pack=kernel_pack, plan_level=plan_level, locale=locale)
+    model_text = ""
+    provider_usages: list[dict[str, Any]] = []
+    authoring_attempts = 0
+    authoring_errors: list[str] = []
+    attempt_audit: list[dict[str, Any]] = []
+    partial_candidates: list[tuple[int, dict[str, Any], str, list[dict[str, str]]]] = []
+    try:
+        authoring_settings = {**MODEL_SETTINGS}
+        if authoring_settings.get("mode") != "sandbox":
+            # Small local models can need several minutes to emit a complete
+            # SCBKR confirmation sheet. Keep this separate from the short
+            # connection probe: expiry remains explicit and never triggers a
+            # template or hidden fallback.
+            authoring_settings["timeout"] = max(int(authoring_settings.get("timeout") or 0), 900)
+        # Local 3B-4B models sometimes need more room to finish the global
+        # review/risk fields after S/C/B/K/R. Truncating those fields is not a
+        # capability failure, so local authoring gets a bounded larger budget.
+        requested_output_tokens = int(authoring_settings.get("max_tokens") or 0)
+        if _uses_lightweight_local_authoring(authoring_settings):
+            authoring_settings["max_tokens"] = min(max(requested_output_tokens, 960), 1200)
+        else:
+            authoring_settings["max_tokens"] = min(max(requested_output_tokens, 640), 800)
+        authoring_settings["_skip_rule_state_context"] = True
+        # A real endpoint must author the rulebook. Invalid semantic separation
+        # is retried with role-specific feedback; it is never replaced by a
+        # template. Parseable attempts remain visible as a task-scoped draft.
+        active_messages = list(messages)
+        authoring: dict[str, Any] | None = None
+        for attempt in range(1, 4):
+            authoring_attempts = attempt
+            response = None
+            try:
+                response = _post_same_model_with_schema(
+                    authoring_settings,
+                    active_messages,
+                    model_rulebook_response_format(),
+                )
+            except Exception:
+                raise
+            if isinstance(response, dict) and isinstance(response.get("usage"), dict):
+                provider_usages.append(response["usage"])
+            model_text = parse_chat_completion_response(response)
+            schema_repair_audit: dict[str, Any] | None = None
+            try:
+                candidate = parse_model_rulebook_candidate(model_text, user_input=raw_input, locale=locale)
+            except ModelRulebookAuthoringError as exc:
+                try:
+                    candidate, schema_repair_audit, schema_repair_messages = _repair_model_rulebook_schema_gap(
+                        exc,
+                        raw_input=raw_input,
+                        locale=locale,
+                        settings=authoring_settings,
+                        provider_usages=provider_usages,
+                    )
+                    active_messages.extend(schema_repair_messages)
+                    model_text = json.dumps(candidate, ensure_ascii=False)
+                except ModelRulebookAuthoringError:
+                    candidate = None
+                except Exception as repair_exc:
+                    authoring_errors.append(f"schema_dimension_repair_failed:{repair_exc}")
+                    candidate = None
+                if candidate is not None:
+                    semantic_report = candidate.get("model_semantic_report") or {}
+                    semantic_valid = semantic_report.get("passed") is True
+                    role_count = sum(
+                        1 for value in (semantic_report.get("dimension_role_alignment") or {}).values()
+                        if value is True
+                    )
+                    candidate_score = (
+                        role_count
+                        + int(semantic_report.get("distinct_dimensions") is True)
+                        + int(semantic_report.get("request_alignment") is True)
+                    )
+                else:
+                    authoring_errors.append(str(exc))
+                    attempt_audit.append({
+                        "attempt": attempt,
+                        "schema_valid": False,
+                        "semantic_valid": False,
+                        "error": str(exc),
+                        "raw_preview": model_text[:1200],
+                    })
+                    if attempt >= 3:
+                        raise
+                    repair_text = (
+                        "The previous response could not be parsed as the required SCBKR JSON. Rewrite the complete object: "
+                        "S/C/B/K/R must each contain task-specific content and explanation, and include rule_summary, "
+                        "missing_information, user_confirmation_items, model_cannot_decide, risk_reminders, and next_actions. "
+                        "Do not use markdown."
+                        if str(locale).lower().startswith("en")
+                        else "上一版無法解析成 SCBKR JSON。請重寫完整物件：S／C／B／K／R 每一維都要有本次任務專用的 content 與 explanation，"
+                        "並補齊 rule_summary、missing_information、user_confirmation_items、model_cannot_decide、risk_reminders、next_actions；不要使用 Markdown。"
+                    )
+                    active_messages = list(build_model_rulebook_messages(raw_input, kernel_pack=kernel_pack, plan_level=plan_level, locale=locale))
+                    active_messages.extend([
+                        {"role": "assistant", "content": model_text[:1200]},
+                        {"role": "user", "content": repair_text},
+                    ])
+                    continue
+
+            semantic_report = candidate.get("model_semantic_report") or {}
+            semantic_valid = semantic_report.get("passed") is True
+            role_count = sum(1 for value in (semantic_report.get("dimension_role_alignment") or {}).values() if value is True)
+            candidate_score = role_count + int(semantic_report.get("distinct_dimensions") is True) + int(semantic_report.get("request_alignment") is True)
+            attempt_audit.append({
+                "attempt": attempt,
+                "schema_valid": True,
+                "semantic_valid": semantic_valid,
+                "semantic_report": semantic_report,
+                "schema_dimension_repair": schema_repair_audit,
+                "raw_preview": model_text[:1200],
+            })
+            if semantic_valid:
+                authoring = candidate
+                messages = active_messages
+                break
+
+            authoring_errors.append("scbkr_semantic_roles_invalid")
+            if _uses_lightweight_local_authoring(authoring_settings):
+                combined_messages = list(active_messages)
+                all_dimension_repairs: list[dict[str, Any]] = []
+                try:
+                    for repair_round in range(1, 3):
+                        candidate, dimension_repairs, repair_messages = _repair_model_rulebook_dimensions(
+                            candidate,
+                            raw_input=raw_input,
+                            locale=locale,
+                            settings=authoring_settings,
+                            provider_usages=provider_usages,
+                        )
+                        for item in dimension_repairs:
+                            item["repair_round"] = repair_round
+                        all_dimension_repairs.extend(dimension_repairs)
+                        combined_messages.extend(repair_messages)
+                        semantic_report = candidate.get("model_semantic_report") or {}
+                        semantic_valid = semantic_report.get("passed") is True
+                        if semantic_valid or not dimension_repairs:
+                            break
+                    if not semantic_valid:
+                        candidate, authority_repairs = enforce_kernel_authority_boundary(
+                            candidate,
+                            locale=locale,
+                        )
+                        if authority_repairs:
+                            semantic_report = validate_model_rulebook_semantics(candidate, user_input=raw_input)
+                            semantic_valid = semantic_report.get("passed") is True
+                            candidate["model_semantic_report"] = semantic_report
+                            candidate["model_semantic_valid"] = semantic_valid
+                            all_dimension_repairs.extend([
+                                {
+                                    **item,
+                                    "model_used": False,
+                                    "schema_valid": True,
+                                    "repair_round": "kernel_authority_guard",
+                                }
+                                for item in authority_repairs
+                            ])
+                    role_count = sum(
+                        1 for value in (semantic_report.get("dimension_role_alignment") or {}).values()
+                        if value is True
+                    )
+                    candidate_score = role_count + int(semantic_report.get("distinct_dimensions") is True) + int(semantic_report.get("request_alignment") is True)
+                    attempt_audit[-1]["dimension_repairs"] = all_dimension_repairs
+                    attempt_audit[-1]["semantic_valid_after_dimension_repairs"] = semantic_valid
+                    attempt_audit[-1]["semantic_report_after_dimension_repairs"] = semantic_report
+                    model_text = json.dumps(candidate, ensure_ascii=False)
+                    if semantic_valid:
+                        authoring = candidate
+                        messages = combined_messages
+                        break
+                except Exception as exc:
+                    authoring_errors.append(f"dimension_repair_failed:{exc}")
+                    attempt_audit[-1]["dimension_repair_error"] = str(exc)
+                partial_candidates.append((candidate_score, candidate, model_text, combined_messages))
+                break
+
+            partial_candidates.append((candidate_score, candidate, model_text, list(active_messages)))
+            if attempt < 3:
+                repair_text = build_semantic_repair_instruction(semantic_report, locale=locale)
+                active_messages = list(build_model_rulebook_messages(raw_input, kernel_pack=kernel_pack, plan_level=plan_level, locale=locale))
+                active_messages.extend([
+                    {"role": "assistant", "content": model_text[:1200]},
+                    {"role": "user", "content": repair_text},
+                ])
+
+        provider = str(MODEL_SETTINGS.get("provider") or "")
+        model_name = str(MODEL_SETTINGS.get("model_name") or "")
+        if authoring is None and partial_candidates:
+            _, best_candidate, best_model_text, best_messages = max(partial_candidates, key=lambda item: item[0])
+            best_candidate["model_authoring_attempts"] = authoring_attempts
+            best_candidate["model_authoring_errors"] = list(authoring_errors)
+            capability = build_model_capability_assessment(
+                best_candidate.get("model_semantic_report") or {},
+                attempts=authoring_attempts,
+                targeted_repair_attempted=any(
+                    bool(item.get("dimension_repairs")) for item in attempt_audit
+                ),
+                locale=locale,
+                model_name=model_name,
+            )
+            context_audit = build_context_audit(
+                messages=best_messages,
+                model_output=best_model_text,
+                kernel_pack=kernel_pack,
+            )
+            context_audit["authoring_attempts"] = attempt_audit
+            context_audit["capability_escalation_based_on_latency"] = False
+            draft = authoring_to_scbkr_draft(
+                user_input=raw_input,
+                authoring=best_candidate,
+                kernel_pack=kernel_pack,
+                plan_level=plan_level,
+                locale=locale,
+                model_provider=provider,
+                model_name=model_name,
+                response_source="model_capability_limited",
+                context_audit=context_audit,
+            )
+            draft["model_capability"] = capability
+            draft["signing_allowed"] = False
+            draft["next_required_action"] = "owner_clarify_or_select_stronger_model"
+            draft["missing_information"] = list(dict.fromkeys([
+                *draft.get("missing_information", []),
+                *capability.get("unresolved_gaps", []),
+            ]))
+            draft["compiler_report"].update({
+                "status": "model_capability_limited",
+                "attempts": authoring_attempts,
+                "repairs": max(authoring_attempts - 1, 0),
+                "errors": list(authoring_errors),
+                "model_semantic_valid": False,
+                "capability": capability,
+                "next_required_action": "owner_clarify_or_select_stronger_model",
+            })
+            draft["token_metrics"] = build_token_efficiency_metrics(
+                raw_input=raw_input,
+                messages=best_messages,
+                retrieval_context={"evidence_packet": {}},
+                full_rule_registry=_rule_registry().list_rules(),
+                provider_usages=provider_usages,
+                attempts=authoring_attempts,
+                model_settings=MODEL_SETTINGS,
+                pricing=PRICING_SETTINGS,
+            )
+            structural_validation = validate_validity_failure(draft, kernel_pack)
+            validation = {
+                **structural_validation,
+                "passed": False,
+                "fail_reasons": sorted(set([
+                    *structural_validation.get("fail_reasons", []),
+                    "model_semantic_roles_invalid",
+                    *capability.get("gap_codes", []),
+                ])),
+                "semantic_report": best_candidate.get("model_semantic_report") or {},
+                "capability_limited": True,
+                "repair_instruction": capability.get("recommended_action"),
+            }
+            draft["validator_passed"] = False
+            draft["compiler_report"]["validator_passed"] = False
+            draft["compiler_report"]["validator"] = validation
+            return {
+                "ok": False,
+                "capability_limited": True,
+                "kernel_pack": kernel_pack,
+                "draft": draft,
+                "validator": validation,
+                "context_audit": context_audit,
+                "model_raw_preview": best_model_text[:1200],
+                "attempt_audit": attempt_audit,
+                "model_capability": capability,
+            }
+
+        if authoring is None:
+            raise ModelRulebookAuthoringError("empty_model_output")
+        authoring["model_authoring_attempts"] = authoring_attempts
+        authoring["model_authoring_errors"] = list(authoring_errors)
+        context_audit = build_context_audit(messages=messages, model_output=model_text, kernel_pack=kernel_pack)
+        context_audit["authoring_attempts"] = attempt_audit
+        context_audit["capability_escalation_based_on_latency"] = False
+        draft = authoring_to_scbkr_draft(
+            user_input=raw_input,
+            authoring=authoring,
+            kernel_pack=kernel_pack,
+            plan_level=plan_level,
+            locale=locale,
+            model_provider=provider,
+            model_name=model_name,
+            context_audit=context_audit,
+        )
+        draft = apply_plan_depth(draft, plan_level)
+        draft["compiler_report"]["attempts"] = authoring_attempts
+        draft["compiler_report"]["repairs"] = max(authoring_attempts - 1, 0)
+        draft["compiler_report"]["errors"] = list(authoring_errors)
+        draft["token_metrics"] = build_token_efficiency_metrics(
+            raw_input=raw_input,
+            messages=messages,
+            retrieval_context={"evidence_packet": {}},
+            full_rule_registry=_rule_registry().list_rules(),
+            provider_usages=provider_usages,
+            attempts=authoring_attempts,
+            model_settings=MODEL_SETTINGS,
+            pricing=PRICING_SETTINGS,
+        )
+        validation = validate_validity_failure(draft, kernel_pack)
+        draft["validator_passed"] = validation.get("passed") is True
+        draft.setdefault("compiler_report", {})["validator_passed"] = validation.get("passed") is True
+        draft["compiler_report"]["validator"] = validation
+        return {
+            "ok": validation.get("passed") is True,
+            "kernel_pack": kernel_pack,
+            "draft": draft,
+            "validator": validation,
+            "context_audit": context_audit,
+            "model_raw_preview": model_text[:1200],
+            "attempt_audit": attempt_audit,
+        }
+    except ModelRulebookAuthoringError as exc:
+        return {
+            "ok": False,
+            "kernel_pack": kernel_pack,
+            "model_raw_preview": model_text[:1200],
+            "attempt_audit": attempt_audit,
+            "failure": build_authoring_failure(
+                reason=str(exc),
+                model_provider=str(MODEL_SETTINGS.get("provider") or ""),
+                model_name=str(MODEL_SETTINGS.get("model_name") or ""),
+                message=(
+                    f"The model responded but did not produce a valid, semantically separated SCBKR rulebook: {exc}"
+                    if str(locale).lower().startswith("en")
+                    else f"模型有回覆，但未輸出合格且五維語意分工正確的 SCBKR 規則書：{exc}"
+                ),
+                context_audit=build_context_audit(messages=messages, model_output=model_text, kernel_pack=kernel_pack),
+            ),
+        }
+    except Exception as exc:
+        _mark_model_runtime_unavailable(_friendly_model_error(MODEL_SETTINGS, str(exc), locale=locale))
+        lowered = str(exc).lower()
+        failure_reason = "model_timeout" if ("timed out" in lowered or "timeout" in lowered) else "model_call_failed"
+        return {
+            "ok": False,
+            "kernel_pack": kernel_pack,
+            "model_raw_preview": model_text[:1200],
+            "attempt_audit": attempt_audit,
+            "failure": build_authoring_failure(
+                reason=failure_reason,
+                model_provider=str(MODEL_SETTINGS.get("provider") or ""),
+                model_name=str(MODEL_SETTINGS.get("model_name") or ""),
+                message=_friendly_model_error(MODEL_SETTINGS, str(exc), locale=locale),
+                context_audit=build_context_audit(messages=messages, model_output=model_text, kernel_pack=kernel_pack),
+            ),
+        }
+
+
+def _apply_model_authoring_failure_to_task(task: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    failure = result["failure"]
+    task.update(
+        {
+            "status": failure["draft_source"],
+            "draft_source": failure["draft_source"],
+            "model_used": bool(failure.get("model_used")),
+            "model_provider": failure.get("model_provider"),
+            "model_name": failure.get("model_name"),
+            "model_schema_valid": False,
+            "model_semantic_valid": False,
+            "validator_passed": False,
+            "fallback_used": False,
+            "fallback_reason": "",
+            "requires_user_signature": True,
+            "model_signature_allowed": False,
+            "next_required_action": failure.get("next_required_action"),
+            "model_rulebook_authoring": failure,
+            "context_audit": failure.get("context_audit"),
+            "model_raw_preview": result.get("model_raw_preview", ""),
+            "attempt_audit": result.get("attempt_audit") or [],
+        }
+    )
+    task["kernel_runtime"] = {
+        "route": "model_assisted_rulebook",
+        "l0_gate": {},
+        "validator": {"passed": False, "fail_reasons": [failure.get("failure_reason")]},
+        "kernel_meta": (result.get("kernel_pack") or {}).get("meta"),
+    }
+    task["draft_object"] = {
+        "draft_id": f"draft:{task['task_id']}",
+        "state": "MODEL_UNAVAILABLE" if failure["draft_source"] == "model_unavailable" else "MODEL_SCHEMA_INVALID",
+        "intent": "create_new_rule_confirmation",
+        "object_type": "rule",
+        "user_request_raw": task.get("raw_input"),
+        "proposed_title": "SCBKR model-assisted rulebook unavailable",
+        "summary": failure.get("failure_message"),
+        "model_participated": False,
+        "model_provider": failure.get("model_provider"),
+        "model_name": failure.get("model_name"),
+        "model_schema_valid": False,
+        "model_semantic_valid": False,
+        "kernel_validator_passed": False,
+        "fallback_used": False,
+        "fallback_reason": "",
+        "requires_user_signature": True,
+        "model_signature_allowed": False,
+        "next_required_action": failure.get("next_required_action"),
+        "risk_flags": [failure.get("failure_reason")],
+    }
+    return task
+
+
+def _apply_model_authoring_success_to_task(
+    task: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    raw_input: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    capability_limited = result.get("capability_limited") is True
+    validator_passed = result["validator"].get("passed") is True and not capability_limited
+    next_action = "owner_clarify_or_select_stronger_model" if capability_limited else "owner_review_and_signature"
+    task["scbkr"] = result["draft"]
+    task["kernel_runtime"] = {
+        "route": "model_assisted_rulebook",
+        "l0_gate": {},
+        "validator": result["validator"],
+        "kernel_meta": (result.get("kernel_pack") or {}).get("meta"),
+    }
+    task["draft_object"] = build_scbkr_draft_object(
+        user_request_raw=raw_input,
+        scbkr=task["scbkr"],
+        intent=str(payload.get("intent") or "create_new_rule_confirmation"),
+        object_type=str(payload.get("object_type") or "rule"),
+        draft_id=task["task_id"],
+        evidence_context=task.get("data_center_context"),
+    )
+    task["draft_object"].update(
+        {
+            "draft_source": task["scbkr"].get("draft_source"),
+            "model_participated": True,
+            "model_provider": task["scbkr"].get("model_provider"),
+            "model_name": task["scbkr"].get("model_name"),
+            "model_schema_valid": True,
+            "model_schema_repaired": bool(task["scbkr"].get("model_schema_repaired")),
+            "model_semantic_valid": bool(task["scbkr"].get("model_semantic_valid")),
+            "model_semantic_report": task["scbkr"].get("model_semantic_report") or {},
+            "kernel_validator_passed": validator_passed,
+            "fallback_used": False,
+            "fallback_reason": "",
+            "requires_user_signature": True,
+            "model_signature_allowed": False,
+            "signing_allowed": validator_passed,
+            "next_required_action": next_action,
+            "missing_information": task["scbkr"].get("missing_information", []),
+            "risk_flags": task["scbkr"].get("risk_reminders", []),
+            "user_confirmation_items": task["scbkr"].get("user_confirmation_items", []),
+            "context_audit": result.get("context_audit"),
+            "model_capability": task["scbkr"].get("model_capability") or result.get("model_capability") or {},
+        }
+    )
+    task.update(
+        {
+            "status": "model_capability_limited" if capability_limited else "waiting_user_confirm" if validator_passed else "model_validation_failed",
+            "draft_source": task["scbkr"].get("draft_source"),
+            "model_used": True,
+            "model_provider": task["scbkr"].get("model_provider"),
+            "model_name": task["scbkr"].get("model_name"),
+            "model_schema_valid": True,
+            "model_schema_repaired": bool(task["scbkr"].get("model_schema_repaired")),
+            "model_semantic_valid": bool(task["scbkr"].get("model_semantic_valid")),
+            "model_semantic_report": task["scbkr"].get("model_semantic_report") or {},
+            "validator_passed": validator_passed,
+            "fallback_used": False,
+            "fallback_reason": "",
+            "requires_user_signature": True,
+            "model_signature_allowed": False,
+            "signing_allowed": validator_passed,
+            "next_required_action": next_action,
+            "model_raw_preview": result.get("model_raw_preview"),
+            "context_audit": result.get("context_audit"),
+            "model_capability": task["scbkr"].get("model_capability") or result.get("model_capability") or {},
+            "attempt_audit": result.get("attempt_audit") or [],
+            "draft_model_call_skipped_reason": "",
+        }
+    )
+    return task
 
 
 @app.get("/health")
@@ -1102,7 +2225,7 @@ def raw_product_manifest() -> dict[str, Any]:
 
 @app.get("/api/product/about")
 def product_about(topic: str = "identity", locale: str | None = None) -> dict[str, Any]:
-    allowed_topics = {"identity", "author", "capabilities", "collaboration", "rule_import"}
+    allowed_topics = {"identity", "author", "capabilities", "collaboration", "rule_import", "scbkr", "usage"}
     selected_topic = topic if topic in allowed_topics else "identity"
     return {
         "topic": selected_topic,
@@ -1188,7 +2311,7 @@ def _rule_state_runtime() -> RuleStateRuntime:
 
 
 def _rule_state_manager() -> RuleStateManager:
-    return RuleStateManager(_rule_registry(), _rule_state_runtime())
+    return RuleStateManager(_rule_registry(), _rule_state_runtime(), lambda: list_active_stored_tasks(limit=20))
 
 
 @app.get("/api/rule-state/catalog")
@@ -1240,14 +2363,17 @@ def validate_rule_overlay(payload: dict[str, Any]) -> dict[str, Any]:
 def list_rules() -> dict[str, Any]:
     rules = _rule_registry().list_rules()
     compiled_rules: list[dict[str, Any]] = []
-    for task in list_persisted_tasks(limit=1000):
+    # Only stored, reviewed tasks can be formal rules. Loading every draft's
+    # full JSON made startup scale with test/history volume instead of rules.
+    for task in list_active_stored_tasks(limit=1000):
         compiled = task.get("compiled_rule") or {}
         if not compiled:
             continue
         scbkr = task.get("scbkr") or {}
         storage_items = task.get("storage_items") or []
         storage_targets = sorted({str(item.get("target")) for item in storage_items if item.get("target")})
-        status = "active" if compiled.get("active") and task.get("review_passed") is True else "draft"
+        lifecycle_status = str(compiled.get("lifecycle_status") or task.get("lifecycle_status") or "").strip().lower()
+        status = lifecycle_status if lifecycle_status in {"disabled", "revoked", "archived", "superseded", "deleted"} else "active" if compiled.get("active") and task.get("review_passed") is True else "draft"
         compiled_rules.append(
             {
                 "rule_id": compiled.get("rule_id") or f"local-rule:{task.get('task_id')}",
@@ -1258,6 +2384,9 @@ def list_rules() -> dict[str, Any]:
                 "rule_author": (scbkr.get("confirmed_by") or "user"),
                 "rule_source": "compiled_four_store_rule",
                 "rule_version": f"v{compiled.get('version') or 1}.0",
+                "task_id": task.get("task_id"),
+                "supersedes": compiled.get("supersedes") or task.get("supersedes_rule_id"),
+                "superseded_by": compiled.get("superseded_by"),
                 "rule_scope": compiled.get("match_conditions") or {},
                 "allowed_tools": [],
                 "denied_tools": ["auto_publish", "auto_email", "auto_store_without_signature"],
@@ -1271,7 +2400,7 @@ def list_rules() -> dict[str, Any]:
                 "scbkr_summary": {key: scbkr.get(key) for key in ("S", "C", "B", "K", "R")},
                 "four_store_locations": storage_targets,
                 "version_history": [
-                    {"version": "v1.0", "status": status, "note": "Compiled from owner-signed SCBKR workbench flow."}
+                    {"version": f"v{compiled.get('version') or 1}.0", "status": status, "note": "Compiled from owner-signed SCBKR workbench flow."}
                 ],
                 "citation_policy": compiled.get("citation_policy"),
                 "created_at": task.get("created_at"),
@@ -1283,6 +2412,226 @@ def list_rules() -> dict[str, Any]:
     known = {rule.get("rule_id") for rule in rules}
     rules = rules + [rule for rule in compiled_rules if rule.get("rule_id") not in known]
     return {"rules": rules, "count": len(rules), "registry_version": "scbkr.rule-registry.v2"}
+
+
+def _combined_rule(rule_id: str) -> dict[str, Any]:
+    candidate = next((item for item in list_rules()["rules"] if item.get("rule_id") == rule_id), None)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="rule not found")
+    return candidate
+
+
+def _rule_evidence_state(rule: dict[str, Any]) -> dict[str, Any]:
+    """Capture authority-bearing rule state, excluding only observation clocks."""
+
+    return {
+        "rule_id": rule.get("rule_id"),
+        "rule_name": rule.get("rule_name"),
+        "rule_text": rule.get("rule_text"),
+        "rule_version": rule.get("rule_version"),
+        "activation_status": rule.get("activation_status"),
+        "signature_status": rule.get("signature_status"),
+        "signature": rule.get("signature"),
+        "signed_at": rule.get("signed_at"),
+        "review_passed": rule.get("review_passed"),
+        "storage_confirmed": rule.get("storage_confirmed"),
+        "supersedes": rule.get("supersedes"),
+        "superseded_by": rule.get("superseded_by"),
+        "rule_scope": rule.get("rule_scope"),
+        "allowed_tools": rule.get("allowed_tools"),
+        "denied_tools": rule.get("denied_tools"),
+        "automation_level": rule.get("automation_level"),
+        "citation_policy": rule.get("citation_policy"),
+        "compiled_rule": rule.get("compiled_rule"),
+        "scbkr_summary": rule.get("scbkr_summary"),
+        "four_store_locations": rule.get("four_store_locations"),
+        "updated_at": rule.get("updated_at"),
+    }
+
+
+def _revalidate_revision_source_at_confirm(task: dict[str, Any]) -> dict[str, Any]:
+    source_rule_id = str(task.get("supersedes_rule_id") or "").strip()
+    if not source_rule_id:
+        return {
+            "required": False,
+            "allowed": True,
+            "conflict": False,
+            "reason": "not_a_rule_revision",
+        }
+
+    snapshot = task.get("source_rule_snapshot") or {}
+    draft_state = snapshot.get("evidence_state")
+    if not isinstance(draft_state, dict) or not draft_state or not snapshot.get("evidence_hash"):
+        return {
+            "required": True,
+            "state_scope": "rule_revision_source",
+            "confirm_time_rechecked": False,
+            "allowed": False,
+            "conflict": True,
+            "reason": "draft_evidence_snapshot_missing",
+            "source_rule_id": source_rule_id,
+        }
+    computed_draft_hash = evidence_state_hash(draft_state)
+    if computed_draft_hash != snapshot.get("evidence_hash"):
+        return {
+            "required": True,
+            "state_scope": "rule_revision_source",
+            "confirm_time_rechecked": False,
+            "allowed": False,
+            "conflict": True,
+            "reason": "draft_evidence_snapshot_integrity_failed",
+            "source_rule_id": source_rule_id,
+            "recorded_evidence_hash": snapshot.get("evidence_hash"),
+            "computed_evidence_hash": computed_draft_hash,
+        }
+
+    try:
+        current_rule = _combined_rule(source_rule_id)
+        current_state = _rule_evidence_state(current_rule)
+    except HTTPException as exc:
+        current_rule = None
+        current_state = {
+            "rule_id": source_rule_id,
+            "source_state": "missing",
+            "status_code": exc.status_code,
+        }
+
+    gate = compare_evidence_state(draft_state, current_state, state_scope="rule_revision_source")
+    gate.update(
+        {
+            "source_rule_id": source_rule_id,
+            "draft_observed_at": snapshot.get("observed_at"),
+            "draft_rule_version": snapshot.get("rule_version"),
+            "current_rule_version": current_rule.get("rule_version") if current_rule else None,
+            "current_activation_status": current_rule.get("activation_status") if current_rule else "missing",
+        }
+    )
+    return gate
+
+
+def _version_number(value: Any) -> int:
+    raw = str(value or "1").lower().lstrip("v")
+    try:
+        return max(1, int(float(raw.split(".")[0])))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _rule_dimension_summary(rule: dict[str, Any], dimension: str) -> str:
+    value = (rule.get("scbkr_summary") or {}).get(dimension) or {}
+    if not isinstance(value, dict):
+        return str(value)[:500]
+    preferred = {
+        "S": ("model_draft_content", "task_subject", "rule_subject", "task_name"),
+        "C": ("model_draft_content", "core_logic", "flow_steps", "causal_chain"),
+        "B": ("model_draft_content", "forbidden", "stop_conditions", "failure_conditions"),
+        "K": ("model_draft_content", "references", "citable_sources", "source_credibility"),
+        "R": ("model_draft_content", "acceptance_criteria", "formation_conditions", "failure_conditions"),
+    }[dimension]
+    for key in preferred:
+        candidate = value.get(key)
+        if candidate not in (None, "", [], {}):
+            return json.dumps(candidate, ensure_ascii=False)[:500] if not isinstance(candidate, str) else candidate[:500]
+    return json.dumps(value, ensure_ascii=False)[:500]
+
+
+def _update_task_rule_lifecycle(
+    task: dict[str, Any],
+    *,
+    lifecycle_status: str,
+    signature: str,
+    reason: str,
+    superseded_by: str | None = None,
+) -> dict[str, Any]:
+    now = _now()
+    compiled = dict(task.get("compiled_rule") or {})
+    if not compiled:
+        raise HTTPException(status_code=400, detail="compiled rule not found")
+    compiled.update({
+        "active": False,
+        "lifecycle_status": lifecycle_status,
+        "lifecycle_updated_at": now,
+        "lifecycle_signature_hash": hashlib.sha256(signature.encode("utf-8")).hexdigest(),
+    })
+    if superseded_by:
+        compiled["superseded_by"] = superseded_by
+    task["compiled_rule"] = compiled
+    task["lifecycle_status"] = lifecycle_status
+    task["lifecycle_reason"] = reason
+    task["lifecycle_updated_at"] = now
+
+    stored_by_id = {
+        str(item.get("item_id")): item
+        for item in list_persisted_storage_items(task_id=str(task.get("task_id")), limit=100)
+    }
+    updated_items: list[dict[str, Any]] = []
+    source_items = task.get("storage_items") or list(stored_by_id.values())
+    for source in source_items:
+        item = deepcopy(stored_by_id.get(str(source.get("item_id"))) or source)
+        item["status"] = lifecycle_status
+        item["updated_at"] = now
+        item["lifecycle_reason"] = reason
+        if superseded_by:
+            item["superseded_by"] = superseded_by
+        payload = deepcopy(item.get("payload") or {})
+        payload["status"] = lifecycle_status
+        payload["lifecycle_reason"] = reason
+        if superseded_by:
+            payload["superseded_by"] = superseded_by
+        item["payload"] = payload
+        save_storage_item(item)
+        updated_items.append(item)
+    task["storage_items"] = updated_items
+
+    for source_case in list_persisted_retrieval_cases(task_id=str(task.get("task_id")), limit=None):
+        case = deepcopy(source_case)
+        case["governance_status"] = lifecycle_status
+        case["status"] = lifecycle_status
+        case["updated_at"] = now
+        if superseded_by:
+            case["superseded_by"] = superseded_by
+        save_retrieval_case(case)
+
+    save_task(task)
+    _append_task_event(
+        "rule_lifecycle_changed",
+        task,
+        status_before=task.get("status"),
+        status_after=task.get("status"),
+        payload={
+            "rule_id": compiled.get("rule_id"),
+            "lifecycle_status": lifecycle_status,
+            "reason": reason,
+            "superseded_by": superseded_by,
+            "hard_delete": False,
+        },
+    )
+    return task
+
+
+def _supersede_prior_rule_after_storage(task: dict[str, Any]) -> dict[str, Any] | None:
+    prior_rule_id = str(task.get("supersedes_rule_id") or "").strip()
+    if not prior_rule_id:
+        return None
+    new_rule_id = str((task.get("compiled_rule") or {}).get("rule_id") or f"local-rule:{task.get('task_id')}")
+    signature = str((task.get("scbkr") or {}).get("signature") or task.get("confirmed_at") or "owner_revision_storage")
+    registry_candidate = next((item for item in _rule_registry().list_rules() if item.get("rule_id") == prior_rule_id), None)
+    if registry_candidate is not None:
+        updated = _rule_registry().supersede(prior_rule_id, new_rule_id)
+        return {"rule_id": prior_rule_id, "status": updated.get("activation_status"), "superseded_by": new_rule_id}
+    prior = _combined_rule(prior_rule_id)
+    prior_task_id = str(prior.get("task_id") or (prior.get("compiled_rule") or {}).get("task_id") or "")
+    if not prior_task_id:
+        raise HTTPException(status_code=400, detail="prior compiled task not found")
+    prior_task = _get_task(prior_task_id)
+    _update_task_rule_lifecycle(
+        prior_task,
+        lifecycle_status="superseded",
+        signature=signature,
+        reason=f"Replaced by owner-signed rule {new_rule_id}",
+        superseded_by=new_rule_id,
+    )
+    return {"rule_id": prior_rule_id, "status": "superseded", "superseded_by": new_rule_id}
 
 
 @app.post("/api/rules/draft")
@@ -1303,41 +2652,27 @@ def create_rule_draft_from_text(payload: dict[str, Any]) -> dict[str, Any]:
     instruction = str(payload.get("instruction") or "").strip()
     if not instruction:
         raise HTTPException(status_code=400, detail="instruction is required")
-    lowered = instruction.lower()
-    known_tools = [tool["tool_id"] for tool in list_tool_definitions()]
-    allowed_tools = [tool_id for tool_id in known_tools if tool_id.lower() in lowered]
-    action = "publish" if any(token in lowered for token in ("發布", "publish")) else "execute" if any(token in lowered for token in ("執行", "execute")) else "store" if any(token in lowered for token in ("入庫", "store")) else "draft"
-    creator = load_product_manifest()["creator"]
-    name = instruction.splitlines()[0].strip("。.!！?？ ")[:48]
-    keywords = sorted(_keyword_tokens(instruction))[:12]
-    validation = _rule_state_runtime().validate_overlay(instruction)
-    draft_payload = {
-        "rule_name": name or "自然語言規則草案",
-        "rule_text": instruction,
-        "rule_author": str(payload.get("rule_author") or creator["name"]["zh-TW"]),
-        "rule_source": "user_defined",
-        "rule_version": "v1.0.0",
-        "rule_scope": {"task_types": ["*"], "tools": allowed_tools, "workflows": ["*"], "keywords": keywords, "actions": [action]},
-        "allowed_tools": allowed_tools,
-        "denied_tools": [],
-        "automation_level": "manual",
-        "risk_level": "medium",
-        "changelog": ["由自然語言建立，等待使用者檢查與簽名。"],
-        "rule_state_receipt": validation["rule_state"].get("receipt_hash"),
-        "validation_status": validation["status"],
+    task = _create_task_from_payload({
+        "raw_input": instruction,
+        "task_name": payload.get("rule_name"),
+        "task_type": "general",
+        "intent": "create_new_rule_confirmation",
+        "object_type": "rule",
+        "create_scbkr_draft": True,
+        "locale": payload.get("locale"),
+        "rule_assist_plan": "FREE",
+    })
+    return {
+        **task,
+        "task": task,
+        "compiled_from": "model_assisted_rulebook",
+        "model_signed": False,
+        "next_required_action": task.get("next_required_action"),
     }
-    try:
-        rule = _rule_registry().create_draft(draft_payload)
-        assessment = _assess_rule_assist(instruction, locale=_response_locale(instruction, None), target_mode="rule")
-        draft_object = build_rule_draft_object(rule)
-        draft_object["rule_assist_state"] = assessment.get("state")
-        draft_object["rule_assist_plan"] = assessment.get("plan_level")
-        return {"rule": rule, "draft_object": draft_object, "rule_assist": assessment, "validation": validation, "rule_state": _rule_state_manager().status(), "compiled_from": "natural_language", "model_signed": False, "next_required_action": "owner_review_and_signature"}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/rules/{rule_id:path}/sign")
+@_serialized_rule_state_change
 def sign_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         rule = _rule_registry().sign_user_rule(rule_id, str(payload.get("owner_signature") or ""))
@@ -1349,6 +2684,7 @@ def sign_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.post("/api/rules/{rule_id:path}/activate")
+@_serialized_rule_state_change
 def activate_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         manager = _rule_state_manager()
@@ -1378,13 +2714,124 @@ def activate_rule(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/api/rules/{rule_id:path}/status")
 def change_rule_status(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    try:
-        rule = _rule_registry().set_status(rule_id, str(payload.get("status") or ""))
-        return {"rule": rule, "rule_state": _rule_state_manager().status()}
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="rule not found") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    status = str(payload.get("status") or "").strip().lower()
+    action = {"disabled": "disable", "archived": "archive", "revoked": "delete", "deleted": "delete"}.get(status)
+    if not action:
+        raise HTTPException(status_code=400, detail="status must be disabled, archived, revoked, or deleted")
+    return change_rule_lifecycle(rule_id, {**payload, "action": action})
+
+
+@app.post("/api/rules/{rule_id:path}/revision")
+def create_rule_revision(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    instruction = str(payload.get("instruction") or "").strip()
+    if not instruction:
+        raise HTTPException(status_code=400, detail="revision instruction is required")
+    with RULE_STATE_COMMIT_LOCK:
+        source = _combined_rule(rule_id)
+        if str(source.get("activation_status") or "").lower() == "deleted":
+            raise HTTPException(status_code=400, detail="deleted rules cannot be revised")
+        source_evidence_state = _rule_evidence_state(source)
+        source_rule_snapshot = {
+            "rule_id": rule_id,
+            "rule_name": source.get("rule_name"),
+            "rule_version": source.get("rule_version"),
+            "activation_status": source.get("activation_status"),
+            "observed_at": _now(),
+            "evidence_state": source_evidence_state,
+            "evidence_hash": evidence_state_hash(source_evidence_state),
+        }
+    locale = _response_locale(instruction, str(payload.get("locale") or ""))
+    summaries = "\n".join(f"{dimension}: {_rule_dimension_summary(source, dimension)}" for dimension in ("S", "C", "B", "K", "R"))
+    if locale == "en":
+        raw_input = (
+            "Create a new SCBKR rulebook version from this signed rule. Keep unaffected meaning, apply the user's change, "
+            "and rewrite all five dimensions so they remain semantically separated. Do not activate or sign it.\n\n"
+            f"Previous rule: {source.get('rule_name')} ({source.get('rule_version')})\n{summaries}\n\n"
+            f"Requested change: {instruction}"
+        )
+    else:
+        raw_input = (
+            "請根據這條已簽名規則建立新版 SCBKR 規則書。保留未受影響的原意，套用使用者修改要求，"
+            "並重新寫完整五維，確保主體、因果、邊界、依據、責任不混用。不得自動簽名或啟用。\n\n"
+            f"原規則：{source.get('rule_name')}（{source.get('rule_version')}）\n{summaries}\n\n"
+            f"修改要求：{instruction}"
+        )
+    task = _create_task_from_payload({
+        "raw_input": raw_input,
+        "task_name": f"{source.get('rule_name') or 'SCBKR rule'} - revision",
+        "task_type": "rule_revision",
+        "intent": "modify_existing_rule",
+        "object_type": "rule",
+        "create_scbkr_draft": True,
+        "locale": locale,
+        "rule_assist_plan": "FREE",
+    })
+    task["supersedes_rule_id"] = rule_id
+    task["revision_number"] = _version_number(source.get("rule_version")) + 1
+    task["revision_instruction"] = instruction
+    task["source_rule_snapshot"] = source_rule_snapshot
+    if isinstance(task.get("draft_object"), dict):
+        task["draft_object"].update({
+            "intent": "modify_existing_rule",
+            "supersedes_rule_id": rule_id,
+            "revision_number": task["revision_number"],
+        })
+    save_task(task)
+    _append_task_event(
+        "rule_revision_draft_created",
+        task,
+        status_after=task.get("status"),
+        payload={"supersedes_rule_id": rule_id, "revision_number": task["revision_number"]},
+    )
+    return task
+
+
+@app.post("/api/rules/{rule_id:path}/lifecycle")
+@_serialized_rule_state_change
+def change_rule_lifecycle(rule_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    action = str(payload.get("action") or "").strip().lower()
+    target_status = {"disable": "disabled", "archive": "archived", "delete": "deleted"}.get(action)
+    if not target_status:
+        raise HTTPException(status_code=400, detail="action must be disable, archive, or delete")
+    if payload.get("confirmed_by") != "user" or payload.get("second_confirm") is not True:
+        raise HTTPException(status_code=400, detail="rule lifecycle change requires user second confirmation")
+    signature = str(payload.get("signature") or "").strip()
+    if not signature or signature.lower() in {"model", "assistant", "system"}:
+        raise HTTPException(status_code=400, detail="owner signature is required; model cannot change rule lifecycle")
+    reason = str(payload.get("reason") or f"User requested {action}").strip()
+    source = _combined_rule(rule_id)
+    if source.get("rule_source") != "compiled_four_store_rule":
+        try:
+            updated_rule = _rule_registry().set_status(rule_id, target_status)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="rule not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        append_ledger_event(build_ledger_event(
+            "rule_lifecycle_changed",
+            trace_id=f"rule-lifecycle-{uuid4().hex[:12]}",
+            ledger_id="rule-registry-ledger",
+            payload={"rule_id": rule_id, "lifecycle_status": target_status, "reason": reason, "hard_delete": False},
+        ))
+        return {"rule": updated_rule, "lifecycle_status": target_status, "hard_delete": False, "replay_retained": True, "rule_state": _rule_state_manager().status()}
+    task_id = str(source.get("task_id") or (source.get("compiled_rule") or {}).get("task_id") or "")
+    if not task_id:
+        raise HTTPException(status_code=400, detail="compiled rule task not found")
+    updated_task = _update_task_rule_lifecycle(
+        _get_task(task_id),
+        lifecycle_status=target_status,
+        signature=signature,
+        reason=reason,
+    )
+    return {
+        "rule": next((item for item in list_rules()["rules"] if item.get("rule_id") == rule_id), source),
+        "task_id": task_id,
+        "lifecycle_status": target_status,
+        "hard_delete": False,
+        "replay_retained": True,
+        "updated_storage_items": len(updated_task.get("storage_items") or []),
+        "rule_state": _rule_state_manager().status(),
+    }
 
 
 @app.get("/api/rulepacks")
@@ -1528,17 +2975,144 @@ def get_launch_readiness() -> dict[str, Any]:
 
 @app.get("/api/metrics/token-efficiency")
 def token_efficiency_metrics() -> dict[str, Any]:
-    return summarize_metrics(list_persisted_tasks(limit=1000))
+    metrics = summarize_metrics(list_persisted_tasks(limit=20))
+    metrics["aggregation_scope"] = "latest_20_tasks"
+    return metrics
+
+
+@app.get("/api/metrics/pricing")
+def get_metrics_pricing() -> dict[str, Any]:
+    """Return the local price snapshot used for transparent cost math."""
+    return normalize_pricing(PRICING_SETTINGS, model_name=str(MODEL_SETTINGS.get("model_name") or ""))
+
+
+@app.post("/api/metrics/pricing")
+def set_metrics_pricing(payload: dict[str, Any]) -> dict[str, Any]:
+    """Save user-supplied pricing; no provider price is guessed by SCBKR."""
+    next_pricing = normalize_pricing(payload, model_name=str(payload.get("model_name") or MODEL_SETTINGS.get("model_name") or ""))
+    next_pricing["source"] = str(payload.get("source") or "user_configured")
+    next_pricing["updated_at"] = _now()
+    PRICING_SETTINGS.clear()
+    PRICING_SETTINGS.update(next_pricing)
+    save_runtime_section("pricing", PRICING_SETTINGS)
+    return next_pricing
+
+
+def _token_ab_report_paths() -> tuple[Path, Path]:
+    report_dir = current_data_dir() / "metrics"
+    return report_dir / "token-ab-latest.json", report_dir / "token-ab-latest.md"
+
+
+@app.get("/api/metrics/token-ab/latest")
+def get_latest_token_ab_benchmark() -> dict[str, Any]:
+    json_path, _ = _token_ab_report_paths()
+    if not json_path.exists():
+        return {
+            "status": "not_run",
+            "savings_verified": False,
+            "message": "尚未執行同一模型 A/B 實測。",
+        }
+    try:
+        report = json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="token A/B report could not be read") from exc
+    return {"status": "completed", **report}
+
+
+@app.post("/api/metrics/token-ab/run")
+def run_same_model_token_ab(payload: dict[str, Any]) -> dict[str, Any]:
+    """Run two explicit calls against one provider/model and persist local evidence."""
+
+    question = str(payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    if not _model_connected() or MODEL_SETTINGS.get("mode") == "sandbox":
+        raise HTTPException(status_code=409, detail="a connected real model is required for token A/B verification")
+    try:
+        _assert_model_gateway_call_allowed(MODEL_SETTINGS)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    locale = _response_locale(question, str(payload.get("locale") or ""))
+    classification = classify_user_input(question)
+    four_store_context = _build_four_store_context(question, str(payload.get("task_id") or "") or None)
+    current_rule_package = payload.get("current_rule_package")
+    if not isinstance(current_rule_package, dict):
+        current_rule_package = build_current_rule_package(
+            question,
+            four_store_context,
+            plan_level=str(RULE_ASSIST_SETTINGS.get("plan_level") or "FREE"),
+            locale=locale,
+            classification=classification,
+        )
+
+    full_history = payload.get("full_history") or payload.get("chat_history") or []
+    if not isinstance(full_history, list):
+        raise HTTPException(status_code=400, detail="full_history must be a list")
+    full_history = [item for item in full_history[-100:] if isinstance(item, dict)]
+    full_rule_context = payload.get("full_rule_context")
+    if full_rule_context is None:
+        full_rule_context = {
+            "four_store_context": four_store_context,
+            "registered_rules": _rule_registry().list_rules(),
+            "storage_items": list_persisted_storage_items(limit=1000),
+        }
+
+    requested_provider = str(MODEL_SETTINGS.get("provider") or "")
+    requested_model = str(MODEL_SETTINGS.get("model_name") or "")
+    context_length = max(2048, int(MODEL_SETTINGS.get("context_length") or 8192))
+    reserved_output_tokens = max(64, int(MODEL_SETTINGS.get("max_tokens") or 640))
+    safe_prompt_ceiling = max(512, context_length - reserved_output_tokens - 512)
+    default_prompt_budget = max(1024, min(4096, context_length // 2))
+    requested_prompt_budget = int(payload.get("max_prompt_tokens") or default_prompt_budget)
+    max_prompt_tokens = max(512, min(requested_prompt_budget, safe_prompt_ceiling))
+
+    def model_call(*, provider: str, model: str, messages: list[dict[str, str]], variant: str) -> dict[str, Any]:
+        if provider != requested_provider or model != requested_model:
+            raise ValueError("token A/B provider/model identity changed during the benchmark")
+        settings = {**MODEL_SETTINGS, "_skip_rule_state_context": True}
+        return _post_openai_compatible(settings, messages)
+
+    try:
+        report = run_token_ab_benchmark(
+            question=question,
+            full_history=full_history,
+            full_rule_context=full_rule_context,
+            current_rule_package=current_rule_package,
+            provider=requested_provider,
+            model_name=requested_model,
+            model_call=model_call,
+            system_prompt=(
+                "Answer only from the supplied confirmed context. Do not invent facts. Reply in English."
+                if locale == "en"
+                else "只能依提供的已確認內容回答，不得編造資料。請使用繁體中文。"
+            ),
+            max_prompt_tokens=max_prompt_tokens,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"token A/B benchmark failed: {exc}") from exc
+
+    json_path, markdown_path = _token_ab_report_paths()
+    write_token_ab_report(report, json_path=json_path, markdown_path=markdown_path)
+    return {
+        "status": "completed",
+        **report,
+        "local_report": {
+            "json": str(json_path),
+            "markdown": str(markdown_path),
+        },
+    }
 
 
 @app.get("/api/system/status")
 def system_status() -> dict[str, Any]:
+    persisted_tasks_count = len(list_persisted_task_summaries(limit=10_000))
     return {
         "api_url": LOCAL_DESKTOP_API_BASE_URL,
         "web_url": "http://localhost:5500",
         "runtime": "P13-A/B/C SQLite + JSONL retrieval runtime",
         "physical_write_performed": False,
-        "tasks_count": len(TASKS),
+        "tasks_count": persisted_tasks_count,
         "model": _public_model_settings(),
         "permissions": PERMISSIONS,
     }
@@ -1550,21 +3124,21 @@ def system_status() -> dict[str, Any]:
 def desktop_status() -> dict[str, Any]:
     sidecar_host = os.environ.get("SCBKR_API_HOST", "127.0.0.1")
     sidecar_port = int(os.environ.get("SCBKR_API_PORT", "8787"))
-    release_runtime = os.environ.get("SCBKR_DESKTOP_RUNTIME") == "release-candidate"
-    release_package_built = release_runtime or os.environ.get("SCBKR_DESKTOP_PREVIEW") == "1"
-    desktop_stage = "P14-C-preview"
+    desktop_runtime = os.environ.get("SCBKR_DESKTOP_RUNTIME") in {"release-candidate", "store-candidate"}
+    release_package_built = desktop_runtime
+    desktop_stage = "SCBKR-2.3-free-store-candidate" if desktop_runtime else "development"
     return {
         "desktop_stage": desktop_stage,
         "desktop_shell": True,
-        "installer_built": False,
-        "preview_package_built": release_package_built,
+        "installer_built": desktop_runtime,
+        "preview_package_built": False,
         "release_candidate_package_built": release_package_built,
-        "tauri_skeleton": True,
-        "desktop_release_candidate": True,
-        "release_candidate_stage": "P15-S-1.0-final-rc",
+        "tauri_skeleton": False,
+        "desktop_release_candidate": desktop_runtime,
+        "release_candidate_stage": "SCBKR-2.3-free-rc",
         "sidecar_supported": True,
         "sidecar_running": True,
-        "sandbox_available": True,
+        "sandbox_available": False,
         "api_status": "running",
         "api_server_reachable": True,
         "api_url": f"http://{sidecar_host}:{sidecar_port}",
@@ -1574,13 +3148,27 @@ def desktop_status() -> dict[str, Any]:
         "sidecar_port": sidecar_port,
         "data_dir": os.environ.get("SCBKR_DATA_DIR"),
         "external_call_required": MODEL_SETTINGS.get("mode") in ("external", "hybrid"),
-        "preview": True,
-        "preview_package": "built" if release_package_built else "preview runtime",
+        "preview": False,
+        "preview_package": "not included",
         "release_candidate_package": "built" if release_package_built else "runtime",
         "production_packaging": False,
-        "production_packaging_status": "future stage pending",
-        "installer": "not a production installer",
-        "release_candidate_installer": "release candidate installer",
+        "production_packaging_status": (
+            "Windows release candidate complete; Microsoft Store signing and submission are pending"
+            if desktop_runtime
+            else "release candidate not built"
+        ),
+        "installer": "NSIS release-candidate installer" if desktop_runtime else "not built",
+        "release_candidate_installer": "NSIS release-candidate installer",
+        "store_submission_ready": False,
+        "store_submission_target": "Microsoft Store",
+        "store_submission_blockers": [
+            "partner_center_publisher_identity",
+            "code_signing_identity",
+            "store_listing_and_legal_urls",
+            "store_submission_package",
+            "microsoft_certification",
+        ],
+        "public_edition": "FREE",
     }
 
 
@@ -1608,6 +3196,8 @@ def _model_payload_preserving_blank_api_key(payload: dict[str, Any]) -> dict[str
 
 @app.post("/api/settings/model")
 def set_model_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    global _MODEL_SESSION_VERIFIED
+    _MODEL_SESSION_VERIFIED = False
     payload = _model_payload_preserving_blank_api_key(payload)
     next_settings = {**MODEL_SETTINGS, **payload, "enabled": False, "last_test_status": "untested", "last_test_message": "", "updated_at": _now()}
     if "api_key" not in payload:
@@ -1637,6 +3227,7 @@ def set_permissions(payload: dict[str, Any]) -> dict[str, Any]:
 
 @app.post("/api/model/test")
 def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    global _MODEL_SESSION_VERIFIED
     if payload:
         payload = _model_payload_preserving_blank_api_key(payload)
         next_settings = {**MODEL_SETTINGS, **payload, "updated_at": _now()}
@@ -1657,14 +3248,21 @@ def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
                 assert_permission_allowed(PERMISSIONS, "external_api_call")
             test_settings = {
                 **MODEL_SETTINGS,
-                # A connection check only needs a short reply. Keeping this
-                # small prevents lightweight local models from rejecting the
-                # request when their loaded context window is limited.
-                "max_tokens": min(MODEL_SETTINGS["max_tokens"], 64),
+                # A connection check proves that the model can generate, not
+                # how much it can write. Eight tokens keep old local hardware
+                # from being marked offline merely because a verbose reply
+                # reaches the ordinary authoring timeout.
+                "temperature": 0,
+                "max_tokens": min(MODEL_SETTINGS["max_tokens"], 8),
+                "timeout": (
+                    max(int(MODEL_SETTINGS.get("timeout") or 0), 300)
+                    if MODEL_SETTINGS.get("mode") == "local"
+                    else MODEL_SETTINGS["timeout"]
+                ),
             }
             response = _post_openai_compatible(
                 test_settings,
-                [{"role": "user", "content": "請回覆 SCBKR model gateway test。"}],
+                [{"role": "user", "content": "Reply with exactly: SCBKR READY"}],
             )
             status = {**make_test_status(True, parse_chat_completion_response(response)), "test_result_kind": "local_model_success" if MODEL_SETTINGS["mode"] == "local" else "external_model_success"}
     except PermissionError as exc:
@@ -1678,6 +3276,7 @@ def test_model(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     if status["last_test_status"] == "success":
         MODEL_SETTINGS.pop("raw_error", None)
     MODEL_SETTINGS["enabled"] = status["last_test_status"] == "success"
+    _MODEL_SESSION_VERIFIED = status["last_test_status"] == "success"
     save_runtime_section("model", MODEL_SETTINGS)
     result = _public_model_settings()
     if MODEL_SETTINGS.get("mode") == "sandbox":
@@ -1704,10 +3303,32 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     user_text = str(payload.get("message", "")).strip()
     if not user_text:
         raise HTTPException(status_code=400, detail="message is required")
+    recent_chat_history: list[dict[str, str]] = []
+    raw_history = payload.get("chat_history") or payload.get("messages") or []
+    if isinstance(raw_history, list):
+        for item in raw_history[-12:]:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").lower()
+            content = str(item.get("content") or "").strip()
+            if role in {"user", "assistant"} and content:
+                recent_chat_history.append({"role": role, "content": content[:4000]})
     input_classification = classify_user_input(user_text)
     product_topic = detect_product_topic(user_text)
     locale = _response_locale(user_text, str(payload.get("locale") or ""))
-    four_store_context = _build_four_store_context(user_text, None)
+    product_info_request = bool(
+        product_topic
+        or _is_scbkr_product_question(user_text)
+        or _is_workbench_capability_question(user_text)
+    )
+    # Product identity and usage are shipped local authority. They do not need
+    # semantic retrieval, and an unrelated signed rule must never be presented
+    # as the basis for a product-help answer.
+    four_store_context = (
+        _deferred_four_store_context(user_text)
+        if product_info_request
+        else _build_four_store_context(user_text, None)
+    )
     rule_assist = _assess_rule_assist(user_text, locale=locale, target_mode="chat", four_store_context=four_store_context)
     current_rule_package = build_current_rule_package(
         user_text,
@@ -1718,7 +3339,18 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     )
     post_check: dict[str, Any] = {"checked": False, "allowed": True, "violations": [], "action": "not_applicable"}
     model_fallback_error: str | None = None
+    provider_usages: list[dict[str, Any]] = []
+    model_request_messages: list[dict[str, Any]] = []
+    chat_model_settings = {**MODEL_SETTINGS, "_skip_rule_state_context": True}
     mode = str(input_classification.get("mode") or "general_chat")
+    if mode == "general_chat" and current_rule_package.get("matched_rules"):
+        mode = "answer_with_rules"
+        input_classification = {
+            **input_classification,
+            "mode": mode,
+            "reason": "已命中已簽名本地規則，自動改走 current_rule_package 引用規則回答。",
+            "requires_four_store": True,
+        }
     if _is_workbench_capability_question(user_text):
         reply = SCBKR_WORKBENCH_CAPABILITY_ZH
         source = "scbkr_workbench_capability_lock"
@@ -1729,6 +3361,13 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     elif mode == "confirm_storage":
         reply = _rule_os_route_reply(mode, locale, rule_os_text(locale))
         source = "rule_os_storage_gate"
+    elif mode == "modify_existing_rule":
+        reply = (
+            "Open Rule Center, select the signed rule, and choose Manage rule. Describe the change there; the connected model will draft a new unsigned version while the current version stays active. Only you can review and sign the replacement."
+            if locale == "en"
+            else "請到規則中心選取要修改的已簽名規則，再按「管理規則」。在那裡用人話描述修改內容；連接的模型會草擬一份未簽名新版，舊版在新版完成驗收前仍維持原狀。只有你能確認與簽名新版。"
+        )
+        source = "rule_os_modify_gate"
     elif mode in {"tool_execution", "high_risk_action"}:
         reply = _rule_os_route_reply(mode, locale, rule_os_text(locale))
         source = "rule_os_permission_gate"
@@ -1739,71 +3378,134 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
             reply = _rule_os_route_reply(mode, locale, rule_os_text(locale))
         source = "rule_os_four_store_reader"
     elif product_topic:
-        reply = build_product_reply(product_topic, locale)
+        reply = build_product_reply(product_topic, locale, depth=detect_explanation_depth(user_text))
         source = f"product_manifest:{product_topic}"
     elif _is_scbkr_product_question(user_text):
-        reply = build_product_reply("identity", locale)
+        reply = build_product_reply("identity", locale, depth=detect_explanation_depth(user_text))
         source = "product_manifest:identity"
     elif mode == "answer_with_rules":
         if current_rule_package.get("draft_only") and not current_rule_package.get("matched_rules"):
-            reply = build_rule_package_local_reply(user_text, current_rule_package, locale)
-            source = "rule_os_draft_only_no_signed_rule"
-        elif not _model_connected() or MODEL_SETTINGS.get("mode") == "sandbox":
+            if not _model_connected():
+                model_fallback_error = "model_not_connected"
+                reply = _model_unavailable_reply(locale, model_fallback_error)
+                source = "model_unavailable"
+            elif MODEL_SETTINGS.get("mode") == "sandbox":
+                reply = build_local_rule_assist_reply(user_text, rule_assist, locale)
+                source = "sandbox"
+            else:
+                try:
+                    _assert_model_gateway_call_allowed(MODEL_SETTINGS)
+                    if locale == "en":
+                        no_rule_system = (
+                            "You are the normal chat entry for SCBKR. The hard router already searched the local four stores, "
+                            "and no signed active rule matched this request. Answer as a helpful general model in the user's language. "
+                            "You may use recent chat only for conversational continuity. Do not treat chat as a rule, formal evidence, "
+                            "or stored memory; do not create a task or write to the four stores. Do not claim that a rule was applied, "
+                            "signed, stored, or activated, and do not claim that an external action was executed."
+                        )
+                    else:
+                        no_rule_system = (
+                            "你是 SCBKR 的一般聊天入口。硬路由已先查本地四庫，但本次沒有命中已簽名且啟用的規則。"
+                            "請像一般模型一樣，以使用者語言正常、具體地回答。最近短期對話只能維持聊天連貫，"
+                            "不得當成規則、正式依據或長期記憶，也不得建立 task 或寫入四庫。"
+                            "不得宣稱已套用、簽名、入庫或啟用規則，也不得宣稱已執行外部動作。"
+                        )
+                    model_request_messages = [
+                        {"role": "system", "content": no_rule_system},
+                        *recent_chat_history,
+                        {"role": "user", "content": user_text},
+                    ]
+                    response = _post_openai_compatible(chat_model_settings, model_request_messages)
+                    if isinstance(response.get("usage"), dict):
+                        provider_usages.append(response["usage"])
+                    reply = parse_chat_completion_response(response)
+                    source = "model_gateway_general_no_rule"
+                except PermissionError as exc:
+                    if _model_call_requires_external_api_permission(MODEL_SETTINGS):
+                        raise HTTPException(status_code=403, detail=EXTERNAL_API_LOOPBACK_ERROR) from exc
+                    model_fallback_error = str(exc)
+                    reply = _model_unavailable_reply(locale, "model_permission_required")
+                    source = "model_unavailable"
+                except Exception as exc:
+                    model_fallback_error = _friendly_model_error(MODEL_SETTINGS, str(exc))
+                    _mark_model_runtime_unavailable(model_fallback_error)
+                    reply = _model_unavailable_reply(locale, model_fallback_error)
+                    source = "model_unavailable"
+        elif not _model_connected():
+            model_fallback_error = "model_not_connected"
+            reply = _model_unavailable_reply(locale, model_fallback_error)
+            source = "model_unavailable"
+        elif MODEL_SETTINGS.get("mode") == "sandbox":
             reply = build_rule_package_local_reply(user_text, current_rule_package, locale)
             source = "rule_os_local_rule_package"
         else:
             try:
                 _assert_model_gateway_call_allowed(MODEL_SETTINGS)
                 messages = build_rule_package_messages(user_text, current_rule_package, locale)
-                response = _post_openai_compatible(MODEL_SETTINGS, messages)
+                response = _post_openai_compatible(chat_model_settings, messages)
+                model_request_messages = messages
+                if isinstance(response.get("usage"), dict):
+                    provider_usages.append(response["usage"])
                 reply = parse_chat_completion_response(response)
                 source = "model_gateway_rule_package"
             except PermissionError as exc:
                 if _model_call_requires_external_api_permission(MODEL_SETTINGS):
                     raise HTTPException(status_code=403, detail=EXTERNAL_API_LOOPBACK_ERROR) from exc
                 model_fallback_error = str(exc)
-                reply = build_rule_package_local_reply(user_text, current_rule_package, locale)
-                source = "model_gateway_permission_denied_local_rule_package"
+                reply = _model_unavailable_reply(locale, "model_permission_required")
+                source = "model_unavailable"
             except Exception as exc:
                 model_fallback_error = _friendly_model_error(MODEL_SETTINGS, str(exc))
-                reply = build_rule_package_local_reply(user_text, current_rule_package, locale)
-                source = "model_gateway_failed_local_rule_package"
+                _mark_model_runtime_unavailable(model_fallback_error)
+                reply = _model_unavailable_reply(locale, model_fallback_error)
+                source = "model_unavailable"
         post_check = check_model_answer_against_rule_package(reply, current_rule_package)
         if not post_check.get("allowed"):
             if source.startswith("model_gateway"):
-                fallback_reply = build_rule_package_local_reply(user_text, current_rule_package, locale)
+                violation_codes = ", ".join(str(item.get("code") or "rule_violation") for item in post_check.get("violations", []))
                 if locale == "en":
-                    reply = "The model output did not pass the local rule check, so SCBKR replaced it with a local rule-package draft.\n\n" + fallback_reply
+                    reply = "The model output was blocked by the local rule check. SCBKR did not replace it with a template or fallback answer. Review the rule package or retry the connected model."
                 else:
-                    reply = "模型輸出未通過本地規則檢查，SCBKR 已改用本次規則包產生安全草稿。\n\n" + fallback_reply
-                source = f"{source}_post_check_local_rule_package"
+                    reply = "模型輸出未通過本地規則檢查，已被擋下。SCBKR 沒有用模板或 fallback 冒充答案；請檢查本次規則包或重試已連線模型。"
+                if violation_codes:
+                    reply = f"{reply}\n\nRule check: {violation_codes}"
+                source = f"{source}_post_check_blocked"
             else:
                 reply = downgrade_answer_to_draft(reply, post_check, locale)
     elif not _model_connected():
-        reply = build_local_rule_assist_reply(user_text, rule_assist, locale)
-        source = "rule_assist_local_fallback"
+        model_fallback_error = "model_not_connected"
+        reply = _model_unavailable_reply(locale, model_fallback_error)
+        source = "model_unavailable"
     elif MODEL_SETTINGS.get("mode") == "sandbox":
         reply = build_local_rule_assist_reply(user_text, rule_assist, locale)
         source = "sandbox"
     else:
         try:
             _assert_model_gateway_call_allowed(MODEL_SETTINGS)
-            response = _post_openai_compatible(MODEL_SETTINGS, [{"role": "system", "content": "你是 SCBKR 一般聊天入口。必須使用使用者最新訊息所使用的語言回答；若使用者明確指定另一語言，則依指定語言回答。此規則在 EMPTY、DRAFTING、User Rule 與沈耀規則狀態都成立。繁體中文使用者不得自行切成簡體中文，也不得自行編造價格、優惠、工法、傳承。不要建立 task，不要寫入 Data Center。若使用者問 SCBKR / Workbench / Data Center / 四庫 / S/C/B/K/R，必須依本產品定義回答；不得把 SCBKR 解釋成外部組織、SAP、學校、科研平台或未知縮寫。一般聊天不得污染規則庫；若要正式回答任務，必須改用 current_rule_package。\n\n" + build_rule_assist_prompt(rule_assist, locale)}, {"role": "user", "content": user_text}])
+            model_request_messages = [
+                {"role": "system", "content": "你是 SCBKR 一般聊天入口。必須使用使用者最新訊息所使用的語言回答；若使用者明確指定另一語言，則依指定語言回答。此規則在 EMPTY、DRAFTING、User Rule 與沈耀規則狀態都成立。繁體中文使用者不得自行切成簡體中文，也不得自行編造價格、優惠、工法、傳承。不要建立 task，不要寫入 Data Center。若使用者問 SCBKR / Workbench / Data Center / 四庫 / S/C/B/K/R，必須依本產品定義回答；不得把 SCBKR 解釋成外部組織、SAP、學校、科研平台或未知縮寫。一般聊天可使用最近短期對話維持連貫，但不得把它寫入規則庫；若要正式回答任務，必須改用 current_rule_package。\n\n" + build_rule_assist_prompt(rule_assist, locale)},
+                *recent_chat_history,
+                {"role": "user", "content": user_text},
+            ]
+            response = _post_openai_compatible(chat_model_settings, model_request_messages)
+            if isinstance(response.get("usage"), dict):
+                provider_usages.append(response["usage"])
             reply = parse_chat_completion_response(response)
             source = "model_gateway"
         except PermissionError as exc:
             if _model_call_requires_external_api_permission(MODEL_SETTINGS):
                 raise HTTPException(status_code=403, detail=EXTERNAL_API_LOOPBACK_ERROR) from exc
             model_fallback_error = str(exc)
-            reply = build_local_rule_assist_reply(user_text, rule_assist, locale)
-            source = "model_gateway_permission_denied_local_fallback"
+            reply = _model_unavailable_reply(locale, "model_permission_required")
+            source = "model_unavailable"
         except Exception as exc:
             model_fallback_error = _friendly_model_error(MODEL_SETTINGS, str(exc))
-            reply = build_local_rule_assist_reply(user_text, rule_assist, locale)
-            source = "model_gateway_failed_local_fallback"
+            _mark_model_runtime_unavailable(model_fallback_error)
+            reply = _model_unavailable_reply(locale, model_fallback_error)
+            source = "model_unavailable"
     if locale == "zh-TW":
         reply = _zh_tw_output_guard(reply)
-    if rule_assist.get("four_store", {}).get("answer_priority") == "basic_chat_or_draft_only":
+    if not product_info_request and rule_assist.get("four_store", {}).get("answer_priority") == "basic_chat_or_draft_only":
         if locale == "en":
             marker = "Four-store state: no signed citation was found, so this is basic chat or a draft only."
             if marker.lower() not in reply.lower():
@@ -1816,18 +3518,29 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
         reply = f"{reply}\n\nGate：這涉及高風險工具、發布、入庫或外部連線；我只能先做草案，正式執行前必須由使用者簽名確認。"
     elif rule_assist.get("state") == "OWNER_SIGNATURE_REQUIRED" and locale == "en" and "signature" not in reply.lower():
         reply = f"{reply}\n\nGate: this touches high-risk tools, publishing, storage, or external connection. I can draft only; owner signature is required before execution."
-    reply = _rule_state_manager().decorate_reply(reply, locale)
+    rule_state_manager = _rule_state_manager()
+    reply = rule_state_manager.guard_reply(reply)
+    rule_applied = bool(current_rule_package.get("matched_rules"))
+    current_state = rule_state_manager.status(locale)
+    if (rule_applied and source != "model_unavailable") or current_state.get("state") == "RULEPACK_ACTIVE":
+        reply = rule_state_manager.decorate_reply(reply, locale)
     suggestion = _build_chat_suggestion(user_text) if mode == "general_chat" and any(trigger in user_text for trigger in SUGGESTION_TRIGGERS) else None
+    # The per-request estimate compares the retrieved evidence used for this
+    # task with the compiled minimal package. Full-store, same-model A/B remains
+    # available as an explicit benchmark and must never block ordinary chat.
     token_cost_audit = measure_context_compression(
         {
             "latest_user_message": user_text,
-            "chat_history": payload.get("chat_history") or payload.get("messages") or [],
-            "four_store_context": four_store_context,
+            "recent_chat_history": recent_chat_history,
+            "retrieved_four_store_context": four_store_context,
             "rule_assist": rule_assist,
-            "registered_rules": _rule_registry().list_rules(),
-            "storage_items_considered": list_persisted_storage_items(limit=1000),
         },
         current_rule_package,
+        messages=model_request_messages,
+        provider_usages=provider_usages,
+        model_settings=MODEL_SETTINGS,
+        pricing=PRICING_SETTINGS,
+        measurement_scope="rule_answer" if mode == "answer_with_rules" else "general_chat",
     )
     return {
         "mode": "general_chat",
@@ -1838,9 +3551,11 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
         "post_check": post_check,
         "reply": reply,
         "reply_source": source,
+        "model_used": source.startswith("model_gateway") or source == "sandbox",
         "model_fallback_error": model_fallback_error,
         "chat_context_used": current_rule_package.get("chat_context_used", False),
-        "rule_state": _rule_state_manager().status(locale),
+        "rule_state": current_state,
+        "rule_applied": rule_applied,
         "rule_assist": rule_assist,
         "model_connected": _model_connected(),
         "suggestion": suggestion,
@@ -1899,38 +3614,28 @@ def _create_task_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
         plan_level = str(payload.get("rule_assist_plan") or RULE_ASSIST_SETTINGS.get("plan_level", "FREE"))
         task["rule_assist_plan"] = plan_level
         task["rule_assist"] = _assess_rule_assist(raw_input, locale=_response_locale(raw_input, None), target_mode=str(payload.get("object_type") or "task"), four_store_context=task["data_center_context"])
-        direct_runtime = compile_rule_from_input(raw_input, plan_level=plan_level, locale=_response_locale(raw_input, None))
-        task["kernel_runtime"] = {
-            "route": direct_runtime["route"],
-            "l0_gate": direct_runtime["l0_gate"],
-            "validator": direct_runtime["validator"],
-            "kernel_meta": direct_runtime["kernel_pack"].get("meta"),
-        }
-        task["scbkr"] = direct_runtime["draft"]
-        fallback_used = False
-        skipped_reason = "direct_scbkr_kernel_compiler"
-        task["draft_object"] = build_scbkr_draft_object(
-            user_request_raw=raw_input,
-            scbkr=task["scbkr"],
-            intent=str(payload.get("intent") or "create_confirmation"),
-            object_type=str(payload.get("object_type") or "task"),
-            draft_id=task_id,
-            evidence_context=task["data_center_context"],
+        authoring_result = _compile_model_assisted_rulebook(
+            raw_input,
+            plan_level=plan_level,
+            locale=_response_locale(raw_input, str(payload.get("locale") or "")),
         )
-        task["draft_model_call_skipped_reason"] = skipped_reason
-        task["status"] = "waiting_user_confirm" if direct_runtime["validator"].get("passed") else "model_validation_failed"
-        task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
-        task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
-        task["draft_object"]["generated_under_kernel"] = task["scbkr"].get("meta", {}).get("generated_under_kernel")
-        task["draft_object"]["model_role"] = "draft_only"
-        task["draft_object"]["requires_user_signature"] = True
-        task["confirmed"] = False
+        if authoring_result.get("draft"):
+            _apply_model_authoring_success_to_task(task, authoring_result, raw_input=raw_input, payload=payload)
+            task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
+            task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
+            task["draft_object"]["generated_under_kernel"] = task["scbkr"].get("meta", {}).get("generated_under_kernel")
+            task["confirmed"] = False
+            TASKS[task_id] = task
+            save_task(task)
+            save_scbkr_confirmation(task_id, task["scbkr"])
+            _append_task_event("task_created", task, status_after="waiting_scbkr", payload={"task_type": task["task_type"]})
+            _append_task_event("scbkr_model_assisted_rulebook_created", task, status_before="waiting_scbkr", status_after=task["status"], payload={"draft_source": task.get("draft_source"), "model_provider": task.get("model_provider"), "model_name": task.get("model_name"), "validator": task["kernel_runtime"].get("validator"), "context_audit": task.get("context_audit")})
+            return task
+        _apply_model_authoring_failure_to_task(task, authoring_result)
         TASKS[task_id] = task
         save_task(task)
-        save_scbkr_confirmation(task_id, task["scbkr"])
         _append_task_event("task_created", task, status_after="waiting_scbkr", payload={"task_type": task["task_type"]})
-        _append_task_event("scbkr_direct_kernel_compiled", task, status_before="waiting_scbkr", status_after=task["status"], payload={"fallback_used": fallback_used, "draft_model_call_skipped_reason": skipped_reason, "data_center_context_advisory": True, "validator": direct_runtime["validator"]})
-        _append_task_event("scbkr_draft_created", task, status_before="waiting_scbkr", status_after=task["status"], payload={"compatibility_event": True, "confirmation_status": task["scbkr"].get("confirmation_status")})
+        _append_task_event("scbkr_model_assisted_rulebook_failed", task, status_before="waiting_scbkr", status_after=task["status"], payload=task.get("model_rulebook_authoring"))
         return task
     TASKS[task_id] = task
     save_task(task)
@@ -1964,44 +3669,23 @@ def create_scbkr(task_id: str) -> dict[str, Any]:
     task["data_center_context"].update({"advisory": True, "retrieval_required": True, "auto_confirmed": False, "auto_storage": False, "candidate_count": len(task["data_center_context"].get("hits", []))})
     task["rule_assist_plan"] = RULE_ASSIST_SETTINGS.get("plan_level", "FREE")
     task["rule_assist"] = _assess_rule_assist(task["raw_input"], locale=_response_locale(task["raw_input"], None), target_mode="task", four_store_context=task["data_center_context"])
-    direct_runtime = compile_rule_from_input(
+    authoring_result = _compile_model_assisted_rulebook(
         task["raw_input"],
         plan_level=str(task["rule_assist_plan"] or "FREE"),
         locale=_response_locale(task["raw_input"], None),
     )
-    task["kernel_runtime"] = {
-        "route": direct_runtime["route"],
-        "l0_gate": direct_runtime["l0_gate"],
-        "validator": direct_runtime["validator"],
-        "kernel_meta": direct_runtime["kernel_pack"].get("meta"),
-    }
-    task["scbkr"] = direct_runtime["draft"]
-    fallback_used = False
-    skipped_reason = "direct_scbkr_kernel_compiler"
-    task["draft_object"] = build_scbkr_draft_object(user_request_raw=task["raw_input"], scbkr=task["scbkr"], draft_id=task_id, evidence_context=task["data_center_context"])
-    task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
-    task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
-    task["draft_object"]["generated_under_kernel"] = task["scbkr"].get("meta", {}).get("generated_under_kernel")
-    task["draft_object"]["model_role"] = "draft_only"
-    task["draft_object"]["requires_user_signature"] = True
-    task["draft_model_call_skipped_reason"] = skipped_reason
-    task["status"] = "waiting_user_confirm" if direct_runtime["validator"].get("passed") else "model_validation_failed"
+    if authoring_result.get("draft"):
+        _apply_model_authoring_success_to_task(task, authoring_result, raw_input=task["raw_input"], payload={"intent": "create_new_rule_confirmation", "object_type": "rule"})
+        task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
+        task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
+        task["draft_object"]["generated_under_kernel"] = task["scbkr"].get("meta", {}).get("generated_under_kernel")
+        save_task(task)
+        save_scbkr_confirmation(task_id, task["scbkr"])
+        _append_task_event("scbkr_model_assisted_rulebook_created", task, status_before=status_before, status_after=task["status"], payload={"draft_source": task.get("draft_source"), "validator": task["kernel_runtime"].get("validator"), "context_audit": task.get("context_audit")})
+        return task
+    _apply_model_authoring_failure_to_task(task, authoring_result)
     save_task(task)
-    save_scbkr_confirmation(task_id, task["scbkr"])
-    _append_task_event(
-        "scbkr_direct_kernel_compiled",
-        task,
-        status_before=status_before,
-        status_after=task["status"],
-        payload={"confirmation_status": task["scbkr"].get("confirmation_status"), "fallback_used": fallback_used, "draft_model_call_skipped_reason": skipped_reason, "data_center_context_advisory": True, "validator": direct_runtime["validator"]},
-    )
-    _append_task_event(
-        "scbkr_draft_created",
-        task,
-        status_before=status_before,
-        status_after=task["status"],
-        payload={"compatibility_event": True, "confirmation_status": task["scbkr"].get("confirmation_status")},
-    )
+    _append_task_event("scbkr_model_assisted_rulebook_failed", task, status_before=status_before, status_after=task["status"], payload=task.get("model_rulebook_authoring"))
     return task
 
 
@@ -2014,33 +3698,26 @@ def regenerate_scbkr_draft(task_id: str, payload: dict[str, Any]) -> dict[str, A
     task["data_center_context"] = _build_four_store_context(raw_input, task_id)
     task["rule_assist_plan"] = RULE_ASSIST_SETTINGS.get("plan_level", "FREE")
     task["rule_assist"] = _assess_rule_assist(raw_input, locale=_response_locale(raw_input, None), target_mode="task", four_store_context=task["data_center_context"])
-    direct_runtime = compile_rule_from_input(
+    authoring_result = _compile_model_assisted_rulebook(
         raw_input,
         plan_level=str(task["rule_assist_plan"] or "FREE"),
         locale=_response_locale(raw_input, None),
     )
-    task["kernel_runtime"] = {
-        "route": direct_runtime["route"],
-        "l0_gate": direct_runtime["l0_gate"],
-        "validator": direct_runtime["validator"],
-        "kernel_meta": direct_runtime["kernel_pack"].get("meta"),
-    }
-    task["scbkr"] = direct_runtime["draft"]
-    fallback_used = False
-    skipped_reason = "direct_scbkr_kernel_compiler"
-    task["draft_object"] = build_scbkr_draft_object(user_request_raw=raw_input, scbkr=task["scbkr"], draft_id=task_id, evidence_context=task["data_center_context"])
-    task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
-    task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
-    task["draft_object"]["generated_under_kernel"] = task["scbkr"].get("meta", {}).get("generated_under_kernel")
-    task["draft_object"]["model_role"] = "draft_only"
-    task["draft_object"]["requires_user_signature"] = True
-    task["status"] = "waiting_user_confirm" if direct_runtime["validator"].get("passed") else "model_validation_failed"
+    if authoring_result.get("draft"):
+        _apply_model_authoring_success_to_task(task, authoring_result, raw_input=raw_input, payload={"intent": "create_new_rule_confirmation", "object_type": "rule"})
+        task["confirmed"] = False
+        task["draft_object"]["rule_assist_state"] = task["rule_assist"].get("state")
+        task["draft_object"]["rule_assist_plan"] = task["rule_assist"].get("plan_level")
+        task["draft_object"]["generated_under_kernel"] = task["scbkr"].get("meta", {}).get("generated_under_kernel")
+        save_task(task)
+        save_scbkr_confirmation(task_id, task["scbkr"])
+        _append_task_event("scbkr_model_assisted_rulebook_regenerated", task, status_before=status_before, status_after=task["status"], payload={"draft_source": task.get("draft_source"), "validator": task["kernel_runtime"].get("validator"), "context_audit": task.get("context_audit")})
+        return {"task_id": task_id, "scbkr": task["scbkr"], "draft_source": task["scbkr"].get("draft_source"), "fallback_used": False, "fallback_reason": "", "model_raw_preview": task.get("model_raw_preview", ""), "schema_valid": True, **_task_response(task)}
+    _apply_model_authoring_failure_to_task(task, authoring_result)
     task["confirmed"] = False
-    task["draft_model_call_skipped_reason"] = skipped_reason
     save_task(task)
-    save_scbkr_confirmation(task_id, task["scbkr"])
-    _append_task_event("scbkr_draft_regenerated", task, status_before=status_before, status_after=task["status"], payload={"fallback_used": fallback_used, "fallback_reason": skipped_reason})
-    return {"task_id": task_id, "scbkr": task["scbkr"], "draft_source": task["scbkr"].get("draft_source"), "fallback_used": fallback_used, "fallback_reason": skipped_reason, "model_raw_preview": "", "schema_valid": not fallback_used, **_task_response(task)}
+    _append_task_event("scbkr_model_assisted_rulebook_failed", task, status_before=status_before, status_after=task["status"], payload=task.get("model_rulebook_authoring"))
+    return {"task_id": task_id, "scbkr": None, "draft_source": task.get("draft_source"), "fallback_used": False, "fallback_reason": "", "model_raw_preview": "", "schema_valid": False, **_task_response(task)}
 
 
 @app.patch("/api/tasks/{task_id}/scbkr")
@@ -2053,11 +3730,12 @@ def edit_scbkr(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     candidate = payload.get("scbkr")
     if candidate is not None:
         validate_scbkr_draft_for_confirmation(candidate)
-        task["scbkr"] = candidate
+        task["scbkr"] = deepcopy(candidate)
+        task["scbkr"]["owner_revision"] = {"kind": "full_edit", "requires_new_signature": True}
     _reset_owner_signature_status(task["scbkr"])
     task["confirmed"] = False
-    task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
     task["scbkr"]["confirmation_status"] = "draft"
+    _revalidate_revised_scbkr(task, revision_source="owner_full_edit")
     task["draft_object"] = build_scbkr_draft_object(user_request_raw=task.get("raw_input", ""), scbkr=task["scbkr"], draft_id=task_id, evidence_context=task.get("data_center_context"))
     _invalidate_downstream_after_scbkr_revision(task, status_before)
     save_task(task)
@@ -2086,7 +3764,8 @@ def apply_scbkr_rule_assist(task_id: str, payload: dict[str, Any] | None = None)
     task["scbkr"] = apply_rule_assist_to_scbkr(raw_input, task["scbkr"], task["rule_assist"])
     _reset_owner_signature_status(task["scbkr"])
     task["confirmed"] = False
-    task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
+    task["scbkr"]["confirmation_status"] = "draft"
+    _revalidate_revised_scbkr(task, revision_source="rule_assist")
     task["draft_object"] = build_scbkr_draft_object(
         user_request_raw=raw_input,
         scbkr=task["scbkr"],
@@ -2114,10 +3793,15 @@ def apply_scbkr_rule_assist(task_id: str, payload: dict[str, Any] | None = None)
 @app.post("/api/tasks/{task_id}/scbkr/patch-draft")
 def scbkr_patch_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
+    _ensure_scbkr_edit_allowed(task)
+    if "scbkr" not in task:
+        raise HTTPException(status_code=409, detail="A model-authored SCBKR draft is required before editing a dimension")
     layer = str(payload.get("layer") or "B").upper()
     instruction = str(payload.get("instruction", "")).strip()
     if layer not in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
         raise HTTPException(status_code=400, detail="layer must be S/C/B/K/R")
+    if not instruction:
+        raise HTTPException(status_code=400, detail="edit instruction is required")
     before = task.get("scbkr", {}).get(layer, {})
     raw_input = str(task.get("raw_input") or "").strip()
     assessment = _assess_rule_assist(
@@ -2126,16 +3810,116 @@ def scbkr_patch_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         target_mode="task",
         four_store_context=task.get("data_center_context"),
     )
-    after = strip_confirmation_metadata(build_scbkr_layer_patch(
-        raw_input=raw_input,
-        scbkr=task.get("scbkr", {}),
-        layer=layer,
-        instruction=instruction,
-        assessment=assessment,
-    ))
-    if layer == "B" and ("日期" in instruction or "date" in instruction.lower()):
-        after["stop_conditions"] = list(after.get("stop_conditions") or []) + ["模型不得自行確認事件日期；日期必須由使用者填寫或確認。"]
-        after["sensitive_operation_confirm"] = True
+    locale = _response_locale(raw_input or instruction, payload.get("locale"))
+    sandbox_mode = MODEL_SETTINGS.get("mode") == "sandbox" or MODEL_SETTINGS.get("provider") == SANDBOX_PROVIDER
+    provider_usage: dict[str, Any] = {}
+    if sandbox_mode:
+        # This deterministic adapter exists only for automated tests. It is
+        # never reported as a connected production model.
+        sandbox_patch = strip_confirmation_metadata(build_scbkr_layer_patch(
+            raw_input=raw_input,
+            scbkr=task.get("scbkr", {}),
+            layer=layer,
+            instruction=instruction,
+            assessment=assessment,
+        ))
+        after = {
+            **strip_confirmation_metadata(before if isinstance(before, dict) else {}),
+            **sandbox_patch,
+        }
+        model_metadata = {
+            "model_used": False,
+            "sandbox_used": True,
+            "model_source": "sandbox_test_adapter",
+            "model_provider": SANDBOX_PROVIDER,
+            "model_name": str(MODEL_SETTINGS.get("model_name") or SANDBOX_PROVIDER),
+            "model_schema_valid": True,
+            "model_semantic_valid": True,
+        }
+    else:
+        unavailable = _model_rulebook_unavailable_reason()
+        if unavailable:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": unavailable,
+                    "message": _model_unavailable_reply(locale, unavailable),
+                    "next_required_action": "open_model_settings_and_test_connection",
+                },
+            )
+        messages = build_model_dimension_patch_messages(
+            raw_input,
+            layer=layer,
+            instruction=instruction,
+            current_dimension=before if isinstance(before, dict) else {},
+            locale=locale,
+            compact=_uses_lightweight_local_authoring(MODEL_SETTINGS),
+        )
+        patch_settings = {**MODEL_SETTINGS, "_skip_rule_state_context": True}
+        patch_settings["timeout"] = max(int(patch_settings.get("timeout") or 0), 90)
+        patch_settings["max_tokens"] = min(max(int(patch_settings.get("max_tokens") or 0), 256), 700)
+        try:
+            if str(patch_settings.get("provider") or "").lower() == "lm_studio":
+                response = _post_openai_compatible(patch_settings, messages)
+            else:
+                try:
+                    response = _post_openai_compatible(
+                        patch_settings,
+                        messages,
+                        response_format=model_dimension_patch_response_format(),
+                    )
+                except Exception as exc:
+                    if "response_format" not in str(exc):
+                        raise
+                    response = _post_openai_compatible(patch_settings, messages)
+            provider_usage = dict(response.get("usage") or {}) if isinstance(response, dict) else {}
+            model_text = parse_chat_completion_response(response)
+            model_patch = parse_model_dimension_patch_output(
+                model_text,
+                layer=layer,
+                instruction=instruction,
+                user_input=raw_input,
+                locale=locale,
+            )
+            after = strip_confirmation_metadata(apply_model_dimension_patch(
+                before if isinstance(before, dict) else {},
+                layer=layer,
+                patch=model_patch,
+                model_provider=str(MODEL_SETTINGS.get("provider") or ""),
+                model_name=str(MODEL_SETTINGS.get("model_name") or ""),
+            ))
+        except ModelRulebookAuthoringError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": exc.code,
+                    "message": (
+                        "The model response did not form a valid SCBKR field. No edit was applied."
+                        if locale == "en"
+                        else "模型回覆尚未形成合格的 SCBKR 欄位，這次沒有套用修改。"
+                    ),
+                    "next_required_action": "revise_instruction_or_switch_model",
+                },
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "model_patch_call_failed",
+                    "message": _model_unavailable_reply(locale, "model_patch_call_failed"),
+                    "next_required_action": "retry_or_switch_model",
+                },
+            ) from exc
+        model_metadata = {
+            "model_used": True,
+            "sandbox_used": False,
+            "model_source": "connected_model",
+            "model_provider": str(MODEL_SETTINGS.get("provider") or ""),
+            "model_name": str(MODEL_SETTINGS.get("model_name") or ""),
+            "model_schema_valid": True,
+            "model_semantic_valid": True,
+        }
+    _validate_scbkr_patch_after_draft(layer, after)
     patch = {
         "layer": layer,
         "before_summary": str(before)[:240],
@@ -2144,8 +3928,86 @@ def scbkr_patch_draft(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         "plan_level": assessment.get("plan_level"),
         "rule_assist_state": assessment.get("state"),
         "auto_confirmed": False,
+        "provider_usage": provider_usage,
+        **model_metadata,
     }
     return {"task_id": task_id, "patch": patch, "confirmed": False, "status": task.get("status")}
+
+
+@app.post("/api/tasks/{task_id}/scbkr/owner-edit")
+def owner_edit_scbkr_dimension(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply an owner's visible field edit to the actual compiled dimension."""
+    task = _get_task(task_id)
+    _ensure_scbkr_edit_allowed(task)
+    if "scbkr" not in task:
+        raise HTTPException(status_code=400, detail="SCBKR draft required before edit")
+    layer = str(payload.get("layer") or "").upper()
+    content = str(payload.get("content") or "").strip()
+    if layer not in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
+        raise HTTPException(status_code=400, detail="layer must be S/C/B/K/R")
+    if len(content) < 2:
+        raise HTTPException(status_code=400, detail="dimension content is required")
+
+    current_scbkr = deepcopy(task["scbkr"])
+    current_dimension = current_scbkr.get(layer) if isinstance(current_scbkr.get(layer), dict) else {}
+    owner_patch = {
+        "content": content,
+        "explanation": "使用者直接修改此欄位；重新簽名前仍為草稿。",
+        "missing_information": [],
+        "needs_user_confirmation": ["請確認此修改後再簽名。"],
+        "model_cannot_decide": ["模型不得覆蓋使用者的直接修改。"],
+        "risk_notes": ["修改後必須重新通過驗證與簽名。"],
+    }
+    edited_dimension = apply_model_dimension_patch(
+        current_dimension,
+        layer=layer,
+        patch=owner_patch,
+    )
+    edited_dimension.pop("model_patch", None)
+    edited_dimension["owner_edit"] = {
+        "owner_edited": True,
+        "content": content,
+        "requires_new_signature": True,
+    }
+    edited_dimension["owner_draft_content"] = content
+    edited_dimension["model_schema_adapter_generated"] = False
+    edited_dimension["model_explanation_derived_from_fields"] = True
+    edited_dimension = strip_confirmation_metadata(edited_dimension)
+    if layer == "R":
+        edited_dimension["signature_status"] = "waiting_owner_signature"
+    _validate_scbkr_patch_after_draft(layer, edited_dimension)
+
+    for key in ("confirmed", "confirmed_at", "confirmed_by", "confirmation_statement", "signature", "confirmed_snapshot", "confirmed_snapshot_hash"):
+        current_scbkr.pop(key, None)
+    for dim in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
+        if isinstance(current_scbkr.get(dim), dict):
+            current_scbkr[dim] = strip_confirmation_metadata(current_scbkr[dim])
+    current_scbkr[layer] = edited_dimension
+    current_scbkr["confirmation_status"] = "draft"
+    _reset_owner_signature_status(current_scbkr)
+    validate_scbkr_draft_for_confirmation(current_scbkr)
+
+    status_before = task.get("status")
+    task["scbkr"] = current_scbkr
+    task["confirmed"] = False
+    validation = _revalidate_revised_scbkr(task, revision_source="owner_dimension_edit")
+    task["draft_object"] = build_scbkr_draft_object(
+        user_request_raw=task.get("raw_input", ""),
+        scbkr=task["scbkr"],
+        draft_id=task_id,
+        evidence_context=task.get("data_center_context"),
+    )
+    _invalidate_downstream_after_scbkr_revision(task, status_before)
+    save_task(task)
+    save_scbkr_confirmation(task_id, task["scbkr"])
+    _append_task_event(
+        "scbkr_owner_dimension_edited",
+        task,
+        status_before=status_before,
+        status_after=task["status"],
+        payload={"layer": layer, "requires_new_signature": True, "validator_passed": validation["passed"]},
+    )
+    return _task_response(task, auto_confirmed=False)
 
 
 @app.post("/api/tasks/{task_id}/scbkr/apply-patch")
@@ -2179,7 +4041,7 @@ def apply_scbkr_patch(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task["scbkr"] = candidate_scbkr
     _reset_owner_signature_status(task["scbkr"])
     task["confirmed"] = False
-    task["status"] = "draft_failed" if task.get("scbkr", {}).get("draft_source") == "draft_failed" else "waiting_user_confirm"
+    _revalidate_revised_scbkr(task, revision_source="model_dimension_patch")
     task["draft_object"] = build_scbkr_draft_object(user_request_raw=task.get("raw_input", ""), scbkr=task["scbkr"], draft_id=task_id, evidence_context=task.get("data_center_context"))
     _invalidate_downstream_after_scbkr_revision(task, status_before)
     save_task(task)
@@ -2216,25 +4078,42 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
     if "scbkr" not in task:
         raise HTTPException(status_code=400, detail="SCBKR draft required before confirm")
     payload = payload or {}
-    downstream_invalidated = False
-    if "scbkr" in payload:
-        _ensure_scbkr_edit_allowed(task)
-        candidate = payload["scbkr"]
-        validate_scbkr_draft_for_confirmation(candidate)
-        status_before_revision = task.get("status")
-        downstream_invalidated = _invalidate_downstream_after_scbkr_revision(task, status_before_revision)
-        candidate["confirmation_status"] = "draft"
-        task["scbkr"] = candidate
-    else:
-        validate_scbkr_draft_for_confirmation(task["scbkr"])
     confirmed_by = str(payload.get("confirmed_by") or "user").strip().lower()
     signature = str(payload.get("signature") or "").strip()
-    if task.get("scbkr", {}).get("draft_source") == "draft_failed":
-        raise HTTPException(status_code=400, detail="SCBKR draft failed; task subject is required before confirmation")
     if confirmed_by != "user" or signature.lower() in {"model", "assistant", "system"}:
         raise HTTPException(status_code=400, detail="model cannot sign or confirm SCBKR")
     if not signature:
         raise HTTPException(status_code=400, detail="owner signature is required before SCBKR confirmation")
+    downstream_invalidated = False
+    if "scbkr" in payload:
+        _ensure_scbkr_edit_allowed(task)
+        candidate = deepcopy(payload["scbkr"])
+        validate_scbkr_draft_for_confirmation(candidate)
+        status_before_revision = task.get("status")
+        downstream_invalidated = _invalidate_downstream_after_scbkr_revision(task, status_before_revision)
+        for key in ("confirmed", "confirmed_at", "confirmed_by", "confirmation_statement", "signature", "confirmed_snapshot", "confirmed_snapshot_hash"):
+            candidate.pop(key, None)
+        for dim in SCBKR_CONFIRMATION_REQUIRED_FIELDS:
+            if isinstance(candidate.get(dim), dict):
+                candidate[dim] = strip_confirmation_metadata(candidate[dim])
+        candidate["confirmation_status"] = "draft"
+        candidate["owner_revision"] = {"kind": "full_edit", "requires_new_signature": True}
+        _reset_owner_signature_status(candidate)
+        task["scbkr"] = candidate
+        task["confirmed"] = False
+        _revalidate_revised_scbkr(task, revision_source="owner_full_edit")
+    elif task.get("confirmed") is not True:
+        _revalidate_revised_scbkr(task, revision_source=str(task.get("scbkr", {}).get("last_revision_source") or "pre_signature_check"))
+    validate_scbkr_draft_for_confirmation(task["scbkr"])
+    if task.get("scbkr", {}).get("signing_allowed") is not True:
+        raise HTTPException(
+            status_code=409,
+            detail="Current rulebook still has unresolved SCBKR gaps. Complete the highlighted fields or use a stronger model for one compilation pass before signing.",
+        )
+    if task.get("validator_passed") is not True:
+        raise HTTPException(status_code=409, detail="Kernel Validator must pass before owner signature")
+    if task.get("scbkr", {}).get("draft_source") == "draft_failed":
+        raise HTTPException(status_code=400, detail="SCBKR draft failed; task subject is required before confirmation")
     confirm_all_dimensions(
         task["scbkr"],
         confirmed_by="user",
@@ -2301,8 +4180,26 @@ def generate(task_id: str) -> dict[str, Any]:
                 result.update({"source": "sandbox_mock_model", "next_required_action": "user_review_required"})
                 return result
             generation_messages = build_generation_messages(task, task["scbkr"])
-            generation_messages.append({"role": "system", "content": "本次模型生成只能依 confirmed SCBKR 與 current_rule_package；不得靠聊天上下文補規則。current_rule_package=" + json.dumps(generation_rule_package, ensure_ascii=False, sort_keys=True)})
-            response = _post_openai_compatible(MODEL_SETTINGS, generation_messages)
+            compact_package = {
+                "task_type": generation_rule_package.get("task_type"),
+                "matched_rules": generation_rule_package.get("matched_rules", [])[:2],
+                "citable_data": generation_rule_package.get("citable_data", [])[:2],
+                "user_preferences": generation_rule_package.get("user_preferences", [])[:2],
+                "forbidden_actions": generation_rule_package.get("forbidden_actions", [])[:5],
+                "stop_conditions": generation_rule_package.get("stop_conditions", [])[:4],
+                "missing_information": generation_rule_package.get("missing_information", [])[:4],
+                "output_limits": generation_rule_package.get("output_limits", [])[:3],
+                "draft_only": generation_rule_package.get("draft_only"),
+                "citation_policy": generation_rule_package.get("citation_policy"),
+                "chat_context_used": False,
+            }
+            generation_messages.append({"role": "system", "content": "本次模型生成只能依已確認的 SCBKR 與下列最小規則包，不得靠聊天上下文補規則。請用使用者語言輸出簡短、可讀、等待驗收的結果；不要重新輸出五維表單，控制在 220 字內。current_rule_package=" + json.dumps(compact_package, ensure_ascii=False, sort_keys=True)})
+            generation_settings = {
+                **MODEL_SETTINGS,
+                "max_tokens": min(int(MODEL_SETTINGS.get("max_tokens") or 256), 256),
+                "timeout": max(int(MODEL_SETTINGS.get("timeout") or 0), 90),
+            }
+            response = _post_openai_compatible(generation_settings, generation_messages)
             result = build_generation_result(task, task["scbkr"], parse_chat_completion_response(response))
             result["content"] = _rule_state_manager().decorate_reply(str(result.get("content") or ""))
             result["token_metrics"] = build_token_efficiency_metrics(
@@ -2312,6 +4209,8 @@ def generate(task_id: str) -> dict[str, Any]:
                 full_rule_registry=_rule_registry().list_rules(),
                 provider_usages=[response.get("usage")] if isinstance(response.get("usage"), dict) else [],
                 attempts=1,
+                model_settings=MODEL_SETTINGS,
+                pricing=PRICING_SETTINGS,
             )
             return result
 
@@ -2492,6 +4391,7 @@ def storage_request(task_id: str, payload: dict[str, Any] | None = None) -> dict
 
 
 @app.post("/api/tasks/{task_id}/storage-confirm")
+@_serialized_rule_state_change
 def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     task = _get_task(task_id)
     status_before = task.get("status")
@@ -2534,6 +4434,36 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not signature:
             raise ValueError("signature is required")
 
+        confirm_time_state_gate = _revalidate_revision_source_at_confirm(task)
+        task["confirm_time_state_gate"] = confirm_time_state_gate
+        if confirm_time_state_gate.get("allowed") is not True:
+            conflict_message = rule_os_text(str(task.get("locale") or "zh-TW")).get("state_conflict_prompt")
+            task["storage_confirmed"] = False
+            task["physical_write_performed"] = False
+            task["status"] = "storage_conflict"
+            task["next_required_action"] = "refresh_revision_from_current_rule_and_reconfirm"
+            task["storage_conflict"] = {
+                "code": confirm_time_state_gate.get("reason"),
+                "message": conflict_message,
+                "gate": confirm_time_state_gate,
+            }
+            save_task(task)
+            _append_task_event(
+                "storage_state_conflict",
+                task,
+                status_before=status_before,
+                status_after=task["status"],
+                payload=task["storage_conflict"],
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": confirm_time_state_gate.get("reason"),
+                    "message": conflict_message,
+                    "conflict": confirm_time_state_gate,
+                },
+            )
+
         plan_targets = [to_plan_target(target) for target in selected_targets]
         physical_targets = [target for target in plan_targets if target in ("vector", "corpus", "logic", "memory")]
         proposed_plan = build_storage_commit_plan(task, task.get("review_result", {}), plan_targets, storage_signature=signature if "memory" in plan_targets else None, storage_notes=payload.get("storage_notes", "P15-C user second-confirmed storage commit."))
@@ -2568,6 +4498,7 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         skipped_reasons = {target: "未產生實體寫入項目，請檢查入庫條件。" for target in skipped_targets}
         written_items = [{"item_id": item.get("item_id"), "target": to_ui_target(item.get("target")), "hash": item.get("content_hash"), "path": item.get("relative_path"), "storage_location": item.get("relative_path"), "stored_at": item.get("stored_at") or item.get("created_at")} for item in items]
         task["storage_result"] = {"status": "storage_committed", "selected_targets": selected_targets, "written_targets": written_targets, "skipped_targets": skipped_targets, "skipped_reasons": skipped_reasons, "written_items": written_items, "storage_item_ids": [item.get("item_id") for item in items], "hashes": [item.get("content_hash") for item in items], "data_dir": str(current_data_dir()), "ledger_id": task.get("ledger_id"), "hash": items[0].get("content_hash") if items else None, "physical_write_performed": True, "storage_plan_hash": storage_plan_hash, "storage_commit_key": storage_commit_key}
+        task["storage_result"]["confirm_time_state_gate"] = confirm_time_state_gate
         task["compiled_rule"] = compile_executable_rule(task, items)
         task["storage_result"]["compiled_rule"] = task["compiled_rule"]
         save_task(task)
@@ -2578,10 +4509,18 @@ def storage_confirm(task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             task["retrieval_index_result"] = {"status": "index_failed", "error": str(index_error)}
             task["storage_result"]["retrieval_index_error"] = str(index_error)
             save_task(task)
+        supersession = _supersede_prior_rule_after_storage(task)
+        if supersession:
+            task["supersession_result"] = supersession
+            task["storage_result"]["supersession_result"] = supersession
+            save_task(task)
+            _append_task_event("rule_revision_activated", task, status_before=status_before, status_after=task["status"], payload=supersession)
         _append_task_event("database_written", task, status_before=status_before, status_after=task["status"], payload=task["storage_result"])
         _append_task_event("storage_physical_write_completed", task, status_before=status_before, status_after=task["status"], payload={"item_count": len(items), "physical_write_performed": True})
         _append_task_event("storage_confirmed", task, status_before=status_before, status_after=task["status"], payload=task["storage_result"])
         return task
+    except HTTPException:
+        raise
     except PermissionError as exc:
         _append_task_event("storage_physical_write_failed", task, status_before=status_before, status_after=task.get("status"), payload={"error_message": str(exc), "physical_write_performed": False})
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -2717,7 +4656,7 @@ def task_retrieval_query(task_id: str, payload: dict[str, Any] | None = None) ->
 
 @app.get("/api/tasks")
 def list_tasks() -> dict[str, Any]:
-    return {"tasks": list_persisted_tasks(limit=50)}
+    return {"tasks": list_persisted_task_summaries(limit=50)}
 
 
 @app.get("/api/tasks/{task_id}")
@@ -2808,7 +4747,9 @@ def _dc_item_from_storage(item: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/data-center/overview")
 def data_center_overview(task_id: str | None = None) -> dict[str, Any]:
-    tasks_all = list_persisted_tasks(limit=1000)
+    # The task JSON contains full SCBKR drafts and can be large. The overview
+    # is a dashboard, so keep it responsive by counting the recent task window.
+    tasks_all = list_persisted_tasks(limit=100)
     storage_all = list_persisted_storage_items(limit=1000)
     ledger_all = read_ledger_events()
     tasks = [t for t in tasks_all if not task_id or t.get("task_id") == task_id]
@@ -2836,11 +4777,16 @@ def data_center_overview(task_id: str | None = None) -> dict[str, Any]:
         "total_confirmed_tasks_count": sum(1 for t in tasks_all if t.get("confirmed") is True),
         "total_generation_results_count": sum(1 for t in tasks_all if t.get("generation_result")),
         "total_review_records_count": sum(1 for t in tasks_all if t.get("review_result")),
+        "task_sample_limit": 100,
+        "counts_scope": "recent_tasks",
     }
 
 @app.get("/api/data-center/{section}")
 def data_center_section(section: str, task_id: str | None = None) -> dict[str, Any]:
-    tasks_all = list_persisted_tasks(limit=1000)
+    # Four-store views are backed by storage_items and do not need to load
+    # every historical task snapshot just to show their contents.
+    store_sections = {"vector", "corpus", "logic", "memory"}
+    tasks_all = [] if section in store_sections else list_persisted_tasks(limit=100)
     storage_all = list_persisted_storage_items(limit=1000)
     tasks = [t for t in tasks_all if not task_id or t.get("task_id") == task_id]
     storage = [i for i in storage_all if not task_id or i.get("task_id") == task_id]
@@ -2861,7 +4807,7 @@ def data_center_section(section: str, task_id: str | None = None) -> dict[str, A
 
 
 def _find_storage_item(item_id: str) -> dict[str, Any]:
-    for item in list_persisted_storage_items(limit=1000):
+    for item in list_persisted_storage_items(limit=100):
         if item.get("item_id") == item_id:
             return item
     raise HTTPException(status_code=404, detail="data center item not found")
