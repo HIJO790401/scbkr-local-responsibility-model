@@ -25,7 +25,12 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ANN001, ANN201, ARG001
 
 try:
     from fastapi.testclient import TestClient as _RealTestClient  # noqa: F401
-except Exception:
+except Exception as exc:
+    if os.environ.get("CI", "").lower() in {"1", "true", "yes"}:
+        raise RuntimeError(
+            'CI requires the real FastAPI TestClient; install the test extra with pip install -e ".[test]".'
+        ) from exc
+
     import sys
     import types
     from typing import Any

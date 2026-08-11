@@ -15,6 +15,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+test = [
+  "pytest>=8,<10",
+  "httpx2>=2.10,<3",
+]
 token-meter = [
   "tiktoken>=0.9.0",
   "transformers>=4.50.0",
