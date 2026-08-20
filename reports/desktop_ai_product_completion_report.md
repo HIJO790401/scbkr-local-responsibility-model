@@ -1,6 +1,7 @@
 # SCBKR Desktop AI Product Completion Report
 
 測試日期：2026-08-11
+最終發布核對：2026-08-20
 公開版本：SCBKR FREE 框架體驗版
 作者：許文耀／沈耀888π（Wen-Yao Hsu）
 
@@ -14,13 +15,27 @@
 - NSIS 安裝程式已產生於 `dist/scbkr-windows-desktop-rc/desktop/SCBKR Local Responsibility Model_2.3.0_x64-setup.exe`。
 - 安裝後不需要使用者另外安裝 Python 或 Node.js。
 
-最終封裝證據：
+2026-08-11 本機封裝證據：
 
 | 產物 | 大小 | SHA-256 |
 | --- | ---: | --- |
 | `scbkr_desktop.exe` | 10,732,544 bytes | `3E2BC111D7F8E18AE6F542A7490E18FEC8178C98ADCE5F94ED0874B25C376004` |
 | `SCBKR Local Responsibility Model_2.3.0_x64-setup.exe` | 29,336,270 bytes | `DD79BE4D8380F3330369844713F4ED26773242C730F8AE2D4B3503FA580AD6BA` |
 | `scbkr-api-x86_64-pc-windows-msvc.exe` | 27,085,405 bytes | `408FD4BE473C8CE37A257935177F718CA0A3ECF3CC80F1D3117D4E46BD771940` |
+
+上表是先前本機建置，不與不同建置環境產生的 GitHub CI 二進位檔宣稱逐位元相同。公開 `main` 的 commit `e35359ce8969b94c2c3a3f6dd5a3d7b068a677ca` 已由 GitHub Actions 成功建置；下載該次 CI artifact 後重新計算結果如下：
+
+| GitHub CI 產物 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `SCBKR Local Responsibility Model_2.3.0_x64-setup.exe` | 25,517,719 bytes | `17CE07C2432C60ECB3E37EE406684DE7D489658C19CB9067BE733D298BCBA978` |
+| `scbkr_desktop.exe` | 10,737,152 bytes | `5B6CC47AE190E708863A78033F6B22A29CF215B8DE0756621E48802D3312C579` |
+| `scbkr-api-x86_64-pc-windows-msvc.exe` | 23,457,034 bytes | `73B34A545E58E49212E8A54FAF1CC58385DB44B26CED9F07EA4136C3D223AA76` |
+
+- GitHub Actions run：`31451472968`，結論 `success`。
+- Artifact：`scbkr-windows-desktop-rc`，artifact ID `9086600892`。
+- Artifact ZIP digest：`sha256:69cf13a62e79b1030fe004c6bca495884e7348ce330f5a0d25261f410c8bba67`。
+- 下載後直接啟動 CI 版 `scbkr-api.exe`，5.91 秒內 `/health` 回覆 `ok=true`、版本 `2.3.0`，中英文產品身分與聊天路由均通過。
+- 三個公開執行檔目前 Authenticode 狀態皆為 `NotSigned`；這是可測試 RC，不得冒充已簽章商店發行版。
 
 ## 2. 模型是否能連接
 
@@ -120,21 +135,25 @@
 | Completion tokens | 51 | 57 | -6 |
 | Total tokens | 5,709 | 1,780 | 3,929（68.82%） |
 
-這證明該次任務大約只需要原 prompt 的 30.45%，不是所有模型與任務固定節省 69.55% 的普遍定律。完整機器可讀證據在 `reports/token_ab_verified_free.json`。
+這證明該次任務大約只需要原 prompt 的 30.45%，不是所有模型與任務固定節省 69.55% 的普遍定律。機器可讀結果在 `reports/token_ab_verified_free.json`。
+
+2026-08-20 取證重新核對了 LM Studio provider log、原始結果檔與公開報告：兩次 usage、時間、模型、prompt hash 與 `raw_source_sha256` 可互相吻合；原始結果檔 SHA-256 為 `B13F50C5B1C8967540EEAC209136CDDEB34872F388D9A46BB925CD26F2ABD863`。但當次 runner 是動態建立 `current_rule_package` 與完整四庫上下文，未另存這兩個欄位的逐位元原文，因此這是**可驗證的歷史實測結果**，不是「已保存完整原始輸入、任何人可逐位元重播」的證明。後續 benchmark 必須同步封存完整 input artifact，才能宣稱完整可重播。
 
 ## 13. 目前是否已是可運行桌面 AI 產品
 
 **是本機可安裝、可啟動、可重複驗證的 Windows Desktop RC；不是展示頁或沙箱。**
 
-最新驗證：
+最新公開 CI 與下載成品驗證：
 
-- `python -m pytest -q`：416 passed、1 skipped、0 failed。
-- skipped 項目是未安裝的可選 `jsonschema` 相容性測試，不影響內建 Validator 路徑。
-- Playwright：desktop Chromium 與 mobile Chromium，2 passed。
+- GitHub Actions `31451472968`：全部步驟成功，artifact 已上傳。
+- `python -m pytest -q`：415 passed、2 skipped、0 failed（30.62 秒）。
+- Playwright CI：desktop Chromium 與 mobile Chromium，2 passed（12.7 秒）。
+- 下載公開 artifact 後再次執行 Playwright：2 passed（17.6 秒）。
 - Vite / TypeScript production build：passed。
 - Desktop release contract：passed。
 - PyInstaller sidecar health、manifest、雙語 identity、chat route smoke：passed。
 - Tauri release 與 NSIS installer：passed。
+- 下載後直接啟動 CI sidecar：health、產品 manifest、中英文 identity、一般聊天 identity route 與 OpenAPI 版本均通過；測試結束後程序與 8787 連接埠均已釋放。
 - 封裝成品實際啟動與全新 AppData 驗證：passed。
 - 實機巡檢聊天、工作台、規則中心、資料中心、工具與搜尋、模型設定、規則狀態、上線中心、說明共 9 個頁面：全部可切換，無橫向溢出，瀏覽器錯誤 0。
 - 封裝狀態 API：`FREE`、`release-candidate`、`preview=false`、`sandbox_available=false`、`store_submission_ready=false`，不把 RC 冒充已上架版本。
