@@ -1,4 +1,4 @@
-# SCBKR Local Responsibility Model
+# SCBKR Responsibility Chain Language Model
 
 **Version 2.3.0 · FREE Framework Experience · Windows Desktop RC**
 

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SCBKR Responsibility Chain Language Model - Support</title>
+  <style>
+    :root { color: #10203b; background: #f4f7fb; font-family: "Segoe UI", "Noto Sans TC", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { width: min(900px, 100%); margin: 0 auto; padding: 44px 24px 64px; }
+    article { background: white; border: 1px solid #dce5f2; border-radius: 8px; padding: 28px; }
+    h1 { margin-top: 0; font-size: 32px; letter-spacing: 0; }
+    h2 { margin-top: 28px; font-size: 19px; letter-spacing: 0; }
+    p, li { line-height: 1.75; }
+    a { color: #075fd8; }
+    code { background: #eef3fa; border-radius: 4px; padding: 2px 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <article>
+      <h1>SCBKR 支援中心 / Support</h1>
+      <p>SCBKR FREE 是 Windows 10/11 x64 的本地責任規則作業系統。它不內建模型或 API 金鑰。</p>
+      <p>SCBKR FREE is a local responsibility-rule operating system for Windows 10/11 x64. It does not bundle a model or API key.</p>
+
+      <h2>開始使用 / Getting started</h2>
+      <ol>
+        <li>開啟 SCBKR 並確認本機 Runtime 顯示運行中。</li>
+        <li>在模型設定連接 LM Studio、Ollama 或 OpenAI-compatible 端點。</li>
+        <li>執行模型連線測試。</li>
+        <li>一般聊天，或要求模型把需求整理成 S/C/B/K/R 規則確認單。</li>
+        <li>檢查並修改確認單；只有使用者可以簽名及確認入庫。</li>
+      </ol>
+
+      <h2>常見狀態 / Common states</h2>
+      <ul>
+        <li><strong>模型未連線：</strong>檢查端點網址、模型名稱與服務是否已啟動。</li>
+        <li><strong>只能保留草稿：</strong>模型輸出未通過五維格式或 Kernel Validator，系統不會用模板偽裝完成。</li>
+        <li><strong>規則未命中：</strong>確認規則已由使用者簽名、完成入庫且狀態為啟用。</li>
+        <li><strong>Token 尚無節省比例：</strong>必須完成可比較的 provider usage A/B 計量後，系統才會標示已驗證比例。</li>
+      </ul>
+
+      <h2>問題回報 / Report an issue</h2>
+      <p>請到 <a href="https://github.com/HIJO790401/scbkr-local-responsibility-model/issues">GitHub Issues</a> 回報可重現步驟、Windows 版本與 SCBKR 版本。不要公開張貼 API 金鑰、密碼、身分文件或私人規則內容。</p>
+      <p>Use <a href="https://github.com/HIJO790401/scbkr-local-responsibility-model/issues">GitHub Issues</a> and include reproduction steps, Windows version, and SCBKR version. Never publish API keys, passwords, identity documents, or private rule content.</p>
+    </article>
+  </main>
+</body>
+</html>

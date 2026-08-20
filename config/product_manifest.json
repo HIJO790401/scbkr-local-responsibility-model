@@ -5,8 +5,8 @@
   "target_version": "2.3.0",
   "release_stage": "2.3-chat-first-ui-alignment",
   "name": {
-    "zh-TW": "SCBKR 一般聊天與責任鏈系統",
-    "en": "SCBKR Chat and Responsibility Chain System"
+    "zh-TW": "SCBKR 責任鏈語言模型",
+    "en": "SCBKR Responsibility Chain Language Model"
   },
   "category": {
     "zh-TW": "一般 AI 聊天產品與使用者規則責任鏈能力",

@@ -2,7 +2,7 @@
   "name": "scbkr-desktop",
   "version": "2.3.0",
   "private": true,
-  "description": "SCBKR 2.3 FREE desktop runtime",
+  "description": "SCBKR Responsibility Chain Language Model 2.3 FREE desktop runtime",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SCBKR Local Responsibility Model",
+  "productName": "SCBKR Responsibility Chain Language Model",
   "version": "2.3.0",
   "identifier": "com.shenyao.scbkr.local",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "SCBKR Local Responsibility Model",
+        "title": "SCBKR Responsibility Chain Language Model",
         "width": 1440,
         "height": 920,
         "minWidth": 1024,
@@ -32,7 +32,7 @@
       "nsis"
     ],
     "createUpdaterArtifacts": false,
-    "publisher": "SCBKR",
+    "publisher": "shenyao888pi",
     "copyright": "Copyright 2026 Wen-Yao Hsu. SCBKR FREE.",
     "externalBin": [
       "sidecar/scbkr-api"
