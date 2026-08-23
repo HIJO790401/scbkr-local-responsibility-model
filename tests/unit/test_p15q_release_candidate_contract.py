@@ -2,6 +2,7 @@ from pathlib import Path
 
 APP = Path("apps/web/src/V2App.tsx").read_text(encoding="utf-8")
 RELEASE_BUILD = Path("scripts/build_desktop_release_windows.ps1").read_text(encoding="utf-8")
+STORE_BUILD = Path("scripts/build_msix_store_windows.ps1").read_text(encoding="utf-8")
 
 
 def test_release_build_is_free_model_assisted_product_not_legacy_preview():
@@ -11,6 +12,13 @@ def test_release_build_is_free_model_assisted_product_not_legacy_preview():
     assert 'dist\\windows-runtime\\sidecar\\scbkr-api.exe' in RELEASE_BUILD
     assert "P14-C" not in RELEASE_BUILD
     assert "Sandbox Mode" not in RELEASE_BUILD
+
+
+def test_store_msix_uses_the_runtime_sidecar_name_tauri_resolves():
+    assert '$sidecarExe = Join-Path $releaseRoot "scbkr-api.exe"' in STORE_BUILD
+    assert 'Join-Path $layoutRoot "scbkr-api.exe"' in STORE_BUILD
+    assert 'requiredPackageFile in @("scbkr_desktop.exe", "scbkr-api.exe")' in STORE_BUILD
+    assert 'Join-Path $layoutRoot "scbkr-api-x86_64-pc-windows-msvc.exe"' not in STORE_BUILD
 
 
 def test_frontend_storage_has_no_fallback_signatures_and_requires_owner_signature():

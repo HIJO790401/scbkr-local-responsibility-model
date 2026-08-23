@@ -99,7 +99,7 @@ if (-not $SkipDesktopBuild) {
 }
 
 $desktopExe = Join-Path $releaseRoot "desktop\scbkr_desktop.exe"
-$sidecarExe = Join-Path $releaseRoot "scbkr-api-x86_64-pc-windows-msvc.exe"
+$sidecarExe = Join-Path $releaseRoot "scbkr-api.exe"
 $iconPath = Join-Path $repoRoot "apps\desktop\src-tauri\icons\scbkr-app-icon.png"
 foreach ($required in @($desktopExe, $sidecarExe, $iconPath)) {
   if (-not (Test-Path -LiteralPath $required)) {
@@ -128,7 +128,7 @@ if (Test-Path -LiteralPath $outputRoot) {
 New-Item -ItemType Directory -Path (Join-Path $layoutRoot "Assets") -Force | Out-Null
 
 Copy-Item -LiteralPath $desktopExe -Destination (Join-Path $layoutRoot "scbkr_desktop.exe")
-Copy-Item -LiteralPath $sidecarExe -Destination (Join-Path $layoutRoot "scbkr-api-x86_64-pc-windows-msvc.exe")
+Copy-Item -LiteralPath $sidecarExe -Destination (Join-Path $layoutRoot "scbkr-api.exe")
 
 Add-Type -AssemblyName System.Drawing
 $icon = [System.Drawing.Image]::FromFile($iconPath)
@@ -204,6 +204,11 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $packagePath)) {
 & $makeAppx unpack /p $packagePath /d $verifyRoot /o
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $verifyRoot "AppxManifest.xml"))) {
   throw "The generated MSIX could not be unpacked for verification."
+}
+foreach ($requiredPackageFile in @("scbkr_desktop.exe", "scbkr-api.exe")) {
+  if (-not (Test-Path -LiteralPath (Join-Path $verifyRoot $requiredPackageFile))) {
+    throw "The generated MSIX is missing a required runtime file: $requiredPackageFile"
+  }
 }
 
 $package = Get-Item -LiteralPath $packagePath
