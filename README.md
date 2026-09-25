@@ -1,6 +1,6 @@
 # SCBKR Responsibility Chain Language Model
 
-**Version 2.3.0 · FREE Framework Experience · Windows Desktop RC**
+**Version 2.3.1 · FREE Framework Experience · Windows Desktop Update Candidate**
 
 ![SCBKR FREE framework experience](docs/images/scbkr-hero.png)
 
@@ -23,7 +23,9 @@ SCBKR 是由 **許文耀／沈耀888π（Wen-Yao Hsu）** 建立的本地責任�
 3. Kernel Validator 檢查模型草稿。模型失敗或未連線時會明確顯示無法完成，不會用假模板冒充模型結果。
 4. 使用者可以逐欄修改，且只有使用者可以簽名。模型不能簽名、入庫、啟用規則或自行執行工具。
 5. 簽名與最後確認後，規則才會編譯進 LOGIC、CORPUS、MEMORY、VECTOR 四庫。
-6. 後續提問先查已簽名規則，產生最小 `current_rule_package`，再交給模型回答並做輸出後檢查與回放。
+6. 後續提問先查已簽名規則，並檢查使用者簽署的適用條件是否成立；只有成立的規則才進最小 `current_rule_package`，再交給模型回答並做輸出後檢查與回放。
+
+2.3.1 新增確認當下的依據重查：修訂既有規則時，若草稿所依賴的原規則已改變或無法確認，入庫會停止並要求重新確認。檢索相似度只能提供候選，不能讓缺少適用條件的舊規則自動生效。工具權限頁僅提供檢查與回放，不代表已執行檔案修改或寄送郵件。
 
 SCBKR 五維代表：
 
@@ -65,14 +67,15 @@ SCBKR 五維代表：
 - 已完成本機 Windows x64 桌面 RC、內建 API sidecar 與 NSIS 安裝程式。
 - 安裝後不需要另外安裝 Python 或 Node.js。
 - 已實機啟動封裝成品並驗證全新 AppData、Runtime、雙語 UI 與模型未連線狀態。
-- 目前尚未程式碼簽章，也尚未提交 Microsoft Store，因此不能宣稱已在商店上架。
+- 現有 FREE 版已由作者上架至 [Microsoft Store](https://apps.microsoft.com/detail/9N1SMMBL6J4D)。本次 2.3.1 更新尚須完成封裝、安裝驗證、商店提交與審核；不能把本地候選版當成商店已更新。
 
 ### 驗證結果
 
-- Python：`416 passed, 1 skipped, 0 failed`
+- Python：`441 passed, 1 skipped, 0 failed`（2.3.1 候選版）。
 - Playwright：桌面 Chromium 與行動版 Chromium，共 `2 passed`
 - Web production build：通過
 - Desktop release contract：通過
+- Windows MSIX：WACK `PASS`；2.3.1 乾淨安裝、2.3.0→2.3.1 覆蓋安裝與安裝後啟動均通過。測試憑證與測試安裝已移除。
 - PyInstaller sidecar smoke：通過
 - Tauri / NSIS Windows packaging：通過
 
@@ -111,7 +114,9 @@ This edition does not include ShenYao official or private rule packs. Users crea
 3. Kernel Validator checks the model draft. If the model is unavailable or invalid, the product reports the failure; it does not disguise a template as a model result.
 4. The user can edit every field. Only the user can sign. The model cannot sign, store, activate, or execute tools by itself.
 5. Only a signed and finally confirmed rule is compiled into the LOGIC, CORPUS, MEMORY, and VECTOR stores.
-6. Later requests retrieve signed rules first, build a minimal `current_rule_package`, generate the answer, run post-checks, and write a replay record.
+6. Later requests retrieve signed rules and check the user-signed applicability conditions. Only applicable rules enter the minimal `current_rule_package` before answer generation, post-checks, and replay.
+
+Version 2.3.1 adds confirmation-time evidence rechecks. A revision is blocked when its source rule has changed or can no longer be verified. Similarity only retrieves candidates; legacy rules without signed applicability conditions do not silently become active. The tool-permission screen evaluates gates and records traces; it does not itself modify files or send mail.
 
 The five SCBKR dimensions are:
 
@@ -153,14 +158,15 @@ This is a reproducible one-model, one-task benchmark, not a universal 69.55% gua
 - A local Windows x64 desktop RC, bundled API sidecar, and NSIS installer have been built.
 - The installed app does not require a separate Python or Node.js installation.
 - The packaged build was launched and checked with fresh AppData, local Runtime, bilingual UI, and an honest disconnected-model state.
-- The build is not code-signed and has not been submitted to Microsoft Store. It must not be represented as store-published.
+- The existing FREE app has been published by the owner on [Microsoft Store](https://apps.microsoft.com/detail/9N1SMMBL6J4D). This 2.3.1 candidate is not a published Store update until its package passes installation checks, submission, and certification.
 
 ### Validation
 
-- Python: `416 passed, 1 skipped, 0 failed`
+- Python: `441 passed, 1 skipped, 0 failed` for the 2.3.1 candidate.
 - Playwright: desktop Chromium and mobile Chromium, `2 passed`
 - Web production build: passed
 - Desktop release contract: passed
+- Windows MSIX: WACK `PASS`; clean 2.3.1 install, 2.3.0-to-2.3.1 upgrade, and installed-app launch passed. The temporary test certificate and test installation were removed.
 - PyInstaller sidecar smoke: passed
 - Tauri / NSIS Windows packaging: passed
 

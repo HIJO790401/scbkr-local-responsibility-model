@@ -1,5 +1,17 @@
 # Release Notes
 
+## 2.3.1 - FREE Rule Applicability and Evidence Recheck Candidate
+
+- Added owner-signed, deterministic rule triggers. Similarity can suggest a rule but cannot make it applicable; legacy rules without trigger closure remain candidates.
+- Added applicability receipts to distinguish applicable, unresolved, invalidated, and non-triggered rules in chat and the Rule Center.
+- Added trusted evidence-read traces, dependency coverage, and confirmation-time rechecks for rule revisions. Stale or untraceable drafts stop before storage.
+- Added a bounded local-file state reader for the ToolGate authorization check. File modification and external-message execution are not provided by this gate; external messages have no production reader and remain blocked.
+- Added Traditional Chinese and English UI states and tests for rule matching, evidence drift, and desktop/mobile workflows.
+
+Local verification: `441 passed, 1 skipped` Python tests; `2 passed` desktop/mobile Playwright tests; Web production build and desktop release contract passed. Windows 2.3.1.0 MSIX passed WACK, clean install, upgrade from 2.3.0.0, and installed Runtime launch. The temporary sideload certificate and test package were removed. No live LM Studio/Ollama model was connected during this verification; model-flow tests used a controlled OpenAI-compatible test endpoint.
+
+Release state: Microsoft Store update candidate. The existing Store listing is live, but it is not evidence that version 2.3.1 has passed Store submission and certification.
+
 ## 2.3.0 - FREE Framework Experience RC
 
 - Rebuilt SCBKR as a chat-first local responsibility-rule desktop product rather than a dashboard demo.

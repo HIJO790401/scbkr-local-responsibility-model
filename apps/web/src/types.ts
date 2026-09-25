@@ -17,6 +17,16 @@ export type ScbkrDimension = {
   [key: string]: unknown;
 };
 
+export type RuleTriggerContract = {
+  contract_version: "v1";
+  trigger_mode: "all" | "any";
+  owner_defined: true;
+  triggers: Array<{ trigger_id: string; evidence_source: string; field: string; operator: string; expected: string }>;
+  scope: { action: string[] };
+  valid_when: unknown[];
+  invalid_when: unknown[];
+};
+
 export type ScbkrDraft = Partial<Record<ScbkrDimensionKey, ScbkrDimension>> & {
   rule_summary?: string;
   missing_information?: string[];
@@ -30,6 +40,7 @@ export type ScbkrDraft = Partial<Record<ScbkrDimensionKey, ScbkrDimension>> & {
   model_schema_valid?: boolean;
   model_semantic_valid?: boolean;
   validator_passed?: boolean;
+  rule_trigger_contract?: RuleTriggerContract;
   [key: string]: unknown;
 };
 
@@ -37,6 +48,9 @@ export type CurrentRulePackage = {
   package_version?: string;
   task_type?: string;
   matched_rules?: Record<string, unknown>[];
+  rule_candidates?: Record<string, unknown>[];
+  rule_applicability_state?: string;
+  applicability_receipts?: Record<string, unknown>[];
   citable_data?: Record<string, unknown>[];
   user_preferences?: Record<string, unknown>[];
   retrieval_candidates?: Record<string, unknown>[];

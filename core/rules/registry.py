@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from core.rules.applicability import evaluate_rule_applicability, validate_rule_trigger_contract
+
 from core.storage.runtime_paths import current_data_dir
 
 RULE_SOURCES = {
@@ -41,6 +43,7 @@ IMMUTABLE_RULE_FIELDS = (
     "rule_source",
     "rule_version",
     "rule_scope",
+    "rule_trigger_contract",
     "allowed_tools",
     "denied_tools",
     "automation_level",
@@ -86,6 +89,9 @@ def normalize_rule(payload: dict[str, Any], *, source_pack_id: str | None = None
     scope = payload.get("rule_scope") or {}
     if not isinstance(scope, dict):
         raise ValueError("rule_scope must be an object")
+    trigger_contract = payload.get("rule_trigger_contract")
+    if trigger_contract is not None:
+        validate_rule_trigger_contract(trigger_contract)
     rule = {
         "rule_id": str(payload.get("rule_id") or f"rule:{uuid4().hex}"),
         "rule_name": str(payload.get("rule_name") or "").strip(),
@@ -102,6 +108,7 @@ def normalize_rule(payload: dict[str, Any], *, source_pack_id: str | None = None
             "keywords": _safe_list(scope.get("keywords")),
             "actions": _safe_list(scope.get("actions")),
         },
+        "rule_trigger_contract": trigger_contract,
         "allowed_tools": _safe_list(payload.get("allowed_tools")),
         "denied_tools": _safe_list(payload.get("denied_tools")),
         "automation_level": automation,
@@ -386,6 +393,8 @@ class RuleRegistry:
         action = str(request.get("action") or "draft")
         text = str(request.get("text") or "").lower()
         matched: list[dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
+        applicability_receipts: list[dict[str, Any]] = []
         for rule in self.list_rules():
             if rule["activation_status"] != "active":
                 continue
@@ -399,10 +408,22 @@ class RuleRegistry:
                 checks.append(workflow in scope["workflows"] or "*" in scope["workflows"])
             if scope["actions"]:
                 checks.append(action in scope["actions"] or "*" in scope["actions"])
-            if scope["keywords"]:
+            if scope["keywords"] and request.get("rule_id") != rule["rule_id"]:
                 checks.append(any(keyword.lower() in text for keyword in scope["keywords"]))
-            if checks and all(checks):
-                matched.append(rule)
+            if (checks and all(checks)) or (request.get("rule_id") == rule["rule_id"] and all(checks)):
+                qualification = evaluate_rule_applicability(rule, {
+                    "request_id": request.get("request_id"),
+                    "owner_input": {"text": str(request.get("text") or "")},
+                    "current_task_field": {
+                        "task_type": task_type, "domain": task_type, "tool": tool,
+                        "workflow": workflow, "action": action, "resource_kind": request.get("resource_kind"),
+                        "effect": request.get("effect"),
+                    },
+                }, retrieval_source="direct_rule_ref")
+                candidates.append({"rule_id": rule["rule_id"], **{key: value for key, value in qualification.items() if key != "applicability_receipt"}})
+                applicability_receipts.append(qualification["applicability_receipt"])
+                if qualification["applied"]:
+                    matched.append(rule)
 
         denied = sorted({item for rule in matched for item in rule["denied_tools"]})
         allowed = sorted({item for rule in matched for item in rule["allowed_tools"] if item not in denied})
@@ -414,11 +435,13 @@ class RuleRegistry:
             "matched": bool(matched),
             "matched_rule_ids": [rule["rule_id"] for rule in matched],
             "matched_rules": matched,
+            "candidate_rules": candidates,
+            "applicability_receipts": applicability_receipts,
             "allowed_tools": allowed,
             "denied_tools": denied,
             "tool_allowed": tool_allowed,
             "decision_allowed": bool(matched) and not draft_only,
             "draft_only": draft_only,
-            "reason": "active_rule_matched" if matched else "no_active_rule_matched",
+            "reason": "active_rule_applicable" if matched else "candidate_rule_not_applicable" if candidates else "no_active_rule_matched",
             "next_required_action": "tool_permission_gate" if matched else "search_organize_or_draft_only",
         }

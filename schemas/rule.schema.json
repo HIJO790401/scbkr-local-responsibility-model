@@ -11,6 +11,7 @@
     "rule_source": {"enum": ["user_defined", "shenyao_signed_rulepack", "enterprise_internal", "third_party", "model_draft"]},
     "rule_version": {"type": "string"},
     "rule_scope": {"type": "object"},
+    "rule_trigger_contract": {"anyOf": [{"type": "null"}, {"$ref": "rule_trigger_contract.schema.json"}]},
     "allowed_tools": {"type": "array", "items": {"type": "string"}},
     "denied_tools": {"type": "array", "items": {"type": "string"}},
     "automation_level": {"enum": ["draft_only", "manual", "semi_auto", "full_auto"]},

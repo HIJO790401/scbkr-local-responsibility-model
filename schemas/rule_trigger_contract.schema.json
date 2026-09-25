@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/rule_trigger_contract.schema.json",
+  "title": "SCBKR RuleTriggerContract v1",
+  "type": "object",
+  "required": ["contract_version", "trigger_mode", "triggers", "scope", "valid_when", "invalid_when", "owner_defined"],
+  "properties": {
+    "contract_version": {"const": "v1"},
+    "trigger_mode": {"enum": ["all", "any"]},
+    "triggers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/clause"}},
+    "scope": {"type": "object", "properties": {
+      "domain": {"type": "array", "items": {"type": "string"}},
+      "action": {"type": "array", "items": {"type": "string"}},
+      "resource_kind": {"type": "array", "items": {"type": "string"}},
+      "effect": {"type": "array", "items": {"type": "string"}}
+    }, "additionalProperties": false},
+    "valid_when": {"type": "array", "items": {"$ref": "#/$defs/clause"}},
+    "invalid_when": {"type": "array", "items": {"$ref": "#/$defs/clause"}},
+    "owner_defined": {"const": true},
+    "owner_signature_ref": {"type": "string"},
+    "created_from_rule_revision": {"type": "string"}
+  },
+  "$defs": {
+    "clause": {
+      "type": "object", "required": ["trigger_id", "evidence_source", "field", "operator"],
+      "properties": {
+        "trigger_id": {"type": "string", "minLength": 1},
+        "evidence_source": {"enum": ["owner_input", "current_task_field", "signed_context", "trusted_reader"]},
+        "field": {"type": "string", "minLength": 1},
+        "operator": {"enum": ["eq", "neq", "in", "contains", "exists", "gt", "gte", "lt", "lte"]},
+        "expected": {}, "required": {"type": "boolean"}, "provenance_required": {"type": "boolean"}
+      }, "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

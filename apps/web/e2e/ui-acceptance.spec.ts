@@ -166,7 +166,7 @@ test("中英雙語核心流程可操作，且不顯示工程狀態碼", async ({
   await expect(page.getByRole("heading", { name: "SCBKR 對話" })).toBeVisible();
   await expect(page.getByLabel("一般聊天主視窗")).toContainText("許文耀／沈耀888π");
   await expect(page.getByLabel("一般聊天主視窗")).toContainText("S／C／B／K／R");
-  await expect(page.locator(".active-rule-panel")).toContainText("尚無可引用規則");
+  await expect(page.locator(".active-rule-panel")).toContainText("本次沒有命中規則");
   await expect(page.locator(".active-rule-panel")).toContainText("尚無生效簽名");
   await expect(page.getByText("王小明", { exact: true })).toHaveCount(0);
   if (testInfo.project.name === "desktop-chromium") await expect(page.locator(".account-card")).toBeVisible();
@@ -214,6 +214,8 @@ test("中英雙語核心流程可操作，且不顯示工程狀態碼", async ({
   const submitSignature = page.getByRole("button", { name: "提交簽名", exact: true });
   await expect(submitSignature).toBeDisabled();
   await signature.fill("UI acceptance owner");
+  await page.getByLabel("下次提問須包含的文字", { exact: true }).fill("先墊錢");
+  await page.getByLabel("適用的回答類型", { exact: true }).selectOption("judgement");
   await expect(submitSignature).toBeEnabled();
   await attachScreen(page, testInfo, "01-workbench");
 

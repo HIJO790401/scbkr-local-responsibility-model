@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/rule_applicability_receipt.schema.json",
+  "title": "SCBKR RuleApplicabilityReceipt v1",
+  "type": "object",
+  "required": ["receipt_version", "rule_id", "retrieval_source", "trigger_evidence_refs", "state", "reason_codes", "evaluated_at", "evaluator_version", "decision_hash", "receipt_hash"],
+  "properties": {
+    "receipt_version": {"const": "v1"}, "rule_id": {"type": "string"},
+    "rule_revision": {"type": ["string", "integer", "null"]},
+    "rule_signature_ref": {"type": ["string", "null"]},
+    "retrieval_source": {"type": "string"}, "trigger_definition_hash": {"type": ["string", "null"]},
+    "trigger_evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "trigger_match": {"type": ["boolean", "null"]}, "scope_match": {"type": ["boolean", "null"]},
+    "invalid_when_triggered": {"type": "boolean"},
+    "state": {"enum": ["NO_MATCH", "SIMILAR_BUT_UNCLOSED", "TRIGGER_UNRESOLVED", "NOT_TRIGGERED", "INVALIDATED", "APPLICABLE"]},
+    "reason_codes": {"type": "array", "items": {"type": "string"}},
+    "evaluated_at": {"type": "string"}, "evaluator_version": {"type": "string"},
+    "decision_hash": {"type": "string"}, "receipt_hash": {"type": "string"}
+  }
+}

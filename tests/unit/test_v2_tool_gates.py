@@ -4,6 +4,7 @@ from apps.api import main
 from core.permissions.permission_flags import DEFAULT_PERMISSION_SETTINGS
 from core.rules.registry import RuleRegistry
 from core.tools.registry import ToolGateEngine, list_tool_definitions
+from core.tools.state_readers import read_tool_evidence_state
 
 
 def permissions(**overrides):
@@ -32,10 +33,74 @@ def active_code_rule(registry: RuleRegistry):
             "automation_level": "semi_auto",
             "risk_level": "high",
             "changelog": [],
+            "rule_trigger_contract": {
+                "contract_version": "v1", "trigger_mode": "all", "owner_defined": True,
+                "triggers": [{"trigger_id": "fix-phrase", "evidence_source": "owner_input", "field": "text", "operator": "contains", "expected": "fix"}],
+                "scope": {"action": ["execute"]}, "valid_when": [], "invalid_when": [],
+            },
         }
     )
     signed = registry.sign_user_rule(draft["rule_id"], "owner")
     return registry.activate(signed["rule_id"], "user", {"workflow": "repair"}, "adopt")
+
+
+def test_production_file_reader_requires_server_prepared_draft_and_rechecks(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_TOOL_WORKSPACE_ROOT", str(tmp_path))
+    path = tmp_path / "sample.py"
+    path.write_text("value = 1\n", encoding="utf-8")
+    registry = RuleRegistry(tmp_path / "rules")
+    active_code_rule(registry)
+    engine = ToolGateEngine(registry, permissions(local_file_access=True), tmp_path / "traces" / "tool.jsonl", state_reader=read_tool_evidence_state, require_trusted_draft=True)
+    request = {"tool_id": "code_workspace", "action": "execute", "task_type": "coding", "workflow": "repair", "text": "fix bug", "file_path": str(path), "user_confirmation": True}
+    assert engine.evaluate({**request, "draft_evidence_state": {"resource_id": "fake"}})["reason"] == "trusted_draft_or_coverage_required"
+    prepared = engine.prepare_stateful_draft(request)
+    approved = engine.evaluate({**request, "prepared_draft_id": prepared["prepared_draft_id"]})
+    assert approved["allowed"] is True
+    assert approved["execution_status"] == "authorized_not_executed"
+    path.write_text("value = 2\n", encoding="utf-8")
+    blocked = engine.evaluate({**request, "prepared_draft_id": prepared["prepared_draft_id"]})
+    assert blocked["allowed"] is False
+    assert blocked["confirm_time_state_gate"]["reason"] == "relevant_evidence_changed"
+
+
+def test_external_message_reader_remains_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_TOOL_WORKSPACE_ROOT", str(tmp_path))
+    engine = ToolGateEngine(RuleRegistry(tmp_path / "rules"), permissions(external_api_call=True), tmp_path / "trace.jsonl", state_reader=read_tool_evidence_state, require_trusted_draft=True)
+    import pytest
+    with pytest.raises(ValueError, match="no trusted production reader"):
+        engine.prepare_stateful_draft({"tool_id": "email_send", "action": "execute"})
+
+
+def test_production_reader_requires_explicit_workspace_and_keeps_file_content_out_of_trace(tmp_path, monkeypatch):
+    import pytest
+
+    path = tmp_path / "private.txt"
+    path.write_text("sensitive-file-content", encoding="utf-8")
+    monkeypatch.delenv("SCBKR_TOOL_WORKSPACE_ROOT", raising=False)
+    request = {"tool_id": "local_files", "action": "execute", "file_path": str(path)}
+    engine = ToolGateEngine(RuleRegistry(tmp_path / "rules"), permissions(local_file_access=True), tmp_path / "traces" / "tool.jsonl", state_reader=read_tool_evidence_state, require_trusted_draft=True)
+    with pytest.raises(ValueError, match="not configured"):
+        engine.prepare_stateful_draft(request)
+
+    monkeypatch.setenv("SCBKR_TOOL_WORKSPACE_ROOT", str(tmp_path))
+    prepared = engine.prepare_stateful_draft(request)
+    evidence_file = tmp_path / "traces" / "draft_evidence" / f"{prepared['prepared_draft_id']}.json"
+    assert "sensitive-file-content" not in evidence_file.read_text(encoding="utf-8")
+
+
+def test_confirm_time_file_reader_failure_blocks_authorization(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCBKR_TOOL_WORKSPACE_ROOT", str(tmp_path))
+    path = tmp_path / "sample.py"
+    path.write_text("value = 1\n", encoding="utf-8")
+    registry = RuleRegistry(tmp_path / "rules")
+    active_code_rule(registry)
+    engine = ToolGateEngine(registry, permissions(local_file_access=True), tmp_path / "traces" / "tool.jsonl", state_reader=read_tool_evidence_state, require_trusted_draft=True)
+    request = {"tool_id": "code_workspace", "action": "execute", "task_type": "coding", "workflow": "repair", "text": "fix bug", "file_path": str(path), "user_confirmation": True}
+    prepared = engine.prepare_stateful_draft(request)
+    path.unlink()
+    result = engine.evaluate({**request, "prepared_draft_id": prepared["prepared_draft_id"]})
+    assert result["allowed"] is False
+    assert result["confirm_time_state_gate"]["reason"] == "confirm_time_state_read_failed"
 
 
 def test_tool_registry_contains_master_plan_tools():

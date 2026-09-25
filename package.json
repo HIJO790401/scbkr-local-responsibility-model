@@ -1,7 +1,7 @@
 {
   "name": "scbkr-local-responsibility-model",
   "private": true,
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "SCBKR chat-first local responsibility-chain and user rule governance system",
   "scripts": {
     "setup": "sh scripts/setup.sh",

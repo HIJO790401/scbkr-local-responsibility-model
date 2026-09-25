@@ -57,6 +57,14 @@ def test_signature_policy_blocks_model_signature_and_requires_local_user():
     assert record["signature_status"] == "owner_signed"
 
 
+def _signed_trigger(phrase: str) -> dict:
+    return {
+        "contract_version": "v1", "trigger_mode": "all", "owner_defined": True,
+        "triggers": [{"trigger_id": "owner-phrase", "evidence_source": "owner_input", "field": "text", "operator": "contains", "expected": phrase}],
+        "scope": {"action": ["judgement"]}, "valid_when": [], "invalid_when": [],
+    }
+
+
 def test_current_rule_package_only_promotes_signed_active_formal_sources():
     context = {
         "hits": [
@@ -67,6 +75,7 @@ def test_current_rule_package_only_promotes_signed_active_formal_sources():
                 "review_passed": True,
                 "signature_status": "owner_signed",
                 "status": "active",
+                "rule_trigger_contract": _signed_trigger("朋友"),
             },
             {
                 "source_store": "vector",
@@ -97,6 +106,7 @@ def test_owner_signed_local_rule_takes_priority_over_an_adopted_external_rulepac
                 "signature_status": "owner_signed",
                 "status": "active",
                 "source_id": "local-owner-rule",
+                "rule_trigger_contract": _signed_trigger("朋友"),
             },
             {
                 "source_store": "logic",
@@ -129,6 +139,7 @@ def test_explicitly_adopted_verified_pack_can_be_used_when_no_local_rule_conflic
                 "signature_status": "verified",
                 "status": "active",
                 "source_id": "adopted-pack-rule",
+                "rule_trigger_contract": _signed_trigger("規則"),
             }
         ]
     }

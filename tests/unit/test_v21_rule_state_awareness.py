@@ -153,9 +153,10 @@ def test_general_chat_exposes_shenyao_declaration_only_when_verified_runtime_is_
     payload = response.json()
     assert payload["rule_state"]["awareness_state"] == "RULEPACK_ACTIVE"
     assert payload["rule_state"]["shenyao_declaration_allowed"] is True
-    assert "沈耀交我判的" in payload["reply"]
-    assert "主責歸耀" in payload["reply"]
-    assert "唯真長存" in payload["reply"]
+    assert payload["rule_applied"] is False
+    assert payload["current_rule_package"]["rule_applicability_state"] == "NO_MATCH"
+    assert "沈耀交我判的" not in payload["reply"]
+    assert "主責歸耀" not in payload["reply"]
 
 
 def test_general_chat_blocks_unverified_shenyao_ownership_claim(monkeypatch):

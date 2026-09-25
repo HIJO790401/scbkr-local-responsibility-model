@@ -30,6 +30,6 @@ def test_rule_intent_stays_in_chat_until_user_chooses_draft():
 def test_docs_and_manifest_describe_chat_first_product():
     assert "一般 AI 聊天產品 + 使用者規則責任鏈能力" in README
     assert "本 GitHub 儲存庫只發佈公開免費版" in README
-    assert MANIFEST["version"] == "2.3.0"
-    assert MANIFEST["release_stage"] == "2.3-chat-first-ui-alignment"
+    assert MANIFEST["version"] == "2.3.1"
+    assert MANIFEST["release_stage"] == "2.3.1-rule-applicability-hardening"
     assert "一般 AI 聊天產品" in MANIFEST["category"]["zh-TW"]

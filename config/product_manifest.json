@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0",
   "product_id": "scbkr",
-  "version": "2.3.0",
-  "target_version": "2.3.0",
-  "release_stage": "2.3-chat-first-ui-alignment",
+  "version": "2.3.1",
+  "target_version": "2.3.1",
+  "release_stage": "2.3.1-rule-applicability-hardening",
   "name": {
     "zh-TW": "SCBKR 責任鏈語言模型",
     "en": "SCBKR Responsibility Chain Language Model"

@@ -86,7 +86,7 @@ def create_signed_active_rule(client: TestClient):
     assert task["scbkr"]["meta"]["generated_under_kernel"]
     assert task["scbkr"]["R"]["model_cannot_sign"] is True
 
-    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"signature": "owner-signature"}).json()
+    confirmed = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"signature": "owner-signature", "rule_trigger_contract": {"contract_version": "v1", "trigger_mode": "all", "owner_defined": True, "triggers": [{"trigger_id": "friend", "evidence_source": "owner_input", "field": "text", "operator": "contains", "expected": "朋友"}], "scope": {"action": ["judgement"]}, "valid_when": [], "invalid_when": []}}).json()
     assert confirmed["scbkr"]["signature_status"] == "owner_signed"
 
     generated = client.post(f"/api/tasks/{task['task_id']}/generate").json()

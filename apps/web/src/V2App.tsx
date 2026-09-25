@@ -450,6 +450,18 @@ function toolExecutionStatusLabel(value: unknown, en: boolean) {
   return en ? "Waiting for permission check" : "等待權限檢查";
 }
 
+function toolGateReasonLabel(value: unknown, en: boolean) {
+  const labels: Record<string, [string, string]> = {
+    authorized_all_gates_passed: ["權限檢查通過；尚未執行", "Authorization passed; nothing executed"],
+    rule_match_required: ["缺少本次適用的已簽名規則", "No signed rule applies to this request"],
+    trusted_draft_or_coverage_required: ["請先由系統讀取檔案並準備草稿依據", "Prepare trusted file evidence before confirmation"],
+    relevant_evidence_changed: ["草稿依賴的內容已變動；請重新準備並確認", "Draft evidence changed; prepare and confirm again"],
+    confirm_time_state_read_failed: ["確認時無法重讀資料，已停止", "Unable to reread evidence at confirmation; blocked"],
+    user_confirmation_required_before_state_recheck: ["請先確認本次操作", "Confirm this operation first"],
+  };
+  return labels[String(value || "")]?.[en ? 1 : 0] || (en ? "The operation did not pass all gates." : "本次操作未通過所有權限閘門。");
+}
+
 function RuleFlowSurface({
   en,
   status,
@@ -584,6 +596,9 @@ export default function V2App() {
   const [taskInput, setTaskInput] = useState("");
   const [task, setTask] = useState<TaskSummary | null>(null);
   const [ownerSignature, setOwnerSignature] = useState("");
+  const [triggerPhrase, setTriggerPhrase] = useState("");
+  const [triggerAction, setTriggerAction] = useState("general_answer");
+  const [invalidPhrase, setInvalidPhrase] = useState("");
   const [dimensionEdits, setDimensionEdits] = useState<Record<string, string>>({});
   const [patchLayer, setPatchLayer] = useState<ScbkrDimensionKey>("B");
   const [patchInstruction, setPatchInstruction] = useState("");
@@ -600,7 +615,17 @@ export default function V2App() {
   const [toolConfirmed, setToolConfirmed] = useState(false);
   const [toolLauncherOpen, setToolLauncherOpen] = useState(false);
   const [toolResult, setToolResult] = useState<Record<string, any> | null>(null);
+  const [toolFilePath, setToolFilePath] = useState("");
+  const [preparedToolDraft, setPreparedToolDraft] = useState("");
   const [modelForm, setModelForm] = useState({ provider: "lm_studio", mode: "local", base_url: "http://127.0.0.1:1234/v1", api_key: "", model_name: "", temperature: 0.2, max_tokens: 4096, context_length: 8192, timeout: 120 });
+
+  useEffect(() => {
+    setTriggerPhrase("");
+    setTriggerAction("general_answer");
+    setInvalidPhrase("");
+  }, [task?.task_id]);
+
+  useEffect(() => setPreparedToolDraft(""), [selectedTool, toolAction, toolFilePath, task?.task_id]);
 
   const activeRules = rules.filter((rule) => rule.activation_status === "active").length;
   const citations = Number(task?.data_center_context?.evidence_packet?.authority_count || 0);
@@ -1130,7 +1155,13 @@ export default function V2App() {
 
   async function confirmTask() {
     if (!task || !ownerSignature.trim()) return;
-    const confirmed = await run(en ? "Sign responsibility chain" : "簽名責任鏈", () => api<TaskSummary>(`/api/tasks/${task.task_id}/confirm`, { method: "POST", body: JSON.stringify({ scbkr: task.scbkr, confirmed_by: "user", signature: ownerSignature.trim() }) }));
+    const triggerContract = {
+      contract_version: "v1", trigger_mode: "all", owner_defined: true,
+      triggers: [{ trigger_id: "owner-phrase", evidence_source: "owner_input", field: "text", operator: "contains", expected: triggerPhrase.trim() }],
+      scope: { action: [triggerAction] }, valid_when: [],
+      invalid_when: invalidPhrase.trim() ? [{ trigger_id: "owner-invalid", evidence_source: "owner_input", field: "text", operator: "contains", expected: invalidPhrase.trim() }] : [],
+    };
+    const confirmed = await run(en ? "Sign responsibility chain" : "簽名責任鏈", () => api<TaskSummary>(`/api/tasks/${task.task_id}/confirm`, { method: "POST", body: JSON.stringify({ scbkr: task.scbkr, confirmed_by: "user", signature: ownerSignature.trim(), rule_trigger_contract: triggerContract }) }));
     if (confirmed) syncTask(confirmed);
   }
 
@@ -1365,8 +1396,13 @@ export default function V2App() {
   }
 
   async function evaluateTool() {
-    const result = await run(en ? "Evaluate tool gates" : "檢查工具閘門", () => api<any>("/api/tools/evaluate", { method: "POST", body: JSON.stringify({ tool_id: selectedTool, action: toolAction, task_type: task?.task_type || "general", workflow: "local", text: task?.raw_input || chatInput, task_id: task?.task_id, user_confirmation: toolConfirmed }) }));
+    const result = await run(en ? "Evaluate tool gates" : "檢查工具閘門", () => api<any>("/api/tools/evaluate", { method: "POST", body: JSON.stringify({ tool_id: selectedTool, action: toolAction, task_type: task?.task_type || "general", workflow: "local", text: task?.raw_input || chatInput, task_id: task?.task_id, user_confirmation: toolConfirmed, file_path: toolFilePath, prepared_draft_id: preparedToolDraft }) }));
     if (result) { setToolResult(result); const latest = await api<any>("/api/tools/traces?limit=20"); setTraces(latest.traces || []); }
+  }
+
+  async function prepareToolEvidence() {
+    const result = await run(en ? "Read file evidence" : "讀取檔案依據", () => api<any>("/api/tools/prepare-stateful-draft", { method: "POST", body: JSON.stringify({ tool_id: selectedTool, action: toolAction, task_id: task?.task_id, file_path: toolFilePath }) }));
+    if (result?.prepared_draft_id) setPreparedToolDraft(result.prepared_draft_id);
   }
 
   async function saveModel() {
@@ -1562,9 +1598,18 @@ export default function V2App() {
 
   const activeRuleApplied = Boolean((currentRulePackage?.matched_rules || []).length);
   const activeRuleAvailable = Boolean(ruleState.active_rule_id || ruleState.active_rulepack_id);
+  const ruleApplicabilityState = currentRulePackage?.rule_applicability_state || "NO_MATCH";
+  const ruleApplicabilityLabel: Record<string, [string, string]> = {
+    NO_MATCH: ["本次沒有命中規則", "No rule matched this request"],
+    SIMILAR_BUT_UNCLOSED: ["找到相似規則，但缺少適用條件，未套用", "Similar rule found, but applicability is incomplete; not applied"],
+    TRIGGER_UNRESOLVED: ["缺少可信資料，暫時不能判定是否適用", "Trusted trigger evidence is missing; not applied"],
+    NOT_TRIGGERED: ["規則存在，但本次條件未觸發", "Rule exists, but its trigger did not match"],
+    INVALIDATED: ["規則失效條件已觸發，未套用", "Invalidation condition matched; not applied"],
+    APPLICABLE: ["已驗證觸發條件並套用", "Trigger verified and rule applied"],
+  };
   const activeRulePanel = (
     <section className="ops-panel active-rule-panel">
-      <header><ShieldCheck size={20} /><div><span>{en ? "RULE AUTHORITY" : "規則依據"}</span><h2>{activeRuleApplied ? (en ? "Rule applied to this answer" : "本次已套用規則") : activeRuleAvailable ? (en ? "Signed rule ready" : "已簽名規則可用") : (en ? "No citable rule" : "尚無可引用規則")}</h2></div></header>
+      <header><ShieldCheck size={20} /><div><span>{en ? "RULE AUTHORITY" : "規則依據"}</span><h2>{activeRuleApplied ? (en ? "Rule applied to this answer" : "本次已套用規則") : (ruleApplicabilityLabel[ruleApplicabilityState] || ruleApplicabilityLabel.NO_MATCH)[en ? 1 : 0]}</h2></div></header>
       <dl><div><dt>{en ? "Source" : "規則來源"}</dt><dd>{ruleState.active_rulepack_id ? (en ? "ShenYao rule runtime" : "沈耀規則 Runtime") : ruleState.active_rule_id ? (en ? "User local rule" : "使用者本機規則") : (en ? "No active rule" : "尚無生效規則")}</dd></div><div><dt>{en ? "Version" : "版本"}</dt><dd>{activeRuleAvailable ? (ruleState.active_rulepack_version || ruleState.active_rule_version || "--") : "--"}</dd></div><div><dt>{en ? "Signature" : "簽名狀態"}</dt><dd>{activeRuleAvailable ? responsibilityHolderLabel(ruleState.responsibility_holder, en) : (en ? "No active signature" : "尚無生效簽名")}</dd></div></dl>
       <button onClick={() => setView("runtime")}><ChevronRight size={15} />{en ? "Open rule state" : "查看規則狀態"}</button>
     </section>
@@ -1905,12 +1950,20 @@ export default function V2App() {
           <section><b>{en ? "Replay" : "回放要求"}</b><p>{compactPublicText(task.scbkr?.R?.replay_requirements, en, 5) || (en ? "Record routing, the rule package, post-check, and storage result." : "記錄路由、規則包、回答後檢查與入庫結果。")}</p></section>
         </div>
         <div className="gate-sequence"><span className={task.confirmed ? "passed" : "current"}>1 {en ? "SIGN" : "簽名"}</span><span className={task.generation_result ? "passed" : task.confirmed ? "current" : ""}>2 {en ? "GENERATE" : "生成"}</span><span className={task.review_passed ? "passed" : task.status === "waiting_review" ? "current" : ""}>3 {en ? "REVIEW" : "驗收"}</span><span className={task.storage_confirmed ? "passed" : task.review_passed ? "current" : ""}>4 {en ? "STORE" : "入庫"}</span></div>
+        {!task.confirmed && <div className="trigger-contract-editor">
+          <h3>{en ? "When should this rule apply?" : "這條規則何時適用？"}</h3>
+          <p>{en ? "You define the trigger. Similar text alone will not activate a rule." : "觸發條件由你決定；內容相似不代表規則已適用。"}</p>
+          <label>{en ? "Phrase in the next request" : "下次提問須包含的文字"}<input value={triggerPhrase} onChange={(e) => setTriggerPhrase(e.target.value)} placeholder={en ? "e.g. advance money" : "例如：先墊錢"} /></label>
+          <label>{en ? "Type of answer" : "適用的回答類型"}<select aria-label={en ? "Type of answer" : "適用的回答類型"} value={triggerAction} onChange={(e) => setTriggerAction(e.target.value)}><option value="general_answer">{en ? "General answer" : "一般回答"}</option><option value="judgement">{en ? "Decision / risk" : "判斷與風險"}</option><option value="generate_copy">{en ? "Copy draft" : "文案草稿"}</option><option value="generate_code">{en ? "Code draft" : "程式草稿"}</option><option value="email_draft">{en ? "Email draft" : "郵件草稿"}</option></select></label>
+          <label>{en ? "Do not apply when this phrase appears (optional)" : "出現這段文字時不適用（選填）"}<input value={invalidPhrase} onChange={(e) => setInvalidPhrase(e.target.value)} /></label>
+        </div>}
+        {task.confirmed && task.scbkr?.rule_trigger_contract && <p>{en ? "Signed trigger" : "已簽名觸發條件"}: {String(task.scbkr.rule_trigger_contract.triggers?.[0]?.expected || "")}</p>}
         <label>{en ? "Owner signature" : "使用者簽名"}<input value={ownerSignature} onChange={(e) => setOwnerSignature(e.target.value)} disabled={task.confirmed || taskCompiling} /></label>
         <small>{en ? "The model cannot sign. The user signature unlocks generation, review, and storage." : "模型不能簽名；只有使用者簽名後才能生成、驗收與入庫。"}</small>
         <div className="action-grid">
           {!task.confirmed && <button disabled={taskHardBlocked} onClick={() => void applyCurrentRuleAssist()}><ShieldCheck size={15} />{en ? "Run structure check" : "檢查五維結構"}</button>}
           {!task.confirmed && <button onClick={() => void run(en ? "Save draft" : "儲存草稿", async () => task)}><Save size={15} />{en ? "Save draft" : "儲存草稿"}</button>}
-          {!task.confirmed && <button disabled={!ownerSignature.trim() || taskSyncBlocked || taskCompiling} onClick={() => void confirmTask()}><ShieldCheck size={15} />{en ? "Submit signature" : "提交簽名"}</button>}
+          {!task.confirmed && <button disabled={!ownerSignature.trim() || !triggerPhrase.trim() || taskSyncBlocked || taskCompiling} onClick={() => void confirmTask()}><ShieldCheck size={15} />{en ? "Submit signature" : "提交簽名"}</button>}
           {task.status === "confirmed" && <button onClick={() => void generate()}><Bot size={15} />{en ? "Generate" : "開始生成"}</button>}
           {task.status === "waiting_review" && <><button disabled={!ownerSignature.trim()} onClick={() => void review("pass")}><Check size={15} />{en ? "Pass" : "通過驗收"}</button><button className="danger" disabled={!ownerSignature.trim()} onClick={() => void review("fail")}><X size={15} />{en ? "Fail" : "驗收失敗"}</button></>}
         </div>
@@ -1924,8 +1977,8 @@ export default function V2App() {
     <section className="workbench-zone tool-zone">
       <div className="zone-title"><div><span>AI ENGINE GATES</span><h2>{en ? "Tool Registry" : "工具註冊與權限"}</h2></div><Wrench size={20} /></div>
       <div className="tool-matrix">{tools.map((tool) => <button key={tool.tool_id} className={selectedTool === tool.tool_id ? "selected" : ""} onClick={() => setSelectedTool(tool.tool_id)}><span>{tool.name}</span><small>{riskLevelLabel(tool.risk_level, en)} · {toolListLabel(tool.capabilities, en, "action")}</small></button>)}</div>
-      <div className="gate-console"><label>{en ? "Action" : "動作"}<select value={toolAction} onChange={(e) => setToolAction(e.target.value)}>{["observe", "search", "draft", "execute", "send", "publish", "store"].map((action) => <option key={action} value={action}>{toolActionLabel(action, en)}</option>)}</select></label><label className="toggle-line"><input type="checkbox" checked={toolConfirmed} onChange={(e) => setToolConfirmed(e.target.checked)} />{en ? "Confirm this high-risk call" : "確認本次高風險呼叫"}</label><button onClick={() => void evaluateTool()}><ShieldCheck size={15} />{en ? "Evaluate gates" : "檢查五道權限閘"}</button></div>
-      {toolResult && <div className={`tool-result ${toolResult.allowed ? "allowed" : "blocked"}`}><b>{toolResult.allowed ? (en ? "AUTHORIZED" : "已授權") : (en ? "BLOCKED" : "已擋下")}</b><span>{toolResult.reason}</span><small>{toolExecutionStatusLabel(toolResult.execution_status, en)}</small></div>}
+      <div className="gate-console"><label>{en ? "Action" : "動作"}<select value={toolAction} onChange={(e) => setToolAction(e.target.value)}>{["observe", "search", "draft", "execute", "send", "publish", "store"].map((action) => <option key={action} value={action}>{toolActionLabel(action, en)}</option>)}</select></label>{["code_workspace", "git_repo", "local_files"].includes(selectedTool) && toolAction === "execute" && <label>{en ? "File path" : "檔案路徑"}<input value={toolFilePath} onChange={(e) => setToolFilePath(e.target.value)} /><button disabled={!toolFilePath.trim()} onClick={() => void prepareToolEvidence()}><FileKey size={15} />{en ? "Prepare evidence" : "準備檔案依據"}</button><small>{preparedToolDraft ? (en ? "Evidence captured; confirm and recheck now" : "已讀取依據；請確認並重新查證") : (en ? "A configured workspace is required" : "需先設定允許讀取的工作目錄")}</small></label>}<label className="toggle-line"><input type="checkbox" checked={toolConfirmed} onChange={(e) => setToolConfirmed(e.target.checked)} />{en ? "Confirm this high-risk call" : "確認本次高風險呼叫"}</label><button onClick={() => void evaluateTool()}><ShieldCheck size={15} />{en ? "Evaluate gates" : "檢查五道權限閘"}</button></div>
+      {toolResult && <div className={`tool-result ${toolResult.allowed ? "allowed" : "blocked"}`}><b>{toolResult.allowed ? (en ? "AUTHORIZED" : "已授權") : (en ? "BLOCKED" : "已擋下")}</b><span>{toolGateReasonLabel(toolResult.reason, en)}</span><small>{toolExecutionStatusLabel(toolResult.execution_status, en)}</small></div>}
     </section>
   );
 
@@ -1966,6 +2019,7 @@ export default function V2App() {
             <p>{ruleOverview(selectedRuleData, en)}</p>
             <div className="dimension-summary compact">{dims.map((dim) => <div key={dim}><b>{dim}｜{copy.dimensions[dim]}</b><span>{dimensionDraftText(selectedRuleData.scbkr_summary?.[dim] || {}, dim, en) || (en ? "No summary yet." : "尚無摘要。")}</span></div>)}</div>
           </section>
+          <section className="rule-trigger-summary"><b>{en ? "Applicability definition" : "規則適用條件"}</b><p>{selectedRuleData.rule_trigger_contract?.triggers?.length ? `${en ? "Your signed trigger" : "你簽名的觸發條件"}: ${selectedRuleData.rule_trigger_contract.triggers.map((entry: any) => String(entry.expected || entry.field)).join(en ? ", " : "、")}` : (en ? "This older rule has no signed trigger definition. It remains in history but is not applied to new answers until you create and sign a revision." : "這條舊規則尚無已簽名的觸發定義。它保留在歷史中；請建立新版並簽名後，才會用於新的回答。")}</p></section>
           <div className="rulebook-condition-grid">
             <section><b>{en ? "Formation" : "成立條件"}</b><p>{compactPublicText(selectedRuleData.compiled_rule?.execution_logic?.formation_conditions, en, 6) || (en ? "The rule is enabled after user signature and review." : "由使用者完成簽名與驗收，並啟用規則後成立。")}</p></section>
             <section><b>{en ? "Invalidation" : "失效條件"}</b><p>{compactPublicText(selectedRuleData.compiled_rule?.execution_logic?.failure_conditions, en, 6) || (en ? "The rule is invalid when disabled, archived, superseded, unsigned, or review fails." : "規則被停用、封存、新版取代、未簽名或驗收失敗時失效。")}</p></section>
@@ -1979,7 +2033,7 @@ export default function V2App() {
           <section className="citation-strip">
             <b>{en ? "Stored in" : "入庫位置"}</b>
             {(selectedRuleData.four_store_locations || ["logic"]).map((store: string) => <span key={store}>{storeDisplayMetadata(store, "active", en).label}</span>)}
-            <em>{en ? "Only enabled, user-signed, and reviewed rules may be cited as formal authority." : "只有已啟用、由使用者簽名且驗收通過的規則，才能作為正式依據。"}</em>
+            <em>{en ? "A rule needs an owner-signed trigger, active status, review, and a match on this request before it can govern an answer." : "規則必須由使用者簽名定義觸發條件、維持啟用與驗收通過，且本次條件命中，才能約束回答。"}</em>
           </section>
         </> : <div className="empty-state">{en ? "Select a rule to inspect details." : "選擇一條規則查看詳情。"}</div>}
       </main>

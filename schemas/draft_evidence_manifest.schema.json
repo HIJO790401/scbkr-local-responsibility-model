@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/draft_evidence_manifest.schema.json",
+  "title": "SCBKR DraftEvidenceManifest v1",
+  "type": "object",
+  "required": ["manifest_version", "draft_id", "state_scope", "resource_id", "resource_kind", "dependency_selectors", "draft_selector_hashes", "draft_projection_hash", "manifest_hash"],
+  "properties": {
+    "manifest_version": {"const": "v1"},
+    "draft_id": {"type": "string", "minLength": 1},
+    "state_scope": {"enum": ["file_modification", "external_message", "rule_revision_source"]},
+    "resource_id": {"type": "string", "minLength": 1},
+    "resource_kind": {"type": "string", "minLength": 1},
+    "dependency_selectors": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["selector_id", "read_event_id", "selector_type", "selector", "required"], "properties": {
+      "selector_id": {"type": "string"}, "read_event_id": {"type": "string"},
+      "selector_type": {"enum": ["whole_resource", "field", "rule_field", "json_pointer", "text_anchor", "message_id", "attachment_id", "recipient_set", "thread_latest_message_id"]},
+      "selector": {"type": "string"}, "semantic_role": {"type": "string"}, "required": {"const": true}
+    }}},
+    "draft_selector_hashes": {"type": "object", "additionalProperties": {"type": "string"}},
+    "draft_projection_hash": {"type": "string"}, "manifest_hash": {"type": "string"},
+    "canonicalization_version": {"type": "string"}
+  }
+}

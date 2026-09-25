@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/dependency_coverage_receipt.schema.json",
+  "title": "SCBKR DependencyCoverageReceipt v1",
+  "type": "object",
+  "required": ["coverage_version", "draft_id", "read_trace_hash", "manifest_hash", "closure_hash", "source_dependency_count", "manifest_covered_source_count", "uncovered_read_event_ids", "lineage_missing_event_ids", "bypass_detected", "coverage_complete", "reason", "receipt_hash"],
+  "properties": {
+    "coverage_version": {"const": "v1"}, "draft_id": {"type": "string"},
+    "read_trace_hash": {"type": "string"}, "manifest_hash": {"type": "string"},
+    "closure_hash": {"type": "string"}, "source_dependency_count": {"type": "integer"},
+    "manifest_covered_source_count": {"type": "integer"},
+    "uncovered_read_event_ids": {"type": "array", "items": {"type": "string"}},
+    "lineage_missing_event_ids": {"type": "array", "items": {"type": "string"}},
+    "bypass_detected": {"type": "boolean"}, "coverage_complete": {"type": "boolean"},
+    "reason": {"type": "string"}, "receipt_hash": {"type": "string"}
+  }
+}

@@ -3,7 +3,7 @@ param(
   [string]$Publisher = "CN=FEB91682-9693-4284-BDDE-2EC33CF8EF23",
   [string]$PublisherDisplayName = "shenyao888pi",
   [string]$DisplayName = "SCBKR Responsibility Chain Language Model",
-  [string]$Version = "2.3.0.0",
+  [string]$Version = "2.3.1.0",
   [string]$ReleaseDir = "dist\scbkr-windows-desktop-rc",
   [string]$OutputDir = "dist\scbkr-windows-store-msix",
   [switch]$SkipDesktopBuild

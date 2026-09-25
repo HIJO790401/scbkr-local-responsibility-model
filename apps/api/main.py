@@ -125,11 +125,23 @@ from core.workflow.review_flow import apply_review_decision
 from core.retrieval.retrieval_runtime import index_task_storage_cases, index_memory_rule_case, query_retrieval_cases, retrieve_for_task
 from core.retrieval.vector_store import get_vector_store_status
 from core.rules.registry import RuleRegistry
+from core.rules.applicability import validate_rule_trigger_contract
 from core.rule_state.manager import RuleStateManager
 from core.rule_state.runtime import RuleStateRuntime
 from core.rule_state.schemas import RuleStateEnum
 from core.tools.registry import ToolGateEngine, list_tool_definitions
-from core.tools.state_precondition import compare_evidence_state, evidence_state_hash
+from core.tools.state_readers import read_tool_evidence_state
+from core.tools.evidence_trace import (
+    build_dependency_coverage_receipt,
+    build_evidence_read_trace,
+    record_evidence_read,
+    verify_dependency_coverage,
+)
+from core.tools.state_precondition import (
+    build_evidence_dependency_manifest,
+    compare_scoped_evidence_state,
+    evidence_state_hash,
+)
 from core.tools.web_runtime import WebRuntime
 from core.launch.readiness import launch_readiness, load_launch_settings, public_launch_settings, save_launch_settings
 from core.kernel.local_kernel_cache import ensure_local_kernel_cache
@@ -181,7 +193,7 @@ SCBKR_CONFIRMATION_REQUIRED_FIELDS = {
     "R": ["expected_outputs", "acceptance_criteria", "ledger_requirements", "storage_options", "signature_status", "review_status", "replay_requirements"],
 }
 
-app = FastAPI(title="SCBKR Local Responsibility Model API", version="2.3.0")
+app = FastAPI(title="SCBKR Local Responsibility Model API", version="2.3.1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=LOCAL_DESKTOP_CORS_ORIGINS,
@@ -683,7 +695,7 @@ def _build_four_store_context(raw_input: str, task_id: str | None = None) -> dic
             elif relation.get("relation") == "similar_grammar":
                 relation.update({"adopted": False, "adoption_scope": "grammar"})
             ok, reason = bool(relation["adopted"]), relation["relation_reason"]
-            hit = {"source_store": source_store, "rule": text_value[:800], "status": "沿用" if ok else "未採用：相關性不足", "governance_status": item.get("status") or payload.get("status") or "active", "adopted": ok, "reason": reason, "rule_confirmed": ok, "storage_item_id": item.get("item_id"), "signature_status": signature_status, "review_passed": review_passed, "hash": item.get("hash") or item.get("content_hash"), "author_id": (payload.get("owner_signature") or {}).get("confirmed_by") or payload.get("confirmed_by"), "version": item.get("version") or payload.get("version") or 1, **relation}
+            hit = {"source_store": source_store, "rule": text_value[:800], "status": "沿用" if ok else "未採用：相關性不足", "governance_status": item.get("status") or payload.get("status") or "active", "adopted": ok, "reason": reason, "rule_confirmed": ok, "storage_item_id": item.get("item_id"), "signature_status": signature_status, "signature_ref": payload.get("confirmed_snapshot_hash"), "rule_trigger_contract": payload.get("rule_trigger_contract"), "review_passed": review_passed, "hash": item.get("hash") or item.get("content_hash"), "author_id": (payload.get("owner_signature") or {}).get("confirmed_by") or payload.get("confirmed_by"), "version": item.get("version") or payload.get("version") or 1, **relation}
             (adopted if ok else rejected).append(hit)
     for rule in list_persisted_memory_rules(limit=20):
         text_value = str(rule.get("rule_text") or rule.get("memory_rule") or rule.get("payload") or rule)
@@ -2394,6 +2406,8 @@ def list_rules() -> dict[str, Any]:
                 "risk_level": "medium",
                 "activation_status": status,
                 "signature_status": compiled.get("signature_status"),
+                "signature_ref": compiled.get("signature_ref"),
+                "rule_trigger_contract": compiled.get("rule_trigger_contract"),
                 "review_passed": compiled.get("review_passed") is True,
                 "storage_confirmed": task.get("storage_confirmed") is True,
                 "compiled_rule": compiled,
@@ -2438,6 +2452,7 @@ def _rule_evidence_state(rule: dict[str, Any]) -> dict[str, Any]:
         "supersedes": rule.get("supersedes"),
         "superseded_by": rule.get("superseded_by"),
         "rule_scope": rule.get("rule_scope"),
+        "rule_trigger_contract": rule.get("rule_trigger_contract"),
         "allowed_tools": rule.get("allowed_tools"),
         "denied_tools": rule.get("denied_tools"),
         "automation_level": rule.get("automation_level"),
@@ -2460,46 +2475,49 @@ def _revalidate_revision_source_at_confirm(task: dict[str, Any]) -> dict[str, An
         }
 
     snapshot = task.get("source_rule_snapshot") or {}
-    draft_state = snapshot.get("evidence_state")
-    if not isinstance(draft_state, dict) or not draft_state or not snapshot.get("evidence_hash"):
+    manifest = snapshot.get("draft_evidence_manifest")
+    trace = snapshot.get("evidence_read_trace")
+    coverage = snapshot.get("dependency_coverage_receipt")
+    if not all(isinstance(item, dict) for item in (manifest, trace, coverage)):
         return {
             "required": True,
             "state_scope": "rule_revision_source",
             "confirm_time_rechecked": False,
             "allowed": False,
             "conflict": True,
-            "reason": "draft_evidence_snapshot_missing",
+            "reason": "legacy_pending_reconfirmation_required",
             "source_rule_id": source_rule_id,
         }
-    computed_draft_hash = evidence_state_hash(draft_state)
-    if computed_draft_hash != snapshot.get("evidence_hash"):
+    if not verify_dependency_coverage(trace, manifest, coverage):
         return {
             "required": True,
             "state_scope": "rule_revision_source",
             "confirm_time_rechecked": False,
             "allowed": False,
             "conflict": True,
-            "reason": "draft_evidence_snapshot_integrity_failed",
+            "reason": "coverage_receipt_invalid",
             "source_rule_id": source_rule_id,
-            "recorded_evidence_hash": snapshot.get("evidence_hash"),
-            "computed_evidence_hash": computed_draft_hash,
         }
 
     try:
         current_rule = _combined_rule(source_rule_id)
-        current_state = _rule_evidence_state(current_rule)
+        current_state = {"resource_id": f"rule:{source_rule_id}", **_rule_evidence_state(current_rule)}
     except HTTPException as exc:
         current_rule = None
         current_state = {
+            "resource_id": f"rule:{source_rule_id}",
             "rule_id": source_rule_id,
             "source_state": "missing",
             "status_code": exc.status_code,
         }
 
-    gate = compare_evidence_state(draft_state, current_state, state_scope="rule_revision_source")
+    gate = compare_scoped_evidence_state(manifest, str(manifest.get("draft_projection_hash") or ""), current_state)
     gate.update(
         {
             "source_rule_id": source_rule_id,
+            "read_trace_hash": trace.get("read_trace_hash"),
+            "coverage_receipt_hash": coverage.get("receipt_hash"),
+            "coverage_complete": True,
             "draft_observed_at": snapshot.get("observed_at"),
             "draft_rule_version": snapshot.get("rule_version"),
             "current_rule_version": current_rule.get("rule_version") if current_rule else None,
@@ -2769,6 +2787,27 @@ def create_rule_revision(rule_id: str, payload: dict[str, Any]) -> dict[str, Any
     task["supersedes_rule_id"] = rule_id
     task["revision_number"] = _version_number(source.get("rule_version")) + 1
     task["revision_instruction"] = instruction
+    draft_id = str(task["task_id"])
+    revision_resource = {"resource_id": f"rule:{rule_id}", **source_evidence_state}
+    read_event = record_evidence_read(
+        draft_id,
+        revision_resource["resource_id"],
+        state_scope="rule_revision_source",
+        selector_type="whole_resource",
+        selector="",
+        value=revision_resource,
+        reader_kind="rule_registry",
+    )
+    trace = build_evidence_read_trace(draft_id, [read_event])
+    manifest = build_evidence_dependency_manifest(
+        trace, revision_resource, state_scope="rule_revision_source", resource_kind="rule"
+    )
+    coverage = build_dependency_coverage_receipt(trace, manifest)
+    if not coverage["coverage_complete"]:
+        raise HTTPException(status_code=409, detail="revision evidence coverage failed")
+    source_rule_snapshot["evidence_read_trace"] = trace
+    source_rule_snapshot["draft_evidence_manifest"] = manifest
+    source_rule_snapshot["dependency_coverage_receipt"] = coverage
     task["source_rule_snapshot"] = source_rule_snapshot
     if isinstance(task.get("draft_object"), dict):
         task["draft_object"].update({
@@ -2891,6 +2930,8 @@ def _tool_gate_engine() -> ToolGateEngine:
         _rule_registry(),
         PERMISSIONS,
         current_data_dir() / "execution_traces" / "tool-gates.jsonl",
+        state_reader=read_tool_evidence_state,
+        require_trusted_draft=True,
     )
 
 
@@ -2905,6 +2946,14 @@ def evaluate_tool_call(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         return _tool_gate_engine().evaluate(payload)
     except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/tools/prepare-stateful-draft")
+def prepare_stateful_tool_draft(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return _tool_gate_engine().prepare_stateful_draft(payload)
+    except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -3126,7 +3175,7 @@ def desktop_status() -> dict[str, Any]:
     sidecar_port = int(os.environ.get("SCBKR_API_PORT", "8787"))
     desktop_runtime = os.environ.get("SCBKR_DESKTOP_RUNTIME") in {"release-candidate", "store-candidate"}
     release_package_built = desktop_runtime
-    desktop_stage = "SCBKR-2.3-free-store-candidate" if desktop_runtime else "development"
+    desktop_stage = "SCBKR-2.3.1-free-store-candidate" if desktop_runtime else "development"
     return {
         "desktop_stage": desktop_stage,
         "desktop_shell": True,
@@ -3135,7 +3184,7 @@ def desktop_status() -> dict[str, Any]:
         "release_candidate_package_built": release_package_built,
         "tauri_skeleton": False,
         "desktop_release_candidate": desktop_runtime,
-        "release_candidate_stage": "SCBKR-2.3-free-rc",
+        "release_candidate_stage": "SCBKR-2.3.1-free-rc",
         "sidecar_supported": True,
         "sidecar_running": True,
         "sandbox_available": False,
@@ -3522,7 +3571,7 @@ def general_chat(payload: dict[str, Any]) -> dict[str, Any]:
     reply = rule_state_manager.guard_reply(reply)
     rule_applied = bool(current_rule_package.get("matched_rules"))
     current_state = rule_state_manager.status(locale)
-    if (rule_applied and source != "model_unavailable") or current_state.get("state") == "RULEPACK_ACTIVE":
+    if rule_applied and source != "model_unavailable":
         reply = rule_state_manager.decorate_reply(reply, locale)
     suggestion = _build_chat_suggestion(user_text) if mode == "general_chat" and any(trigger in user_text for trigger in SUGGESTION_TRIGGERS) else None
     # The per-request estimate compares the retrieved evidence used for this
@@ -4114,6 +4163,12 @@ def confirm_task(task_id: str, payload: dict[str, Any] | None = None) -> dict[st
         raise HTTPException(status_code=409, detail="Kernel Validator must pass before owner signature")
     if task.get("scbkr", {}).get("draft_source") == "draft_failed":
         raise HTTPException(status_code=400, detail="SCBKR draft failed; task subject is required before confirmation")
+    task["scbkr"].pop("rule_trigger_contract", None)
+    if payload.get("rule_trigger_contract") is not None:
+        try:
+            task["scbkr"]["rule_trigger_contract"] = validate_rule_trigger_contract(payload["rule_trigger_contract"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     confirm_all_dimensions(
         task["scbkr"],
         confirmed_by="user",

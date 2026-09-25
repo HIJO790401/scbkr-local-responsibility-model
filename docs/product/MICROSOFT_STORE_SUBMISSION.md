@@ -2,7 +2,7 @@
 
 - Product: **SCBKR Responsibility Chain Language Model**
 - Edition: **FREE**
-- Version: **2.3.0**
+- Update candidate version: **2.3.1 / MSIX 2.3.1.0**
 - Developer: **Wen-Yao Hsu / 許文耀**
 - Publisher display name: **shenyao888pi**
 - Store ID: **9N1SMMBL6J4D**
@@ -39,7 +39,7 @@ SCBKR FREE 是由許文耀／沈耀888π建立的本地責任規則作業系統�
 
 模型可以草擬、解釋與提出缺口，但不能替使用者簽名、正式入庫、啟用規則或執行高風險工具。規則只有在使用者審查、簽名並完成最後確認後，才會依責任拆分進 LOGIC、CORPUS、MEMORY 與 VECTOR 四庫。
 
-後續問題會先查詢已啟用的簽名規則，再建立本次最小 current rule package 交給模型回答。VECTOR 只負責尋找候選，不能直接作為正式依據；聊天歷史也不會自動變成規則。
+後續問題會先查詢已啟用的簽名規則，再檢查使用者簽署的適用條件是否成立。只有適用的規則會進入本次最小 current rule package。VECTOR 只負責尋找候選，不能直接作為正式依據；聊天歷史也不會自動變成規則。
 
 SCBKR 內建 Token / Context Audit。當模型端點提供實際 usage 時，介面會顯示本次 Prompt、Completion、總 Token 與可驗證的 A/B 比較；沒有可核對資料時不會假裝產生節省比例。
 
@@ -52,7 +52,7 @@ FREE 版不內建模型、API 金鑰或沈耀私人正式規則包。使用者�
 3. 可逐欄修改、缺口、風險與確認事項。
 4. 模型不能簽名、入庫或自行啟用規則。
 5. 使用者簽名與確認後編譯進四庫。
-6. 後續回答優先引用已啟用的簽名規則。
+6. 後續回答只正式引用已簽名且本次適用的規則。
 7. 中英文完整介面與產品說明。
 8. Token / Context Audit 與本地模型零 API 費提示。
 9. 規則版本、停用、刪除與回放紀錄。
@@ -60,7 +60,7 @@ FREE 版不內建模型、API 金鑰或沈耀私人正式規則包。使用者�
 
 ### What's new
 
-SCBKR 2.3 FREE 完成本地桌面產品流程：模型協作五維確認單、Kernel Validator、使用者簽名、四庫編譯、已簽名規則引用、中英文 UI、Token / Context Audit，以及草稿建立後到正式入庫前的來源狀態衝突重驗。
+SCBKR 2.3.1 FREE 增加使用者簽名的規則適用條件與逐次判定紀錄。相似規則只列為候選，不會自動套用。修改既有規則時，正式入庫前會重新查證原規則；來源變更或查證不足時停止並要求重新確認。工具頁提供權限檢查與紀錄，不會自行修改檔案或寄送郵件。
 
 ### Keywords
 
@@ -96,7 +96,7 @@ When you ask to create a rule, your connected model helps complete a five-dimens
 
 The model may draft, explain, and identify gaps. It cannot sign for the user, perform final storage, activate a rule, or execute high-risk tools. A rule becomes formal only after user review, signature, and final confirmation, then it is compiled by responsibility into the LOGIC, CORPUS, MEMORY, and VECTOR stores.
 
-For later questions, SCBKR checks active signed rules first and builds a minimal current rule package for the model. VECTOR retrieves candidates only and cannot become formal authority. Chat history does not automatically become a rule.
+For later questions, SCBKR checks active signed rules and evaluates their user-signed applicability conditions. Only applicable rules enter the minimal current rule package. VECTOR retrieves candidates only and cannot become formal authority. Chat history does not automatically become a rule.
 
 The built-in Token / Context Audit shows prompt, completion, and total usage when the configured provider returns real usage. Verified savings require a comparable A/B measurement; SCBKR does not invent a savings percentage when evidence is unavailable.
 
@@ -109,7 +109,7 @@ FREE bundles no model, API key, or private ShenYao official rule pack. Users con
 3. Editable dimensions, gaps, risks, and review items.
 4. The model cannot sign, store, or activate a rule.
 5. User-signed rules compile into four distinct stores.
-6. Later answers prioritize active signed rules.
+6. Later answers formally cite only signed rules applicable to the current request.
 7. Complete Traditional Chinese and English interface.
 8. Token / Context Audit and local-model cost status.
 9. Rule versions, deactivation, deletion, and replay records.
@@ -117,7 +117,7 @@ FREE bundles no model, API key, or private ShenYao official rule pack. Users con
 
 ### What's new
 
-SCBKR 2.3 FREE completes the local desktop workflow: model-assisted five-dimensional confirmation sheets, Kernel Validator, user signature, four-store compilation, signed-rule retrieval, bilingual UI, Token / Context Audit, and confirm-time source-state conflict detection.
+SCBKR 2.3.1 FREE adds user-signed rule applicability conditions and per-request decision records. Similar rules remain candidates rather than applying automatically. A revision rechecks its source rule before final storage and stops for reconfirmation when that source changed or cannot be verified. The tool screen checks permissions and records traces; it does not itself modify files or send messages.
 
 ### Keywords
 

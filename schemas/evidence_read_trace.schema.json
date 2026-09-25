@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scbkr.local/schemas/evidence_read_trace.schema.json",
+  "title": "SCBKR EvidenceReadTrace v1",
+  "type": "object",
+  "required": ["contract_version", "draft_id", "events", "read_trace_hash"],
+  "properties": {
+    "contract_version": {"const": "v1"}, "draft_id": {"type": "string", "minLength": 1},
+    "events": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["read_event_id", "draft_id", "resource_id", "state_scope", "selector_type", "selector", "reader_kind", "derived_from_event_ids", "read_result_status", "required_for_draft"], "properties": {
+      "read_event_id": {"type": "string"}, "draft_id": {"type": "string"}, "resource_id": {"type": "string"},
+      "state_scope": {"type": "string"}, "selector_type": {"type": "string"}, "selector": {"type": "string"},
+      "content_hash": {"type": ["string", "null"]}, "reader_kind": {"type": "string"},
+      "derived_from_event_ids": {"type": "array", "items": {"type": "string"}},
+      "read_result_status": {"type": "string"}, "required_for_draft": {"const": true}
+    }}},
+    "read_trace_hash": {"type": "string"}
+  }
+}

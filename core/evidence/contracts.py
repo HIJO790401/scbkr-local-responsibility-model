@@ -52,7 +52,7 @@ def _citation_from_hit(hit: dict[str, Any]) -> dict[str, Any]:
     )
     source_id = _source_id(hit)
     excerpt = str(hit.get("rule") or hit.get("summary") or "")[:800]
-    return {
+    citation = {
         "citation_id": f"cite:{_hash([store, source_id, excerpt])[:20]}",
         "source_store": store,
         "source_id": source_id,
@@ -68,6 +68,10 @@ def _citation_from_hit(hit: dict[str, Any]) -> dict[str, Any]:
         "must_cite": bool(hit.get("must_cite")),
         "excerpt": excerpt,
     }
+    if store == "logic":
+        citation["rule_trigger_contract"] = hit.get("rule_trigger_contract")
+        citation["signature_ref"] = hit.get("signature_ref")
+    return citation
 
 
 def build_evidence_packet(context: dict[str, Any] | None) -> dict[str, Any]:

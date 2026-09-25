@@ -30,6 +30,11 @@ def rule_payload():
         "automation_level": "manual",
         "risk_level": "high",
         "changelog": ["Initial rule"],
+        "rule_trigger_contract": {
+            "contract_version": "v1", "trigger_mode": "all", "owner_defined": True,
+            "triggers": [{"trigger_id": "release-phrase", "evidence_source": "owner_input", "field": "text", "operator": "contains", "expected": "release"}],
+            "scope": {"action": ["publish"]}, "valid_when": [], "invalid_when": [],
+        },
     }
 
 

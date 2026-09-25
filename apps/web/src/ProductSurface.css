@@ -580,6 +580,29 @@
 .workbench-panel .gate-sequence { margin-top: 10px; }
 .workbench-panel .action-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
+.trigger-contract-editor {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+  padding: 14px 0;
+  border-top: 1px solid #dce6ef;
+  border-bottom: 1px solid #dce6ef;
+}
+.trigger-contract-editor h3,
+.trigger-contract-editor p { grid-column: 1 / -1; margin: 0; }
+.trigger-contract-editor h3 { font-size: .94rem; color: #173653; }
+.trigger-contract-editor p { font-size: .8rem; color: #587083; }
+.trigger-contract-editor label { min-width: 0; }
+.trigger-contract-editor input,
+.trigger-contract-editor select { width: 100%; }
+.rule-trigger-summary { padding: 12px 0; border-bottom: 1px solid #dce6ef; }
+.rule-trigger-summary b { color: #173653; font-size: .85rem; }
+.rule-trigger-summary p { margin: 5px 0 0; color: #49677f; font-size: .81rem; line-height: 1.5; }
+@media (max-width: 900px) {
+  .trigger-contract-editor { grid-template-columns: 1fr; }
+}
+
 .workbench-panel .store-select {
   grid-template-columns: minmax(220px, 1fr) repeat(4, auto) auto;
   align-items: center;

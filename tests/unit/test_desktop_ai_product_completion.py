@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from core.kernel.local_kernel_cache import ensure_local_kernel_cache
+from core.rules.applicability import evaluate_rule_applicability
 from core.scbkr.model_rulebook_author import (
     ModelRulebookAuthoringError,
     apply_model_dimension_patch,
@@ -1121,6 +1122,10 @@ def test_web_explains_stale_state_conflicts_and_offers_a_fresh_revision():
     assert "No four-store write" in (i18n_root / "en.ts").read_text(encoding="utf-8")
 
 
+def _friend_trigger_contract():
+    return {"contract_version": "v1", "trigger_mode": "all", "owner_defined": True, "triggers": [{"trigger_id": "friend", "evidence_source": "owner_input", "field": "text", "operator": "contains", "expected": "朋友"}], "scope": {"action": ["judgement"]}, "valid_when": [], "invalid_when": []}
+
+
 def complete_owner_signed_rule(client, raw_input=RULE_REQUEST):
     task = client.post(
         "/api/tasks/create",
@@ -1128,7 +1133,7 @@ def complete_owner_signed_rule(client, raw_input=RULE_REQUEST):
     ).json()
     signed = client.post(
         f"/api/tasks/{task['task_id']}/confirm",
-        json={"scbkr": task["scbkr"], "confirmed_by": "user", "signature": "owner-signature"},
+        json={"scbkr": task["scbkr"], "confirmed_by": "user", "signature": "owner-signature", "rule_trigger_contract": _friend_trigger_contract()},
     ).json()
     client.post(f"/api/tasks/{task['task_id']}/generate")
     client.post(
@@ -1151,7 +1156,7 @@ def complete_owner_signed_rule(client, raw_input=RULE_REQUEST):
 def prepare_rule_task_for_storage(client, task, signature_prefix):
     confirmed = client.post(
         f"/api/tasks/{task['task_id']}/confirm",
-        json={"scbkr": task["scbkr"], "confirmed_by": "user", "signature": f"{signature_prefix}-owner"},
+        json={"scbkr": task["scbkr"], "confirmed_by": "user", "signature": f"{signature_prefix}-owner", "rule_trigger_contract": _friend_trigger_contract()},
     )
     assert confirmed.status_code == 200, confirmed.text
     generated = client.post(f"/api/tasks/{task['task_id']}/generate")
@@ -1410,8 +1415,9 @@ def test_model_assisted_rulebook_storage_and_followup_rule_package(tmp_path, mon
     assert task["scbkr"]["missing_information"]
     assert task["context_audit"]["chat_context_used"] is False
 
-    signed = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"scbkr": task["scbkr"], "confirmed_by": "user", "signature": "owner-signature"}).json()
+    signed = client.post(f"/api/tasks/{task['task_id']}/confirm", json={"scbkr": task["scbkr"], "confirmed_by": "user", "signature": "owner-signature", "rule_trigger_contract": _friend_trigger_contract()}).json()
     assert signed["status"] == "confirmed"
+    assert signed["scbkr"]["confirmed_snapshot"]["rule_trigger_contract"] == _friend_trigger_contract()
     generated = client.post(f"/api/tasks/{task['task_id']}/generate").json()
     assert generated["status"] == "waiting_review"
     reviewed = client.post(
@@ -1429,11 +1435,13 @@ def test_model_assisted_rulebook_storage_and_followup_rule_package(tmp_path, mon
     ).json()
     assert stored["storage_confirmed"] is True
     assert "logic" in stored["storage_result"]["written_targets"]
+    assert stored["compiled_rule"]["rule_trigger_contract"] == _friend_trigger_contract()
 
     answer = client.post("/api/chat/general", json={"message": FOLLOWUP}).json()
     assert answer["route_mode"] == "answer_with_rules"
     assert answer["chat_context_used"] is False
     assert answer["current_rule_package"]["matched_rules"]
+    assert answer["current_rule_package"]["rule_applicability_state"] == "APPLICABLE"
     assert answer["current_rule_package"]["chat_context_used"] is False
     assert answer["rule_state"]["awareness_state"] == "RULE_ACTIVE"
     assert answer["token_cost_audit"]["compression_ratio"] >= 0
@@ -1466,10 +1474,15 @@ def test_rule_revision_keeps_old_active_until_new_signed_storage_then_supersedes
     before_storage = {item["rule_id"]: item for item in main.list_rules()["rules"]}
     assert before_storage[original_rule_id]["activation_status"] == "active"
 
-    client.post(
+    revised_trigger = {
+        **_friend_trigger_contract(),
+        "triggers": [{**_friend_trigger_contract()["triggers"][0], "expected": "同事"}],
+    }
+    confirmed = client.post(
         f"/api/tasks/{revision['task_id']}/confirm",
-        json={"scbkr": revision["scbkr"], "confirmed_by": "user", "signature": "revision-owner"},
+        json={"scbkr": revision["scbkr"], "confirmed_by": "user", "signature": "revision-owner", "rule_trigger_contract": revised_trigger},
     )
+    assert confirmed.status_code == 200, confirmed.text
     client.post(f"/api/tasks/{revision['task_id']}/generate")
     client.post(
         f"/api/tasks/{revision['task_id']}/review",
@@ -1486,10 +1499,19 @@ def test_rule_revision_keeps_old_active_until_new_signed_storage_then_supersedes
 
     assert stored["compiled_rule"]["version"] == 2
     assert stored["compiled_rule"]["supersedes"] == original_rule_id
+    assert stored["compiled_rule"]["rule_trigger_contract"] == revised_trigger
     assert stored["supersession_result"]["status"] == "superseded"
     after_storage = {item["rule_id"]: item for item in main.list_rules()["rules"]}
     assert after_storage[original_rule_id]["activation_status"] == "superseded"
+    assert after_storage[original_rule_id]["rule_trigger_contract"] == _friend_trigger_contract()
     assert after_storage[stored["compiled_rule"]["rule_id"]]["activation_status"] == "active"
+    current = after_storage[stored["compiled_rule"]["rule_id"]]
+    old_context = {"owner_input": {"text": "朋友要我墊款"}, "current_task_field": {"action": "judgement"}}
+    new_context = {"owner_input": {"text": "同事要我墊款"}, "current_task_field": {"action": "judgement"}}
+    assert evaluate_rule_applicability(current, old_context)["applied"] is False
+    decision = evaluate_rule_applicability(current, new_context)
+    assert decision["applied"] is True
+    assert decision["applicability_receipt"]["rule_revision"] == "v2.0"
 
 
 def test_stale_parallel_revision_is_rechecked_and_blocked_at_storage_confirm(tmp_path, monkeypatch):
@@ -1527,9 +1549,9 @@ def test_stale_parallel_revision_is_rechecked_and_blocked_at_storage_confirm(tmp
 
     assert stale_commit.status_code == 409
     detail = stale_commit.json()["detail"]
-    assert detail["code"] == "state_conflict_reconfirmation_required"
+    assert detail["code"] == "relevant_evidence_changed"
     assert detail["conflict"]["confirm_time_rechecked"] is True
-    assert detail["conflict"]["expected_evidence_hash"] != detail["conflict"]["current_evidence_hash"]
+    assert detail["conflict"]["draft_projection_hash"] != detail["conflict"]["current_projection_hash"]
     stale_task = main._get_task(second["task_id"])
     assert stale_task["status"] == "storage_conflict"
     assert stale_task["storage_confirmed"] is False

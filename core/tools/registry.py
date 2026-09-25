@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -11,6 +12,8 @@ from uuid import uuid4
 from core.permissions.permission_checker import check_permission_for_operation
 from core.rules.registry import RuleRegistry
 from core.tools.state_precondition import compare_evidence_state
+from core.tools.state_precondition import build_evidence_dependency_manifest, compare_scoped_evidence_state
+from core.tools.evidence_trace import build_dependency_coverage_receipt, build_evidence_read_trace, record_evidence_read, verify_dependency_coverage
 
 TOOL_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {"tool_id": "web_search", "name": "Web Search", "operation": "web_search", "risk_level": "high", "capabilities": ["observe", "draft"], "external": True},
@@ -55,11 +58,59 @@ class ToolGateEngine:
         trace_path: str | Path,
         *,
         state_reader: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        require_trusted_draft: bool = False,
     ):
         self.rule_registry = rule_registry
         self.permissions = dict(permissions)
         self.trace_path = Path(trace_path)
         self.state_reader = state_reader
+        self.require_trusted_draft = require_trusted_draft
+
+    def prepare_stateful_draft(self, request: dict[str, Any]) -> dict[str, Any]:
+        tool = _tool(str(request.get("tool_id") or ""))
+        action = str(request.get("action") or "")
+        scope = str(tool.get("state_scope") or "")
+        if not scope or action not in STATE_MUTATING_ACTIONS or self.state_reader is None:
+            raise ValueError("trusted stateful draft reader unavailable")
+        state = self.state_reader({**request, "tool": tool, "state_scope": scope})
+        if not isinstance(state, dict) or not state.get("resource_id"):
+            raise ValueError("trusted reader returned no resource identity")
+        draft_id = uuid4().hex
+        event = record_evidence_read(draft_id, str(state["resource_id"]), state_scope=scope, selector_type="whole_resource", selector="", value=state, reader_kind="production_file_reader")
+        trace = build_evidence_read_trace(draft_id, [event])
+        manifest = build_evidence_dependency_manifest(trace, state, state_scope=scope, resource_kind="file")
+        coverage = build_dependency_coverage_receipt(trace, manifest)
+        if not coverage["coverage_complete"]:
+            raise ValueError("dependency_capture_incomplete")
+        record = {
+            "draft_id": draft_id, "tool_id": tool["tool_id"], "action": action,
+            "task_id": request.get("task_id"), "file_path": request.get("file_path"),
+            "draft_state": state, "trace": trace, "manifest": manifest, "coverage": coverage,
+        }
+        directory = self.trace_path.parent / "draft_evidence"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{draft_id}.json"
+        temporary = directory / f"{draft_id}.tmp"
+        temporary.write_text(json.dumps(record, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        temporary.replace(path)
+        return {"prepared_draft_id": draft_id, "resource_id": state["resource_id"], "manifest_hash": manifest["manifest_hash"], "coverage_receipt_hash": coverage["receipt_hash"], "next_required_action": "owner_confirm_then_revalidate"}
+
+    def _trusted_draft(self, request: dict[str, Any], tool: dict[str, Any], action: str) -> dict[str, Any] | None:
+        draft_id = str(request.get("prepared_draft_id") or "")
+        if not re.fullmatch(r"[0-9a-f]{32}", draft_id):
+            return None
+        path = self.trace_path.parent / "draft_evidence" / f"{draft_id}.json"
+        if not path.is_file():
+            return None
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if record.get("draft_id") != draft_id or record.get("tool_id") != tool["tool_id"] or record.get("action") != action or record.get("task_id") != request.get("task_id"):
+            return None
+        if not verify_dependency_coverage(record.get("trace") or {}, record.get("manifest") or {}, record.get("coverage") or {}):
+            return None
+        return record
 
     def _confirm_time_state_gate(self, tool: dict[str, Any], action: str, request: dict[str, Any]) -> dict[str, Any]:
         state_scope = str(tool.get("state_scope") or "")
@@ -73,6 +124,17 @@ class ToolGateEngine:
                 "confirm_time_rechecked": False,
                 "reason": "user_confirmation_required_before_state_recheck",
             }
+        if self.require_trusted_draft:
+            prepared = self._trusted_draft(request, tool, action)
+            if prepared is None:
+                return {"required": True, "state_scope": state_scope, "allowed": False, "confirm_time_rechecked": False, "reason": "trusted_draft_or_coverage_required"}
+            if self.state_reader is None:
+                return {"required": True, "state_scope": state_scope, "allowed": False, "confirm_time_rechecked": False, "reason": "confirm_time_state_recheck_unavailable"}
+            try:
+                current_state = self.state_reader({"tool": tool, "state_scope": state_scope, "file_path": prepared.get("file_path"), "task_id": prepared.get("task_id")})
+            except Exception as exc:
+                return {"required": True, "state_scope": state_scope, "allowed": False, "confirm_time_rechecked": False, "reason": "confirm_time_state_read_failed", "error": str(exc)[:300]}
+            return compare_scoped_evidence_state(prepared["manifest"], prepared["manifest"]["draft_projection_hash"], current_state)
         draft_state = request.get("draft_evidence_state")
         if not isinstance(draft_state, dict) or not draft_state:
             return {

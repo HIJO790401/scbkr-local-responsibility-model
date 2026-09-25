@@ -1,6 +1,6 @@
 {
   "name": "scbkr-desktop",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "private": true,
   "description": "SCBKR Responsibility Chain Language Model 2.3 FREE desktop runtime",
   "type": "module",

@@ -166,11 +166,11 @@ def test_readme_final_rc_contract_and_images_exist():
 
 
 def test_release_metadata_contracts():
-    assert '"version": "2.3.0"' in Path("package.json").read_text(encoding="utf-8")
-    assert '"version": "2.3.0"' in Path("apps/web/package.json").read_text(encoding="utf-8")
-    assert '"version": "2.3.0"' in Path("apps/desktop/package.json").read_text(encoding="utf-8")
-    assert '"version": "2.3.0"' in Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
-    assert 'version = "2.3.0"' in Path("apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
+    assert '"version": "2.3.1"' in Path("package.json").read_text(encoding="utf-8")
+    assert '"version": "2.3.1"' in Path("apps/web/package.json").read_text(encoding="utf-8")
+    assert '"version": "2.3.1"' in Path("apps/desktop/package.json").read_text(encoding="utf-8")
+    assert '"version": "2.3.1"' in Path("apps/desktop/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+    assert 'version = "2.3.1"' in Path("apps/desktop/src-tauri/Cargo.toml").read_text(encoding="utf-8")
     build = Path("scripts/build_desktop_release_windows.ps1").read_text(encoding="utf-8")
     assert 'lan_companion_supported = $true' in build
     assert 'lan_companion_default_enabled = $false' in build
@@ -190,7 +190,7 @@ def test_desktop_status_is_release_candidate_not_preview(monkeypatch):
 
     status = main.desktop_status()
 
-    assert status["desktop_stage"] == "SCBKR-2.3-free-store-candidate"
+    assert status["desktop_stage"] == "SCBKR-2.3.1-free-store-candidate"
     assert status["public_edition"] == "FREE"
     assert status["installer_built"] is True
     assert status["desktop_release_candidate"] is True

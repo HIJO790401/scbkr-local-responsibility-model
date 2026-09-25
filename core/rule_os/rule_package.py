@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from core.rules.applicability import evaluate_rule_applicability
+
 AUTHORITATIVE_STORES = {"logic", "corpus", "memory"}
 PACKAGE_LIMITS = {
     "matched_rules": 3,
@@ -159,6 +161,8 @@ def build_current_rule_package(
     task_type = _task_type(user_input)
     policy = _base_policy(locale)
     matched_rules: list[dict[str, Any]] = []
+    rule_candidates: list[dict[str, Any]] = []
+    applicability_receipts: list[dict[str, Any]] = []
     citable_data: list[dict[str, Any]] = []
     user_preferences: list[dict[str, Any]] = []
     retrieval_candidates: list[dict[str, Any]] = []
@@ -186,7 +190,29 @@ def build_current_rule_package(
                 )
                 non_citable_data.append({**item, "reason": reason})
             else:
-                matched_rules.append(item)
+                qualification = evaluate_rule_applicability(
+                    {
+                        **item,
+                        "rule_id": item["source_id"],
+                        "rule_trigger_contract": hit.get("rule_trigger_contract"),
+                        "signature_ref": hit.get("signature_ref"),
+                    },
+                    {
+                        "owner_input": {"text": user_input},
+                        "current_task_field": {"action": task_type, "domain": task_type},
+                    },
+                    retrieval_source="four_store_logic",
+                )
+                applicability_receipts.append(qualification["applicability_receipt"])
+                if qualification["applied"]:
+                    matched_rules.append({**item, "applicability_receipt_id": qualification["applicability_receipt_id"]})
+                else:
+                    rule_candidates.append({
+                        "source_store": item["source_store"],
+                        "source_id": item["source_id"],
+                        "rule_applicability_state": qualification["rule_applicability_state"],
+                        "reason_codes": qualification["reason_codes"],
+                    })
         elif _formal(hit) and source_store == "corpus":
             citable_data.append(item)
         elif _formal(hit) and source_store == "memory":
@@ -198,7 +224,7 @@ def build_current_rule_package(
             non_citable_data.append({**item, "reason": policy["non_citable_reason"]})
 
     _extend_task_policy(policy, task_type, locale)
-    rule_status = "signed_rule_applied" if matched_rules else "no_signed_rule_matched"
+    rule_status = "signed_rule_applied" if matched_rules else "signed_rule_not_applicable" if rule_candidates else "no_signed_rule_matched"
     needs_clarification = not matched_rules and task_type != "general_answer"
     return {
         "package_version": "scbkr.current_rule_package.v2",
@@ -208,13 +234,16 @@ def build_current_rule_package(
         "task_type_label": _label_for_task(task_type, locale),
         "classification_mode": (classification or {}).get("mode") or "answer_with_rules",
         "matched_rules": matched_rules[: PACKAGE_LIMITS["matched_rules"]],
+        "rule_candidates": rule_candidates[: PACKAGE_LIMITS["retrieval_candidates"]],
+        "applicability_receipts": applicability_receipts[: PACKAGE_LIMITS["matched_rules"] + PACKAGE_LIMITS["retrieval_candidates"]],
+        "rule_applicability_state": "APPLICABLE" if matched_rules else rule_candidates[0]["rule_applicability_state"] if rule_candidates else "NO_MATCH",
         "rule_status": rule_status,
         "citable_data": citable_data[: PACKAGE_LIMITS["citable_data"]],
         "non_citable_data": non_citable_data[: PACKAGE_LIMITS["non_citable_data"]],
         "retrieval_candidates": retrieval_candidates[: PACKAGE_LIMITS["retrieval_candidates"]],
         "forbidden_actions": policy["forbidden_actions"],
         "stop_conditions": policy["stop_conditions"],
-        "missing_information": [] if matched_rules else policy["missing_information"],
+        "missing_information": [] if matched_rules else (["Similar signed rule exists, but its trigger is unresolved or did not match; it was not applied."] if _locale_is_en(locale) else ["找到相關的已簽名規則，但觸發條件未閉合或本次未命中，因此沒有套用。"]) if rule_candidates else policy["missing_information"],
         "output_limits": policy["output_limits"],
         "user_preferences": user_preferences[: PACKAGE_LIMITS["user_preferences"]],
         "plan_level": plan_level,
@@ -231,7 +260,7 @@ def build_current_rule_package(
         "can_use_model": True,
         "can_execute_tools": False,
         "can_store": False,
-        "citation_policy": "LOGIC/CORPUS/MEMORY only when signed, reviewed, active; VECTOR is recall only",
+        "citation_policy": "LOGIC only when signed, reviewed, active, and trigger-applicable; CORPUS/MEMORY require signed review; VECTOR is recall only",
         "rule_authority_precedence": [
             "owner_signed_local_rule",
             "explicitly_adopted_verified_rulepack",
@@ -246,7 +275,7 @@ def build_rule_package_messages(user_input: str, package: dict[str, Any], locale
     if _locale_is_en(locale):
         system = (
             "You are the SCBKR local rule answer engine. Obey current_rule_package. "
-            "Chat history is non-authoritative. VECTOR candidates are recall only. "
+            "Chat history is non-authoritative. Only matched_rules have rule authority; rule_candidates and VECTOR are recall only. "
             "External generalizations cannot override an active owner-signed local rule. An external rule pack "
             "is authority only when current_rule_package explicitly marks it as adopted and no higher-priority local rule conflicts. "
             "Never claim that you or the model performed storage, signing, activation, publishing, sending, "
@@ -256,15 +285,30 @@ def build_rule_package_messages(user_input: str, package: dict[str, Any], locale
     else:
         system = (
             "你是 SCBKR 本地規則回答引擎。必須遵守 current_rule_package。"
-            "聊天上下文只能作非正式對話脈絡；VECTOR 只能召回。"
+            "聊天上下文只能作非正式對話脈絡；只有 matched_rules 取得規則權威，rule_candidates 與 VECTOR 只能召回。"
             "外部普遍說法不得蓋過已啟用、由使用者簽名的本地規則。"
             "外部規則包只有在 current_rule_package 明確標示已採用，且不與更高優先的本地規則衝突時，才能成為正式依據。"
             "不得宣稱你或模型替使用者完成簽名、入庫、啟用、發布、寄信、付款、刪除或工具執行。"
             "可以如實描述 current_rule_package 提供的既有使用者簽名與規則狀態。"
         )
+    model_package = {
+        **package,
+        "rule_candidates": [
+            {key: item.get(key) for key in ("source_store", "source_id", "rule_applicability_state", "reason_codes")}
+            for item in package.get("rule_candidates") or []
+        ],
+        "retrieval_candidates": [
+            {key: item.get(key) for key in ("source_store", "source_id")}
+            for item in package.get("retrieval_candidates") or []
+        ],
+        "non_citable_data": [
+            {key: item.get(key) for key in ("source_store", "source_id", "reason")}
+            for item in package.get("non_citable_data") or []
+        ],
+    }
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": json.dumps({"user_input": user_input, "current_rule_package": package}, ensure_ascii=False, sort_keys=True)},
+        {"role": "user", "content": json.dumps({"user_input": user_input, "current_rule_package": model_package}, ensure_ascii=False, sort_keys=True)},
     ]
 
 

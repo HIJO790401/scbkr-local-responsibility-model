@@ -151,7 +151,7 @@ What is included / not included:
 - Does not include code signing.
 - Does not include auto-update.
 
-Windows Defender / SmartScreen may warn because this release candidate is not code-signed. Code signing is still required before Microsoft Store submission.
+Windows Defender / SmartScreen may warn because this release candidate is not code-signed. Microsoft signs accepted MSIX submissions; a separate EXE/MSI submission requires a trusted publisher signature.
 
 SCBKR FREE is a model-assisted local rule operating system. Connect LM Studio, Ollama, or an OpenAI-compatible endpoint before asking SCBKR to author a rulebook. A disconnected or invalid model is reported as unavailable; the product does not replace model authorship with a hidden rule template.
 
@@ -182,10 +182,10 @@ Expected product output:
 
 If the API is offline, confirm that the desktop release candidate package launched the scbkr-api.exe sidecar. Normal users do not need Python, Node, npm, uvicorn, or PowerShell. They do need access to a supported local or cloud model endpoint for real model-assisted rulebook authoring.
 "@ | Set-Content -Encoding UTF8 (Join-Path $ReleaseDir "README_RELEASE.md")
-"2.3.0" | Set-Content -Encoding UTF8 (Join-Path $ReleaseDir "VERSION")
+"2.3.1" | Set-Content -Encoding UTF8 (Join-Path $ReleaseDir "VERSION")
 @{
-  version = "2.3.0"
-  desktop_stage = "SCBKR-2.3-free-store-candidate"
+  version = "2.3.1"
+  desktop_stage = "SCBKR-2.3.1-free-store-candidate"
   built_at_utc = (Get-Date).ToUniversalTime().ToString("o")
   api_base_url = "http://127.0.0.1:8787"
   default_bind_host = "127.0.0.1"

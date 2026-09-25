@@ -142,10 +142,13 @@ def build_model_visible_scbkr_payload(scbkr: dict[str, Any]) -> dict[str, dict[s
 
 def build_scbkr_confirmed_snapshot(scbkr: dict[str, Any]) -> dict[str, Any]:
     """Build a replayable snapshot of the confirmed five-dimension chain."""
-    return {
+    snapshot = {
         "dimensions": {dimension_key: deepcopy(scbkr[dimension_key]) for dimension_key in VALID_DIMENSIONS},
         "confirmation_status": scbkr.get("confirmation_status"),
     }
+    if scbkr.get("rule_trigger_contract") is not None:
+        snapshot["rule_trigger_contract"] = deepcopy(scbkr["rule_trigger_contract"])
+    return snapshot
 
 
 def confirm_all_dimensions(
