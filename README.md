@@ -1,6 +1,6 @@
 # SCBKR Responsibility Chain Language Model
 
-**Version 2.3.1 · FREE Framework Experience · Windows Desktop Update Candidate**
+**Version 2.3.1 · FREE Framework Experience · Available on Microsoft Store**
 
 ![SCBKR FREE framework experience](docs/images/scbkr-hero.png)
 
@@ -64,14 +64,14 @@ SCBKR 五維代表：
 
 ### Windows 狀態
 
-- 已完成本機 Windows x64 桌面 RC、內建 API sidecar 與 NSIS 安裝程式。
+- 已完成 Windows x64 桌面版、內建 API sidecar 與 NSIS 安裝程式。
 - 安裝後不需要另外安裝 Python 或 Node.js。
 - 已實機啟動封裝成品並驗證全新 AppData、Runtime、雙語 UI 與模型未連線狀態。
-- 現有 FREE 版已由作者上架至 [Microsoft Store](https://apps.microsoft.com/detail/9N1SMMBL6J4D)。本次 2.3.1 更新尚須完成封裝、安裝驗證、商店提交與審核；不能把本地候選版當成商店已更新。
+- **FREE 2.3.1.0 已在 [Microsoft Store](https://apps.microsoft.com/detail/9N1SMMBL6J4D) 上架**，提供 Windows 10/11 x64 桌面裝置。2026-10-03 已在 Partner Center 核對目前生效的提交 3 與 `2.3.1.0` 套件。
 
 ### 驗證結果
 
-- Python：`441 passed, 1 skipped, 0 failed`（2.3.1 候選版）。
+- Python：`441 passed, 1 skipped, 0 failed`（2.3.1 本機發行驗證）。
 - Playwright：桌面 Chromium 與行動版 Chromium，共 `2 passed`
 - Web production build：通過
 - Desktop release contract：通過
@@ -155,14 +155,14 @@ This is a reproducible one-model, one-task benchmark, not a universal 69.55% gua
 
 ### Windows status
 
-- A local Windows x64 desktop RC, bundled API sidecar, and NSIS installer have been built.
+- The Windows x64 desktop app, bundled API sidecar, and NSIS installer have been built.
 - The installed app does not require a separate Python or Node.js installation.
 - The packaged build was launched and checked with fresh AppData, local Runtime, bilingual UI, and an honest disconnected-model state.
-- The existing FREE app has been published by the owner on [Microsoft Store](https://apps.microsoft.com/detail/9N1SMMBL6J4D). This 2.3.1 candidate is not a published Store update until its package passes installation checks, submission, and certification.
+- **FREE 2.3.1.0 is available on [Microsoft Store](https://apps.microsoft.com/detail/9N1SMMBL6J4D)** for Windows 10/11 x64 desktop devices. On 2026-10-03, Partner Center showed Submission 3 as the current Store state with the `2.3.1.0` package.
 
 ### Validation
 
-- Python: `441 passed, 1 skipped, 0 failed` for the 2.3.1 candidate.
+- Python: `441 passed, 1 skipped, 0 failed` in the local 2.3.1 release validation.
 - Playwright: desktop Chromium and mobile Chromium, `2 passed`
 - Web production build: passed
 - Desktop release contract: passed

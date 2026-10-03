@@ -2,7 +2,7 @@
 
 - Product: **SCBKR Responsibility Chain Language Model**
 - Edition: **FREE**
-- Update candidate version: **2.3.1 / MSIX 2.3.1.0**
+- Published version: **2.3.1 / MSIX 2.3.1.0** (Partner Center Submission 3 verified 2026-10-03)
 - Developer: **Wen-Yao Hsu / 許文耀**
 - Publisher display name: **shenyao888pi**
 - Store ID: **9N1SMMBL6J4D**
@@ -14,6 +14,7 @@
 - Privacy: `https://hijo790401.github.io/scbkr-local-responsibility-model/store/privacy.html`
 - Support: `https://hijo790401.github.io/scbkr-local-responsibility-model/store/support.html`
 - Source: `https://github.com/HIJO790401/scbkr-local-responsibility-model`
+- Store: `https://apps.microsoft.com/detail/9N1SMMBL6J4D`
 
 ## Traditional Chinese listing
 

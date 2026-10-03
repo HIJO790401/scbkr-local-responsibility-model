@@ -1,6 +1,6 @@
 # Release Notes
 
-## 2.3.1 - FREE Rule Applicability and Evidence Recheck Candidate
+## 2.3.1 - FREE Rule Applicability and Evidence Recheck
 
 - Added owner-signed, deterministic rule triggers. Similarity can suggest a rule but cannot make it applicable; legacy rules without trigger closure remain candidates.
 - Added applicability receipts to distinguish applicable, unresolved, invalidated, and non-triggered rules in chat and the Rule Center.
@@ -10,7 +10,7 @@
 
 Local verification: `441 passed, 1 skipped` Python tests; `2 passed` desktop/mobile Playwright tests; Web production build and desktop release contract passed. Windows 2.3.1.0 MSIX passed WACK, clean install, upgrade from 2.3.0.0, and installed Runtime launch. The temporary sideload certificate and test package were removed. No live LM Studio/Ollama model was connected during this verification; model-flow tests used a controlled OpenAI-compatible test endpoint.
 
-Release state: Microsoft Store update candidate. The existing Store listing is live, but it is not evidence that version 2.3.1 has passed Store submission and certification.
+Release state: FREE 2.3.1.0 is available on [Microsoft Store](https://apps.microsoft.com/detail/9N1SMMBL6J4D). Partner Center showed Submission 3 (`1152921505701978735`) as the current Store state and the Windows 10/11 Desktop package `SCBKR_Responsibility_Chain_Language_Model_2.3.1.0_x64.msix` on 2026-10-03. The validation results above are the earlier local release checks, not a claim of new post-publication runtime testing.
 
 ## 2.3.0 - FREE Framework Experience RC
 
